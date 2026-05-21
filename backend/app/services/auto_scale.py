@@ -7,9 +7,16 @@ import fitz
 #   "Escala: 1:100", "Esc. 1/75", "ESC 1:50", "Escala 1 : 25"
 # El número que nos importa es el denominador.
 _SCALE_PATTERN = re.compile(
-    r"esc(?:ala)?\.?\s*1\s*[:/]\s*(\d+(?:[.,]\d+)?)",
+    r"esc(?:ala)?\.?\s*[:\-=]?\s*1\s*[:/]\s*(\d+(?:[.,]\d+)?)",
     re.IGNORECASE,
 )
+
+_RATIO_PATTERN = re.compile(
+    r"\b1\s*[:/]\s*(\d+(?:[.,]\d+)?)\b",
+    re.IGNORECASE,
+)
+
+_KEYWORDS = ["escala", "esc.", "esc:", "scale"]
 
 
 def detect_scales(pdf_path: str | Path, dpi: int) -> dict[str, float]:
@@ -41,14 +48,27 @@ def detect_scales(pdf_path: str | Path, dpi: int) -> dict[str, float]:
 
 def _find_denominator(text: str) -> float | None:
     """Busca el primer match plausible y devuelve el denominador de la escala."""
+    # 1. Intentar coincidencia contigua (método seguro y más confiable)
     for match in _SCALE_PATTERN.finditer(text):
         raw = match.group(1).replace(",", ".")
         try:
             value = float(raw)
+            if 1 <= value <= 5000:
+                return value
         except ValueError:
             continue
-        # Filtramos valores absurdos. Escalas arquitectónicas típicas
-        # van de 1:10 (detalles) a 1:500 (urbanismo).
-        if 1 <= value <= 5000:
-            return value
+
+    # 2. Si no hay coincidencia contigua, pero el texto contiene palabras clave de escala,
+    # buscamos ratios sueltos (muy común en AutoCAD por el desorden del texto en el PDF)
+    text_lower = text.lower()
+    if any(kw in text_lower for kw in _KEYWORDS):
+        for match in _RATIO_PATTERN.finditer(text):
+            raw = match.group(1).replace(",", ".")
+            try:
+                value = float(raw)
+                if 1 <= value <= 5000:
+                    return value
+            except ValueError:
+                continue
     return None
+

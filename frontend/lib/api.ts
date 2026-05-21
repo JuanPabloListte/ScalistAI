@@ -128,6 +128,15 @@ export const api = {
       body: "{}",
     }),
 
+  previewAutoDetectScales: (planId: number) =>
+    request<Record<string, number>>(`/api/v1/plans/${planId}/preview-auto-detect`),
+
+  setBulkScaleRatios: (planId: number, scales: Record<string, number>) =>
+    request<Plan>(`/api/v1/plans/${planId}/bulk-scale-ratio`, {
+      method: "POST",
+      body: JSON.stringify(scales),
+    }),
+
   setScaleRatio: (planId: number, page: number, denominator: number) =>
     request<Plan>(`/api/v1/plans/${planId}/scale-ratio`, {
       method: "POST",

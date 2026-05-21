@@ -57,6 +57,12 @@ export default function PlanViewerInner({
   const [calError, setCalError] = useState<string | null>(null);
   const [autoDetecting, setAutoDetecting] = useState(false);
 
+  // Estados para previsualizar/editar auto-detección
+  const [detectedPreview, setDetectedPreview] = useState<Record<string, number> | null>(null);
+  const [selectedPages, setSelectedPages] = useState<Record<string, boolean>>({});
+  const [editedScales, setEditedScales] = useState<Record<string, string>>({});
+  const [savingBulk, setSavingBulk] = useState(false);
+
   const totalPages = Math.max(1, statusTotal ?? pageCount ?? 1);
 
   useEffect(() => {
@@ -140,6 +146,31 @@ export default function PlanViewerInner({
   }, [height]);
 
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const direction = e.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
+      const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * direction));
+      const ratio = newScale / scale;
+      setScale(newScale);
+      setPos({
+        x: px - (px - pos.x) * ratio,
+        y: py - (py - pos.y) * ratio,
+      });
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handleWheel);
+    };
+  }, [scale, pos]);
+
+  useEffect(() => {
     if (!natural || dims.w === 0) return;
     const fit = Math.min(dims.w / natural.w, dims.h / natural.h);
     const s = Math.min(fit * FIT_MARGIN, 1);
@@ -164,21 +195,6 @@ export default function PlanViewerInner({
     return { x: pos.x + p.x * scale, y: pos.y + p.y * scale };
   }
 
-  function onWheel(e: React.WheelEvent<HTMLDivElement>) {
-    e.preventDefault();
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    const direction = e.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
-    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * direction));
-    const ratio = newScale / scale;
-    setScale(newScale);
-    setPos({
-      x: px - (px - pos.x) * ratio,
-      y: py - (py - pos.y) * ratio,
-    });
-  }
 
   function onMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     if (e.button !== 0 || !containerRef.current) return;
@@ -238,12 +254,65 @@ export default function PlanViewerInner({
     setAutoDetecting(true);
     setCalError(null);
     try {
-      const updated = await api.autoDetectScales(planId);
-      onScaleCalibrated?.(updated);
+      const preview = await api.previewAutoDetectScales(planId);
+
+      // Inicializar selecciones y escalas editables
+      const initialSelected: Record<string, boolean> = {};
+      const initialEdited: Record<string, string> = {};
+
+      Object.entries(preview).forEach(([pageStr, denom]) => {
+        initialSelected[pageStr] = true; // seleccionadas por defecto
+        initialEdited[pageStr] = String(denom);
+      });
+
+      setSelectedPages(initialSelected);
+      setEditedScales(initialEdited);
+      setDetectedPreview(preview);
     } catch (err) {
-      setCalError(err instanceof Error ? err.message : "Error desconocido");
+      setCalError(err instanceof Error ? err.message : "Error al detectar escalas");
     } finally {
       setAutoDetecting(false);
+    }
+  }
+
+  async function submitBulkScales(e: React.FormEvent) {
+    e.preventDefault();
+    if (!detectedPreview) return;
+
+    const payload: Record<string, number> = {};
+    let hasInvalid = false;
+
+    Object.entries(editedScales).forEach(([pageStr, valueStr]) => {
+      if (!selectedPages[pageStr]) return; // saltear si no está seleccionada
+
+      const denom = parseFloat(valueStr.replace(",", "."));
+      if (!Number.isFinite(denom) || denom <= 0) {
+        hasInvalid = true;
+      } else {
+        payload[pageStr] = denom;
+      }
+    });
+
+    if (hasInvalid) {
+      setCalError("Hay escalas inválidas o vacías");
+      return;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setDetectedPreview(null);
+      return;
+    }
+
+    setSavingBulk(true);
+    setCalError(null);
+    try {
+      const updated = await api.setBulkScaleRatios(planId, payload);
+      onScaleCalibrated?.(updated);
+      setDetectedPreview(null);
+    } catch (err) {
+      setCalError(err instanceof Error ? err.message : "Error al guardar las escalas");
+    } finally {
+      setSavingBulk(false);
     }
   }
 
@@ -378,7 +447,6 @@ export default function PlanViewerInner({
 
       <div
         ref={containerRef}
-        onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={endDrag}
@@ -547,7 +615,95 @@ export default function PlanViewerInner({
           </form>
         </div>
       )}
+
+      {/* Modal de confirmación de escalas auto-detectadas */}
+      {detectedPreview !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setDetectedPreview(null)}
+        >
+          <form
+            onSubmit={submitBulkScales}
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full max-w-lg flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+          >
+            <div>
+              <h3 className="text-lg font-semibold">Confirmar escalas detectadas</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                El sistema escaneó el texto de los planos y detectó las siguientes escalas. Marca cuáles deseas aplicar y edítalas si es necesario.
+              </p>
+            </div>
+
+            <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700 pr-1">
+              {Object.keys(detectedPreview).length === 0 ? (
+                <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">
+                  No se detectó texto con formatos de escala (ej: "Esc 1:100") en ninguna página.
+                </p>
+              ) : (
+                Object.keys(detectedPreview)
+                  .sort((a, b) => Number(a) - Number(b))
+                  .map((pageStr) => (
+                    <div key={pageStr} className="flex items-center justify-between py-2 text-sm">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={!!selectedPages[pageStr]}
+                          onChange={(e) =>
+                            setSelectedPages((prev) => ({
+                              ...prev,
+                              [pageStr]: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-brand focus:ring-brand dark:border-slate-600 dark:bg-slate-900"
+                        />
+                        <span className="font-medium">Página {pageStr}</span>
+                      </label>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 dark:text-slate-400">1 :</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={editedScales[pageStr] ?? ""}
+                          disabled={!selectedPages[pageStr]}
+                          onChange={(e) =>
+                            setEditedScales((prev) => ({
+                              ...prev,
+                              [pageStr]: e.target.value,
+                            }))
+                          }
+                          className="w-20 rounded-md border border-slate-300 px-2 py-1 text-center focus:border-brand focus:outline-none disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
+                        />
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            {calError && <p className="text-sm text-red-600 dark:text-red-400">{calError}</p>}
+
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDetectedPreview(null)}
+                disabled={savingBulk}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingBulk || Object.keys(detectedPreview).length === 0}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+              >
+                {savingBulk ? "Guardando..." : "Confirmar y Aplicar"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
+
   );
 }
 

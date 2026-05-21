@@ -272,6 +272,74 @@ def auto_detect_scale(
     return plan
 
 
+@router.get("/plans/{plan_id}/preview-auto-detect")
+def preview_auto_detect_scale(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, int]:
+    """Escanea el texto del PDF y devuelve las escalas detectadas sin guardarlas.
+    Retorna un diccionario {pagina: denominador} (ej: {"1": 100, "2": 50}).
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    pdf_path = Path(plan.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF original no disponible")
+
+    import fitz
+    from app.services.auto_scale import _find_denominator
+    doc = fitz.open(pdf_path)
+    result = {}
+    try:
+        for i in range(doc.page_count):
+            page = doc.load_page(i)
+            text = page.get_text("text") or ""
+            denominator = _find_denominator(text)
+            if denominator is not None and denominator > 0:
+                result[str(i + 1)] = int(denominator)
+    finally:
+        doc.close()
+    return result
+
+
+@router.post("/plans/{plan_id}/bulk-scale-ratio", response_model=PlanRead)
+def set_bulk_scale_by_ratio(
+    plan_id: int,
+    payload: dict[str, float],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Plan:
+    """Setea la escala de varias páginas a la vez dando sus denominadores (1:N)."""
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    dpi = plan.dpi or RASTER_DPI
+    scales = dict(plan.page_scales or {})
+
+    for page_str, denominator in payload.items():
+        try:
+            page = int(page_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Número de página inválido")
+
+        if plan.page_count and page > plan.page_count:
+            raise HTTPException(status_code=400, detail=f"Página {page} fuera de rango")
+        if denominator <= 0:
+            raise HTTPException(status_code=400, detail="El denominador debe ser mayor a 0")
+
+        px_per_m = (dpi * 1000.0) / (25.4 * denominator)
+        scales[page_str] = round(px_per_m, 4)
+
+    plan.page_scales = scales
+    plan.scale_source = "manual_ratio"
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
 @router.get("/plans/{plan_id}/render-status")
 def get_render_status(
     plan_id: int,
