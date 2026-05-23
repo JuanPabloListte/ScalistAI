@@ -720,6 +720,34 @@ export default function PlanViewerInner({
   }
 
   function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (draggingVertex) {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const imgPoint = screenToImage(sx, sy);
+      if (!imgPoint) return;
+
+      setElements((prev) =>
+        prev.map((el) => {
+          if (el.id !== draggingVertex.elementId) return el;
+          const pts = [...el.geometry.points];
+          pts[draggingVertex.pointIndex] = imgPoint.x;
+          pts[draggingVertex.pointIndex + 1] = imgPoint.y;
+          const metrics = getCalculatedMetrics(el.type, pts, currentPageScale);
+          return {
+            ...el,
+            geometry: {
+              ...el.geometry,
+              points: pts,
+            },
+            ...metrics,
+          };
+        })
+      );
+      return;
+    }
+
     if (dragging && dragStart.current) {
       const dx = e.clientX - dragStart.current.x;
       const dy = e.clientY - dragStart.current.y;
@@ -736,12 +764,30 @@ export default function PlanViewerInner({
   }
 
   function onMouseLeave() {
+    if (draggingVertex) {
+      const elementId = draggingVertex.elementId;
+      setDraggingVertex(null);
+      const el = elements.find((item) => item.id === elementId);
+      if (el) {
+        void finalizeElementGeometry(el);
+      }
+      return;
+    }
     setDragging(false);
     dragStart.current = null;
     setMousePos(null);
   }
 
   function onMouseUp() {
+    if (draggingVertex) {
+      const elementId = draggingVertex.elementId;
+      setDraggingVertex(null);
+      const el = elements.find((item) => item.id === elementId);
+      if (el) {
+        void finalizeElementGeometry(el);
+      }
+      return;
+    }
     setDragging(false);
     dragStart.current = null;
   }
@@ -958,54 +1004,9 @@ export default function PlanViewerInner({
     }
   }
 
-  const startDragVertex = (e: React.PointerEvent<SVGCircleElement>, elementId: number, pointIndex: number) => {
+  const startDragVertex = (e: React.MouseEvent, elementId: number, pointIndex: number) => {
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
     setDraggingVertex({ elementId, pointIndex });
-  };
-
-  const handleDragVertexMove = (e: React.PointerEvent<SVGCircleElement>, elementId: number, pointIndex: number) => {
-    if (!draggingVertex || draggingVertex.elementId !== elementId || draggingVertex.pointIndex !== pointIndex) return;
-    e.stopPropagation();
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const imgPoint = screenToImage(sx, sy);
-
-    setElements((prev) =>
-      prev.map((el) => {
-        if (el.id !== elementId) return el;
-        const pts = [...el.geometry.points];
-        pts[pointIndex] = imgPoint.x;
-        pts[pointIndex + 1] = imgPoint.y;
-        const metrics = getCalculatedMetrics(el.type, pts, currentPageScale);
-        return {
-          ...el,
-          geometry: {
-            ...el.geometry,
-            points: pts,
-          },
-          ...metrics,
-        };
-      })
-    );
-  };
-
-  const handleDragVertexUp = (e: React.PointerEvent<SVGCircleElement>, elementId: number, pointIndex: number) => {
-    if (!draggingVertex) return;
-    e.stopPropagation();
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch (err) {
-      // Ignorar si falla
-    }
-    setDraggingVertex(null);
-
-    const el = elements.find((item) => item.id === elementId);
-    if (el) {
-      void finalizeElementGeometry(el);
-    }
   };
 
   function selectAll() {
@@ -2151,9 +2152,7 @@ export default function PlanViewerInner({
                                 stroke="#ffffff"
                                 strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
-                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 0)}
-                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 0)}
-                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 0)}
+                                onMouseDown={(e) => startDragVertex(e, selectedElement.id, 0)}
                               />
                               <circle
                                 cx={x2}
@@ -2163,9 +2162,7 @@ export default function PlanViewerInner({
                                 stroke="#ffffff"
                                 strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
-                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 2)}
-                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 2)}
-                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 2)}
+                                onMouseDown={(e) => startDragVertex(e, selectedElement.id, 2)}
                               />
                             </>
                           );
@@ -2184,9 +2181,7 @@ export default function PlanViewerInner({
                                 stroke="#ffffff"
                                 strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
-                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 0)}
-                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 0)}
-                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 0)}
+                                onMouseDown={(e) => startDragVertex(e, selectedElement.id, 0)}
                               />
                               <circle
                                 cx={x2}
@@ -2196,9 +2191,7 @@ export default function PlanViewerInner({
                                 stroke="#ffffff"
                                 strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
-                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 2)}
-                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 2)}
-                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 2)}
+                                onMouseDown={(e) => startDragVertex(e, selectedElement.id, 2)}
                               />
                             </>
                           );
@@ -2220,9 +2213,7 @@ export default function PlanViewerInner({
                                 stroke="#ffffff"
                                 strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
-                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, pointIndex)}
-                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, pointIndex)}
-                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, pointIndex)}
+                                onMouseDown={(e) => startDragVertex(e, selectedElement.id, pointIndex)}
                               />
                             );
                           }
