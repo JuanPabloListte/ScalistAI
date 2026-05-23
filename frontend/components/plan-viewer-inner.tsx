@@ -130,6 +130,11 @@ export default function PlanViewerInner({
   const [elementsLoading, setElementsLoading] = useState(false);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const selectedElement = useMemo(() => {
+    if (selectedIds.size !== 1) return null;
+    const id = Array.from(selectedIds)[0];
+    return elements.find((e) => e.id === id) || null;
+  }, [selectedIds, elements]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: number[]; label: string } | null>(null);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
@@ -149,6 +154,12 @@ export default function PlanViewerInner({
   const [pageBusy, setPageBusy] = useState(false);
 
   const [show3D, setShow3D] = useState(false);
+
+  // Estado local para arrastrar vertices
+  const [draggingVertex, setDraggingVertex] = useState<{
+    elementId: number;
+    pointIndex: number;
+  } | null>(null);
 
   // Candidatos de Detección IA
   const [wallCandidates, setWallCandidates] = useState<any[]>([]);
@@ -492,6 +503,7 @@ export default function PlanViewerInner({
     .map((e) => `${e.id}:${e.length_m}:${e.area_m2}:${e.height_m}:${e.materials.map((m) => m.id).join(",")}`)
     .join("|");
   useEffect(() => {
+    if (draggingVertex) return;
     let cancelled = false;
     setSummaryLoading(true);
     api
@@ -508,7 +520,7 @@ export default function PlanViewerInner({
     return () => {
       cancelled = true;
     };
-  }, [planId, page, summaryDeps]);
+  }, [planId, page, summaryDeps, draggingVertex]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -913,6 +925,88 @@ export default function PlanViewerInner({
       return next;
     });
   }
+
+  function getCalculatedMetrics(elType: string, points: number[], scaleVal: number | null) {
+    if (!scaleVal) return { length_m: null, area_m2: null };
+    if (elType === "wall" || elType === "opening") {
+      if (points.length < 4) return { length_m: null, area_m2: null };
+      const dx = (points[2] - points[0]) / scaleVal;
+      const dy = (points[3] - points[1]) / scaleVal;
+      const len = parseFloat(Math.sqrt(dx * dx + dy * dy).toFixed(2));
+      return { length_m: len, area_m2: null };
+    } else if (elType === "room") {
+      const pts = chunkPoints(points);
+      if (pts.length < 3) return { length_m: null, area_m2: null };
+      const area = parseFloat(polygonAreaM2(pts, scaleVal).toFixed(2));
+      const perim = parseFloat(polygonPerimeterM(pts, scaleVal).toFixed(2));
+      return { length_m: perim, area_m2: area };
+    }
+    return { length_m: null, area_m2: null };
+  }
+
+  async function finalizeElementGeometry(el: DetectedElement) {
+    const metrics = getCalculatedMetrics(el.type, el.geometry.points, currentPageScale);
+    try {
+      const updated = await api.updateElement(planId, el.id, {
+        geometry: el.geometry,
+        length_m: metrics.length_m,
+        area_m2: metrics.area_m2,
+      });
+      setElements((prev) => prev.map((item) => (item.id === el.id ? updated : item)));
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al actualizar geometría");
+    }
+  }
+
+  const startDragVertex = (e: React.PointerEvent<SVGCircleElement>, elementId: number, pointIndex: number) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDraggingVertex({ elementId, pointIndex });
+  };
+
+  const handleDragVertexMove = (e: React.PointerEvent<SVGCircleElement>, elementId: number, pointIndex: number) => {
+    if (!draggingVertex || draggingVertex.elementId !== elementId || draggingVertex.pointIndex !== pointIndex) return;
+    e.stopPropagation();
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const imgPoint = screenToImage(sx, sy);
+
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.id !== elementId) return el;
+        const pts = [...el.geometry.points];
+        pts[pointIndex] = imgPoint.x;
+        pts[pointIndex + 1] = imgPoint.y;
+        const metrics = getCalculatedMetrics(el.type, pts, currentPageScale);
+        return {
+          ...el,
+          geometry: {
+            ...el.geometry,
+            points: pts,
+          },
+          ...metrics,
+        };
+      })
+    );
+  };
+
+  const handleDragVertexUp = (e: React.PointerEvent<SVGCircleElement>, elementId: number, pointIndex: number) => {
+    if (!draggingVertex) return;
+    e.stopPropagation();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // Ignorar si falla
+    }
+    setDraggingVertex(null);
+
+    const el = elements.find((item) => item.id === elementId);
+    if (el) {
+      void finalizeElementGeometry(el);
+    }
+  };
 
   function selectAll() {
     setSelectedIds(new Set(elements.map((e) => e.id)));
@@ -1738,6 +1832,13 @@ export default function PlanViewerInner({
                               stroke={hovered ? "#16a34a" : "#22c55e"}
                               strokeWidth={(hovered ? 3 : 2) / scale}
                               strokeLinejoin="round"
+                              className="pointer-events-auto cursor-pointer"
+                              onMouseEnter={() => setHoveredId(el.id)}
+                              onMouseLeave={() => setHoveredId(null)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id);
+                              }}
                             />
                             {sel && (
                               <polygon
@@ -1802,10 +1903,26 @@ export default function PlanViewerInner({
                               y1={y1}
                               x2={x2}
                               y2={y2}
+                              stroke="transparent"
+                              strokeWidth={24 / scale}
+                              className="pointer-events-auto cursor-pointer"
+                              onMouseEnter={() => setHoveredId(el.id)}
+                              onMouseLeave={() => setHoveredId(null)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id);
+                              }}
+                            />
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
                               stroke={hovered ? "#3b82f6" : "#2563eb"}
                               strokeWidth={(hovered ? 8 : 6) / scale}
                               strokeLinecap="round"
                               opacity={0.85}
+                              className="pointer-events-none"
                             />
                           </g>
                         );
@@ -1875,10 +1992,26 @@ export default function PlanViewerInner({
                               y1={y1}
                               x2={x2}
                               y2={y2}
+                              stroke="transparent"
+                              strokeWidth={24 / scale}
+                              className="pointer-events-auto cursor-pointer"
+                              onMouseEnter={() => setHoveredId(el.id)}
+                              onMouseLeave={() => setHoveredId(null)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id);
+                              }}
+                            />
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
                               stroke={hovered ? "#fb923c" : "#ea580c"}
                               strokeWidth={(hovered ? 10 : 8) / scale}
                               strokeLinecap="square"
                               opacity={0.9}
+                              className="pointer-events-none"
                             />
                           </g>
                         );
@@ -2000,6 +2133,103 @@ export default function PlanViewerInner({
                         />
                       </g>
                     ))}
+
+                    {/* Drag Handles for Selected Element */}
+                    {selectedElement && (
+                      <g>
+                        {selectedElement.type === "wall" && (() => {
+                          const pts = selectedElement.geometry.points;
+                          if (pts.length < 4) return null;
+                          const [x1, y1, x2, y2] = pts;
+                          return (
+                            <>
+                              <circle
+                                cx={x1}
+                                cy={y1}
+                                r={6 / scale}
+                                fill="#2563eb"
+                                stroke="#ffffff"
+                                strokeWidth={1.5 / scale}
+                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 0)}
+                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 0)}
+                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 0)}
+                              />
+                              <circle
+                                cx={x2}
+                                cy={y2}
+                                r={6 / scale}
+                                fill="#2563eb"
+                                stroke="#ffffff"
+                                strokeWidth={1.5 / scale}
+                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 2)}
+                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 2)}
+                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 2)}
+                              />
+                            </>
+                          );
+                        })()}
+                        {selectedElement.type === "opening" && (() => {
+                          const pts = selectedElement.geometry.points;
+                          if (pts.length < 4) return null;
+                          const [x1, y1, x2, y2] = pts;
+                          return (
+                            <>
+                              <circle
+                                cx={x1}
+                                cy={y1}
+                                r={6 / scale}
+                                fill="#ea580c"
+                                stroke="#ffffff"
+                                strokeWidth={1.5 / scale}
+                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 0)}
+                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 0)}
+                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 0)}
+                              />
+                              <circle
+                                cx={x2}
+                                cy={y2}
+                                r={6 / scale}
+                                fill="#ea580c"
+                                stroke="#ffffff"
+                                strokeWidth={1.5 / scale}
+                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, 2)}
+                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, 2)}
+                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, 2)}
+                              />
+                            </>
+                          );
+                        })()}
+                        {selectedElement.type === "room" && (() => {
+                          const pts = selectedElement.geometry.points;
+                          const handles: React.ReactNode[] = [];
+                          for (let i = 0; i < pts.length; i += 2) {
+                            const x = pts[i];
+                            const y = pts[i + 1];
+                            const pointIndex = i;
+                            handles.push(
+                              <circle
+                                key={i}
+                                cx={x}
+                                cy={y}
+                                r={6 / scale}
+                                fill="#22c55e"
+                                stroke="#ffffff"
+                                strokeWidth={1.5 / scale}
+                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                onPointerDown={(e) => startDragVertex(e, selectedElement.id, pointIndex)}
+                                onPointerMove={(e) => handleDragVertexMove(e, selectedElement.id, pointIndex)}
+                                onPointerUp={(e) => handleDragVertexUp(e, selectedElement.id, pointIndex)}
+                              />
+                            );
+                          }
+                          return handles;
+                        })()}
+                      </g>
+                    )}
                   </g>
                 </svg>
               )}
