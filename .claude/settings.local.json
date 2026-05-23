@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Location; npx tsc --noEmit; echo \"Exit: $LASTEXITCODE\")"
+    ]
+  }
+}
