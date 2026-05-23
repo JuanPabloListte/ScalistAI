@@ -15,6 +15,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -402,6 +403,7 @@ def delete_page(
     if page not in deleted:
         deleted.append(page)
         plan.deleted_pages = deleted
+        flag_modified(plan, "deleted_pages")
 
     # Borrar elementos detectados o dibujados en esta página
     db.query(DetectedElement).filter(
@@ -443,6 +445,7 @@ def restore_page(
     if page in deleted:
         deleted.remove(page)
         plan.deleted_pages = deleted
+        flag_modified(plan, "deleted_pages")
 
     db.commit()
     db.refresh(plan)
