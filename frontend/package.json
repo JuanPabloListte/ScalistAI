@@ -9,11 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
+    "@types/three": "^0.184.1",
+    "konva": "9.3.16",
     "next": "14.2.15",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-konva": "18.2.10",
-    "konva": "9.3.16"
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@types/node": "20.16.10",
