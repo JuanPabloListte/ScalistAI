@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+
+const Plan3DViewer = dynamic(() => import("./plan-3d-viewer"), {
+  ssr: false,
+});
 
 import {
   api,
@@ -143,6 +148,21 @@ export default function PlanViewerInner({
   const [confirmDeletePage, setConfirmDeletePage] = useState<number | null>(null);
   const [pageBusy, setPageBusy] = useState(false);
 
+  const [show3D, setShow3D] = useState(false);
+
+  // Candidatos de Detección IA
+  const [wallCandidates, setWallCandidates] = useState<any[]>([]);
+  const [roomCandidates, setRoomCandidates] = useState<any[]>([]);
+  const [openingCandidates, setOpeningCandidates] = useState<any[]>([]);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
+
+  // Carga de Detección IA
+  const [detectingWalls, setDetectingWalls] = useState(false);
+  const [detectingRooms, setDetectingRooms] = useState(false);
+  const [detectingOpenings, setDetectingOpenings] = useState(false);
+  const [detectionError, setDetectionError] = useState<string | null>(null);
+  const [iaPanelOpen, setIaPanelOpen] = useState(true);
+
   // Calibración
   const [calibrating, setCalibrating] = useState(false);
   const [calPoints, setCalPoints] = useState<Point[]>([]);
@@ -183,6 +203,11 @@ export default function PlanViewerInner({
     setMousePos(null);
     setHoveredId(null);
     setElements([]);
+    setWallCandidates([]);
+    setRoomCandidates([]);
+    setOpeningCandidates([]);
+    setSelectedCandidateIds(new Set());
+    setDetectionError(null);
   }, [planId]);
 
   // Reset estado de dibujo al cambiar página
@@ -192,6 +217,11 @@ export default function PlanViewerInner({
     setHoveredId(null);
     setSelectedIds(new Set());
     setEditingId(null);
+    setWallCandidates([]);
+    setRoomCandidates([]);
+    setOpeningCandidates([]);
+    setSelectedCandidateIds(new Set());
+    setDetectionError(null);
   }, [page]);
 
   useEffect(() => {
@@ -230,6 +260,168 @@ export default function PlanViewerInner({
       if (timer) clearTimeout(timer);
     };
   }, [planId]);
+
+  async function runDetectWalls() {
+    if (!currentPageScale) return;
+    setDetectingWalls(true);
+    setDetectionError(null);
+    try {
+      const res = await api.detectWalls(planId, page);
+      setWallCandidates(res);
+      setSelectedCandidateIds((prev) => {
+        const next = new Set(prev);
+        res.forEach((c) => next.add(c.id));
+        return next;
+      });
+    } catch (err) {
+      setDetectionError(err instanceof Error ? err.message : "Error al detectar muros");
+    } finally {
+      setDetectingWalls(false);
+    }
+  }
+
+  async function runDetectRooms() {
+    if (!currentPageScale) return;
+    setDetectingRooms(true);
+    setDetectionError(null);
+    try {
+      const res = await api.detectRooms(planId, page);
+      setRoomCandidates(res);
+      setSelectedCandidateIds((prev) => {
+        const next = new Set(prev);
+        res.forEach((c) => next.add(c.id));
+        return next;
+      });
+    } catch (err) {
+      setDetectionError(err instanceof Error ? err.message : "Error al detectar recintos");
+    } finally {
+      setDetectingRooms(false);
+    }
+  }
+
+  async function runDetectOpenings() {
+    if (!currentPageScale) return;
+    setDetectingOpenings(true);
+    setDetectionError(null);
+    try {
+      const res = await api.detectOpenings(planId, page);
+      const cleaned = res.map((c, idx) => ({
+        ...c,
+        id: `opening_candidate_${idx + 1}`,
+      }));
+      setOpeningCandidates(cleaned);
+      setSelectedCandidateIds((prev) => {
+        const next = new Set(prev);
+        cleaned.forEach((c) => next.add(c.id));
+        return next;
+      });
+    } catch (err) {
+      setDetectionError(err instanceof Error ? err.message : "Error al detectar aberturas");
+    } finally {
+      setDetectingOpenings(false);
+    }
+  }
+
+  function toggleCandidateSelected(candidateId: string) {
+    setSelectedCandidateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) {
+        next.delete(candidateId);
+      } else {
+        next.add(candidateId);
+      }
+      return next;
+    });
+  }
+
+  function discardCandidates(type?: "wall" | "room" | "opening") {
+    if (!type || type === "wall") {
+      setWallCandidates([]);
+      setSelectedCandidateIds((prev) => {
+        const next = new Set(prev);
+        wallCandidates.forEach((c) => next.delete(c.id));
+        return next;
+      });
+    }
+    if (!type || type === "room") {
+      setRoomCandidates([]);
+      setSelectedCandidateIds((prev) => {
+        const next = new Set(prev);
+        roomCandidates.forEach((c) => next.delete(c.id));
+        return next;
+      });
+    }
+    if (!type || type === "opening") {
+      setOpeningCandidates([]);
+      setSelectedCandidateIds((prev) => {
+        const next = new Set(prev);
+        openingCandidates.forEach((c) => next.delete(c.id));
+        return next;
+      });
+    }
+  }
+
+  async function confirmCandidateWalls() {
+    const selectedWalls = wallCandidates.filter((c) => selectedCandidateIds.has(c.id));
+    if (selectedWalls.length === 0) {
+      discardCandidates("wall");
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const created = await api.createElementsBulk(planId, selectedWalls);
+      setElements((prev) => [...prev, ...created]);
+      discardCandidates("wall");
+    } catch (err) {
+      setDetectionError(err instanceof Error ? err.message : "Error al guardar muros detectados");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function confirmCandidateRooms() {
+    const selectedRooms = roomCandidates.filter((c) => selectedCandidateIds.has(c.id));
+    if (selectedRooms.length === 0) {
+      discardCandidates("room");
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const created = await api.createElementsBulk(planId, selectedRooms);
+      setElements((prev) => [...prev, ...created]);
+      discardCandidates("room");
+    } catch (err) {
+      setDetectionError(err instanceof Error ? err.message : "Error al guardar recintos detectados");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function confirmCandidateOpenings() {
+    const selectedOpenings = openingCandidates.filter((c) => selectedCandidateIds.has(c.id));
+    if (selectedOpenings.length === 0) {
+      discardCandidates("opening");
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const payload = selectedOpenings.map((c) => ({
+        page,
+        cx: c.cx,
+        cy: c.cy,
+        default_width_m: c.default_width_m,
+        label: c.label,
+        subtype: c.subtype,
+      }));
+      const created = await api.createOpeningsBulk(planId, payload);
+      setElements((prev) => [...prev, ...created]);
+      discardCandidates("opening");
+    } catch (err) {
+      setDetectionError(err instanceof Error ? err.message : "Error al guardar aberturas detectadas");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   useEffect(() => {
     let blobUrl: string | null = null;
@@ -1002,6 +1194,154 @@ export default function PlanViewerInner({
             </div>
           </div>
 
+          {/* Detección con IA */}
+          <div className="mb-3 rounded-lg border border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIaPanelOpen((v) => !v)}
+              className="flex w-full items-center justify-between px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-t-lg"
+            >
+              <span>Detección con IA</span>
+              <ChevronIcon open={iaPanelOpen} />
+            </button>
+
+            {iaPanelOpen && (
+              <div className="border-t border-slate-100 dark:border-slate-800 p-2.5 space-y-2">
+                {detectionError && (
+                  <div className="rounded bg-red-50 dark:bg-red-950/40 p-2 text-[10px] text-red-600 dark:text-red-400">
+                    {detectionError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={runDetectWalls}
+                    disabled={!currentPageScale || detectingWalls || bulkBusy}
+                    className="flex flex-col items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-[10px] font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    title={!currentPageScale ? "Calibrá la página primero" : "Detectar muros estructurales"}
+                  >
+                    {detectingWalls ? "..." : "Muros"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={runDetectRooms}
+                    disabled={!currentPageScale || detectingRooms || bulkBusy}
+                    className="flex flex-col items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-[10px] font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    title={!currentPageScale ? "Calibrá la página primero" : "Detectar recintos"}
+                  >
+                    {detectingRooms ? "..." : "Recintos"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={runDetectOpenings}
+                    disabled={!currentPageScale || detectingOpenings || bulkBusy}
+                    className="flex flex-col items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-[10px] font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    title={!currentPageScale ? "Calibrá la página primero" : "Detectar aberturas"}
+                  >
+                    {detectingOpenings ? "..." : "Aberturas"}
+                  </button>
+                </div>
+
+                {/* Resumen Candidatos Muros */}
+                {wallCandidates.length > 0 && (() => {
+                  const selCount = wallCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
+                  return (
+                    <div className="rounded-lg bg-sky-50/50 border border-sky-100 p-2 space-y-1.5 dark:bg-sky-950/20 dark:border-sky-900/50">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-sky-700 dark:text-sky-400">
+                          Muros AI ({selCount}/{wallCandidates.length})
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={confirmCandidateWalls}
+                          disabled={bulkBusy}
+                          className="flex-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[9px] py-1 transition-all disabled:opacity-50"
+                        >
+                          Aceptar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => discardCandidates("wall")}
+                          disabled={bulkBusy}
+                          className="rounded border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-[9px] px-2 py-1 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
+                        >
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Resumen Candidatos Recintos */}
+                {roomCandidates.length > 0 && (() => {
+                  const selCount = roomCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
+                  return (
+                    <div className="rounded-lg bg-emerald-50/50 border border-emerald-100 p-2 space-y-1.5 dark:bg-emerald-950/20 dark:border-emerald-900/50">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                          Recintos AI ({selCount}/{roomCandidates.length})
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={confirmCandidateRooms}
+                          disabled={bulkBusy}
+                          className="flex-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[9px] py-1 transition-all disabled:opacity-50"
+                        >
+                          Aceptar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => discardCandidates("room")}
+                          disabled={bulkBusy}
+                          className="rounded border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-[9px] px-2 py-1 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
+                        >
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Resumen Candidatos Aberturas */}
+                {openingCandidates.length > 0 && (() => {
+                  const selCount = openingCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
+                  return (
+                    <div className="rounded-lg bg-amber-50/50 border border-amber-100 p-2 space-y-1.5 dark:bg-amber-950/20 dark:border-amber-900/50">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-amber-700 dark:text-amber-400">
+                          Aberturas AI ({selCount}/{openingCandidates.length})
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={confirmCandidateOpenings}
+                          disabled={bulkBusy}
+                          className="flex-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[9px] py-1 transition-all disabled:opacity-50"
+                        >
+                          Aceptar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => discardCandidates("opening")}
+                          disabled={bulkBusy}
+                          className="rounded border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-[9px] px-2 py-1 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
+                        >
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
           {/* Barra de acciones bulk */}
           {selectedIds.size > 0 && (
             <div className="mb-2 flex items-center justify-between gap-1 rounded-lg border border-brand/30 bg-sky-50/60 px-2 py-1.5 text-xs dark:border-sky-800 dark:bg-sky-950/30">
@@ -1330,15 +1670,24 @@ export default function PlanViewerInner({
           <div className="relative">
             <div
               ref={containerRef}
-              onMouseDown={onMouseDown}
-              onMouseMove={onMouseMove}
-              onMouseUp={onMouseUp}
-              onMouseLeave={onMouseLeave}
-              onDoubleClick={onDoubleClick}
+              onMouseDown={show3D ? undefined : onMouseDown}
+              onMouseMove={show3D ? undefined : onMouseMove}
+              onMouseUp={show3D ? undefined : onMouseUp}
+              onMouseLeave={show3D ? undefined : onMouseLeave}
+              onDoubleClick={show3D ? undefined : onDoubleClick}
               onContextMenu={(e) => e.preventDefault()}
               className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-950"
-              style={{ height, cursor }}
+              style={{ height, cursor: show3D ? "default" : cursor }}
             >
+              {show3D ? (
+                <Plan3DViewer
+                  elements={elements}
+                  scale={currentPageScale ?? 100}
+                  page={page}
+                  onClose={() => setShow3D(false)}
+                />
+              ) : (
+                <>
               {loading && (
                 <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
                   Procesando página {page}...
@@ -1404,6 +1753,29 @@ export default function PlanViewerInner({
                         );
                       })}
 
+                    {/* Candidatos Recintos */}
+                    {roomCandidates.map((c) => {
+                      const pts = chunkPoints(c.geometry.points);
+                      const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                      const selected = selectedCandidateIds.has(c.id);
+                      return (
+                        <polygon
+                          key={c.id}
+                          points={ptsStr}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCandidateSelected(c.id);
+                          }}
+                          className="pointer-events-auto cursor-pointer"
+                          fill={selected ? "rgba(16, 185, 129, 0.15)" : "rgba(148, 163, 184, 0.05)"}
+                          stroke={selected ? "#10b981" : "#94a3b8"}
+                          strokeWidth={(selected ? 2 : 1) / scale}
+                          strokeDasharray={`${6 / scale} ${4 / scale}`}
+                          opacity={0.8}
+                        />
+                      );
+                    })}
+
                     {/* Muros */}
                     {elements
                       .filter((el) => el.type === "wall")
@@ -1439,6 +1811,44 @@ export default function PlanViewerInner({
                         );
                       })}
 
+                    {/* Candidatos Muros */}
+                    {wallCandidates.map((c) => {
+                      const pts = c.geometry.points;
+                      if (pts.length < 4) return null;
+                      const [x1, y1, x2, y2] = pts;
+                      const selected = selectedCandidateIds.has(c.id);
+                      return (
+                        <g
+                          key={c.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCandidateSelected(c.id);
+                          }}
+                          className="pointer-events-auto cursor-pointer"
+                        >
+                          <line
+                            x1={x1}
+                            y1={y1}
+                            x2={x2}
+                            y2={y2}
+                            stroke="transparent"
+                            strokeWidth={24 / scale}
+                          />
+                          <line
+                            x1={x1}
+                            y1={y1}
+                            x2={x2}
+                            y2={y2}
+                            stroke={selected ? "#eab308" : "#94a3b8"}
+                            strokeWidth={(selected ? 8 : 4) / scale}
+                            strokeLinecap="square"
+                            strokeDasharray={`${6 / scale} ${4 / scale}`}
+                            opacity={selected ? 0.9 : 0.4}
+                          />
+                        </g>
+                      );
+                    })}
+
                     {/* Aberturas */}
                     {elements
                       .filter((el) => el.type === "opening")
@@ -1473,6 +1883,44 @@ export default function PlanViewerInner({
                           </g>
                         );
                       })}
+
+                    {/* Candidatos Aberturas */}
+                    {openingCandidates.map((c) => {
+                      const bbox = c.bbox;
+                      if (!bbox || bbox.length < 4) return null;
+                      const [bx1, by1, bx2, by2] = bbox;
+                      const selected = selectedCandidateIds.has(c.id);
+                      return (
+                        <g
+                          key={c.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCandidateSelected(c.id);
+                          }}
+                          className="pointer-events-auto cursor-pointer select-none"
+                        >
+                          <rect
+                            x={bx1}
+                            y={by1}
+                            width={bx2 - bx1}
+                            height={by2 - by1}
+                            fill={selected ? "rgba(245, 158, 11, 0.15)" : "rgba(148, 163, 184, 0.05)"}
+                            stroke={selected ? "#f59e0b" : "#94a3b8"}
+                            strokeWidth={(selected ? 1.5 : 1) / scale}
+                            strokeDasharray={`${4 / scale} ${3 / scale}`}
+                          />
+                          <text
+                            x={(bx1 + bx2) / 2}
+                            y={(by1 + by2) / 2 + 3 / scale}
+                            textAnchor="middle"
+                            fontSize={`${Math.max(9, 10 / scale)}px`}
+                            className="font-bold fill-amber-700 dark:fill-amber-400 select-none pointer-events-none"
+                          >
+                            {c.label}
+                          </text>
+                        </g>
+                      );
+                    })}
 
                     {/* Preview de dibujo en curso — segmento (wall/opening) */}
                     {(tool === "wall" || tool === "opening") &&
@@ -1555,10 +2003,12 @@ export default function PlanViewerInner({
                   </g>
                 </svg>
               )}
-            </div>
+            </>
+          )}
+        </div>
 
             {/* Barra flotante inferior-derecha */}
-            {!calibrating && (
+            {!calibrating && !show3D && (
               <div className="pointer-events-none absolute bottom-3 right-3">
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
                   <ToolbarIconButton onClick={resetView} title="Centrar (F)" ariaLabel="Centrar vista">
@@ -1569,6 +2019,17 @@ export default function PlanViewerInner({
                   </ToolbarIconButton>
                   <ToolbarIconButton onClick={() => zoomAtCenter(-1)} title="Alejar (-)" ariaLabel="Alejar">
                     <MinusIcon />
+                  </ToolbarIconButton>
+
+                  <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
+
+                  <ToolbarIconButton
+                    onClick={() => setShow3D(true)}
+                    disabled={drawingDisabled}
+                    title={drawingDisabled ? "Vista 3D — calibrá la página primero" : "Vista 3D"}
+                    ariaLabel="Cambiar a vista 3D"
+                  >
+                    <CubeIcon />
                   </ToolbarIconButton>
 
                   <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
@@ -2137,19 +2598,22 @@ function ToolbarIconButton({
   onClick,
   title,
   ariaLabel,
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   title: string;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={title}
       aria-label={ariaLabel}
-      className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+      className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
     >
       {children}
     </button>
@@ -2261,6 +2725,17 @@ function OpeningIcon() {
       <path d="M12 21V3" />
       <path d="M21 21V11a4 4 0 0 0-4-4h-2" />
       <path d="M16 12h.01" />
+    </svg>
+  );
+}
+
+function CubeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m21 16-9 5-9-5V8l9-5 9 5v8z" />
+      <path d="M12 22V12" />
+      <path d="m12 12 8.7-5" />
+      <path d="m12 12-8.7-5" />
     </svg>
   );
 }

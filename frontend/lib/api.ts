@@ -388,6 +388,27 @@ export const api = {
     );
   },
 
+  detectWalls: (planId: number, page: number) =>
+    request<any[]>(`/api/v1/plans/${planId}/detect-walls?page=${page}`),
+
+  detectRooms: (planId: number, page: number) =>
+    request<any[]>(`/api/v1/plans/${planId}/detect-rooms?page=${page}`),
+
+  detectOpenings: (planId: number, page: number) =>
+    request<any[]>(`/api/v1/plans/${planId}/detect-openings?page=${page}`),
+
+  createElementsBulk: (planId: number, payload: any[]) =>
+    request<DetectedElement[]>(`/api/v1/plans/${planId}/elements-bulk`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  createOpeningsBulk: (planId: number, payload: any[]) =>
+    request<DetectedElement[]>(`/api/v1/plans/${planId}/openings-bulk`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   exportXlsx: async (planId: number, page?: number): Promise<Blob> => {
     const token = getToken();
     const qs = page !== undefined ? `?page=${page}` : "";
