@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.detected_element import DetectedElement
     from app.models.project import Project
 
 
@@ -27,9 +28,15 @@ class Plan(Base):
     scale_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # dict { "1": 59.06, "2": 78.74, ... } — escala px/m por número de página (1-indexed)
     page_scales: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # list [1, 2, ...] — páginas eliminadas (1-indexed)
+    deleted_pages: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="uploaded", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     project: Mapped["Project"] = relationship(back_populates="plans")
+    detected_elements: Mapped[list["DetectedElement"]] = relationship(
+        back_populates="plan", cascade="all, delete-orphan"
+    )
+

@@ -17,6 +17,12 @@ class UserRead(BaseModel):
     created_at: datetime
 
 
+class UserUpdate(BaseModel):
+    email: EmailStr | None = None
+    password: str | None = Field(None, min_length=8, max_length=128)
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+

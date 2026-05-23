@@ -1,23 +1,26 @@
 # MuroAI
 
-Aplicación web para automatizar el cómputo métrico y presupuesto de materiales en la fase de preconstrucción y preventa inmobiliaria. El usuario sube planos en PDF, la plataforma extrae dimensiones mediante visión por computadora e IA, y genera un presupuesto desglosado y editable contra un catálogo de materiales con fórmulas de rendimiento.
+Aplicación web para automatizar el cómputo métrico y presupuesto de materiales en la fase de preconstrucción y preventa inmobiliaria. El usuario sube planos en PDF, calibra la escala (auto o manual), dibuja muros, recintos y aberturas sobre el plano, asigna materiales con sus fórmulas de rendimiento, y obtiene un presupuesto exportable a Excel y PDF.
 
 ## Stack
 
-- **Frontend**: Next.js 14 (App Router) + Tailwind CSS + React-Konva (visor interactivo sobre HTML5 Canvas).
-- **Backend**: Python con FastAPI (asíncrono, compatible con el ecosistema de IA).
+- **Frontend**: Next.js 14 (App Router) + Tailwind CSS. Visor de planos con `<img>` + CSS transform (pan/zoom) y overlay SVG para muros/recintos/aberturas/calibración. Visor 3D con Three.js / React Three Fiber v8.
+- **Backend**: Python con FastAPI (asíncrono, BackgroundTasks para pre-render).
 - **Base de datos**: PostgreSQL.
-- **IA / Visión**: PyMuPDF, OpenCV, YOLOv8, PaddleOCR, SAM / U-Net.
-- **Infra**: Docker Compose (postgres + redis + backend + frontend), RQ para tareas async.
+- **Procesamiento**: PyMuPDF (rasterización + extracción de texto), OpenCV (preprocesamiento), openpyxl (export XLSX), reportlab (export PDF).
+- **3D**: Three.js + `@react-three/fiber` v8 + `@react-three/drei` v9 (compatible React 18). Renderiza muros, aberturas y recintos en tiempo real desde los elementos detectados.
+- **IA futura**: PaddleOCR (cotas), YOLOv8 (aberturas, barra de escala), SAM / U-Net (muros). No implementado todavía — el MVP funciona sin IA.
+- **Infra**: Docker Compose (postgres + redis + backend + frontend). Redis reservado para RQ en sprints futuros.
 
-## Resumen del proyecto
+## Flujo end-to-end
 
-El objetivo es reducir el tiempo que los directores de obra e ingenieros dedican al cómputo métrico. El flujo es:
-
-1. El usuario sube un plano en PDF desde el frontend.
-2. El backend rasteriza el documento, calibra la escala geométrica, identifica muros, habitaciones, puertas y ventanas, y extrae dimensiones.
-3. El usuario valida los datos detectados y asigna materiales.
-4. El motor cruza las mediciones con la base de datos de rendimiento y genera un presupuesto exportable en Excel o PDF.
+1. **Crear proyecto** y subir un PDF (cualquier cantidad de páginas).
+2. **Background processing**: el backend cuenta páginas, ejecuta auto-detección de escalas leyendo el texto, y dispara pre-render de todas las páginas en una BackgroundTask.
+3. **Calibrar** (cuando el texto del PDF no alcanza): marcar dos puntos sobre una cota conocida, escribir los metros reales. Se pueden acumular varias referencias y la app aplica la **mediana** para robustez.
+4. **Dibujar** muros (línea), recintos (polígono cerrado) y aberturas (línea, se restan del muro). Cada elemento tiene `length_m` / `area_m2` calculados con la escala de su página.
+5. **Asignar materiales** a los elementos (single o bulk). Cada material tiene yields con `applies_to` + `consumption` + `waste_factor` + `unit_price`.
+6. **Presupuesto** consolidado que cruza elementos con yields. Editable inline (precio unitario).
+7. **Exportar** a XLSX estilado (openpyxl) o PDF estilado (reportlab).
 
 ---
 
@@ -25,182 +28,229 @@ El objetivo es reducir el tiempo que los directores de obra e ingenieros dedican
 
 ```
 MuroAI/
-├── frontend/                  Next.js 14 (App Router) + Tailwind + Konva
-│   ├── app/                   rutas: /login, /projects, /projects/[id]
+├── frontend/                  Next.js 14 (App Router) + Tailwind
+│   ├── app/
+│   │   ├── login/ register/ projects/ projects/[id]/ materials/
+│   │   └── layout.tsx         + script de tema sin flash
 │   ├── components/
-│   │   ├── viewer/            React-Konva: capas plano + overlays
-│   │   └── ui/                botones, tablas, modales
-│   ├── lib/api.ts             cliente HTTP tipado
+│   │   ├── plan-viewer.tsx           wrapper dynamic ssr:false
+│   │   ├── plan-viewer-inner.tsx     viewer, dibujo, presupuesto, selección múltiple, toggle 3D
+│   │   ├── plan-3d-viewer.tsx        visor 3D interactivo (Three.js / R3F v8), estilos Blueprint/Render
+│   │   ├── scales-modal.tsx          tabla editable de escalas por página
+│   │   ├── confirm-modal.tsx         confirmación reutilizable
+│   │   ├── sidebar.tsx               navegación + perfil + tema
+│   │   └── theme-toggle.tsx          switch light/dark accesible
+│   ├── lib/api.ts             cliente HTTP tipado (~40 endpoints)
 │   └── package.json
 ├── backend/                   FastAPI
 │   ├── app/
-│   │   ├── api/v1/            routers: auth, projects, plans, materials, budgets
-│   │   ├── core/              config, seguridad JWT, dependencias
+│   │   ├── api/v1/            routers: auth, projects, plans, materials
+│   │   ├── core/              config, JWT, dependencias
 │   │   ├── services/
 │   │   │   ├── pdf.py         rasterización (PyMuPDF)
-│   │   │   ├── preprocess.py  binarización (OpenCV)
-│   │   │   ├── scale.py       calibración manual + OCR cotas
-│   │   │   ├── detect.py      YOLOv8 (aberturas, escala)
-│   │   │   ├── segment.py     SAM/U-Net (muros, recintos)
-│   │   │   └── compute.py     fórmulas de cómputo métrico
-│   │   ├── models/            SQLAlchemy
-│   │   ├── schemas/           Pydantic
-│   │   └── workers/           tareas async (RQ o Celery + Redis)
-│   ├── ml/                    pesos entrenados (.pt), gitignored
-│   ├── tests/
-│   ├── pyproject.toml
+│   │   │   ├── preprocess.py  enhance_for_display (gamma + dilate líneas)
+│   │   │   ├── auto_scale.py  regex "1:N" sobre texto del PDF
+│   │   │   └── prewarm.py     BackgroundTask que pre-rendera todas las páginas
+│   │   ├── models/            SQLAlchemy: User, Project, Plan, DetectedElement, Material, MaterialYield
+│   │   ├── schemas/           Pydantic v2
+│   │   └── alembic/           migraciones (0001 → 0007)
 │   └── Dockerfile
-├── db/
-│   ├── migrations/            Alembic
-│   └── seeds/                 catálogo base de materiales
-├── storage/                   PDFs originales + rasters (montar volumen)
+├── storage/                   PDFs originales + rasters cacheados
 ├── docker-compose.yml         postgres + redis + backend + frontend
-├── .env.example
 └── README.md
 ```
 
 ---
 
-## 2. Modelo de datos PostgreSQL (tablas principales)
+## 2. Modelo de datos PostgreSQL
 
 | Tabla | Campos clave | Notas |
 |---|---|---|
 | `users` | id, email, password_hash, role | role: admin / director_obra |
-| `projects` | id, user_id, name, status | status: draft / processing / ready |
-| `plans` | id, project_id, pdf_path, raster_path, dpi, page, scale_px_per_m, scale_source | scale_source: manual / ocr / yolo |
-| `detected_elements` | id, plan_id, type, geometry (GeoJSON o PostGIS), area_m2, length_m, height_m, confidence, source | type: wall / room / door / window; source: ai / manual / edited |
-| `materials` | id, name, category, unit | unit: m2, m3, ml, un, kg |
-| `material_yields` | id, material_id, applies_to, consumption, waste_factor, unit_price, currency | fórmula = consumption × area × (1+waste) |
-| `budget_items` | id, project_id, element_id, material_id, quantity, unit_price, subtotal | snapshot del precio al momento del cálculo |
-| `processing_jobs` | id, plan_id, stage, status, started_at, error | tracking de pipeline async |
+| `projects` | id, user_id, name, description, status | status: draft / processing / ready |
+| `plans` | id, project_id, pdf_path, dpi, page_count, `page_scales` (JSON), `deleted_pages` (JSON), scale_source | `page_scales` = `{ "1": 59.06, "2": 78.74, ... }` (px/m por página). `scale_source`: auto_text / manual / manual_multi / manual_ratio |
+| `detected_elements` | id, plan_id, page, type, geometry (JSON), length_m, area_m2, height_m, source | type: wall / room / opening. geometry: `{ points: [...], label?: string }` |
+| `materials` | id, name, category, unit | category libre. unit: un, m2, ml, kg, l, etc. |
+| `material_yields` | id, material_id, applies_to, consumption, waste_factor, unit_price | applies_to: wall / room_floor / room_wall / room_perimeter / opening / opening_perimeter |
+| `element_materials` | element_id, material_id | M2M, permite múltiples materiales por elemento |
 
-Decisión pendiente: **PostGIS sí o no**. Para polígonos del plano, GeoJSON en JSONB alcanza al principio; PostGIS solo se justifica si hacen falta queries espaciales (ej: "¿qué muros tocan esta habitación?").
+Geometría: GeoJSON-like en JSONB. **PostGIS descartado** — no hace falta para nuestras queries (todo se filtra por `plan_id` o `page`).
 
 ---
 
-## 3. Contratos de API (v1)
+## 3. API v1 (endpoints implementados)
 
 ### Auth
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login` → JWT
+- `POST /api/v1/auth/register` · `POST /api/v1/auth/login` → JWT
+- `GET /api/v1/auth/me` · `PATCH /api/v1/auth/update` (perfil)
 
 ### Proyectos
-- `POST /api/v1/projects`
-- `GET /api/v1/projects`
-- `GET /api/v1/projects/{id}`
+- `POST /api/v1/projects` · `GET /api/v1/projects` · `GET /api/v1/projects/{id}`
+- `PATCH /api/v1/projects/{id}` · `DELETE /api/v1/projects/{id}` (cascade)
 
-### Planos (procesamiento async)
-- `POST /api/v1/projects/{id}/plans` (multipart PDF) → `{ plan_id, job_id }`
-- `GET /api/v1/plans/{id}/status` → `{ stage: "raster|scale|detect|done", progress }`
-- `GET /api/v1/plans/{id}` → raster URL + elementos detectados + escala
-- `POST /api/v1/plans/{id}/scale` → `{ p1, p2, real_distance_m }` (calibración manual)
-- `PATCH /api/v1/plans/{id}/elements/{eid}` → corregir geometría/tipo
-- `POST /api/v1/plans/{id}/elements` → crear elemento dibujado a mano
+### Planos
+- `POST /api/v1/projects/{id}/plans` (PDF upload) → dispara auto-detect + background prewarm
+- `GET /api/v1/projects/{id}/plans` · `GET /api/v1/plans/{id}`
+- `GET /api/v1/plans/{id}/raster?page=N` → PNG procesado de la página
+- `GET /api/v1/plans/{id}/render-status` → `{rendered, total}` para barra de progreso
+- `POST /api/v1/plans/{id}/prewarm` → dispara/re-dispara el background
+- `POST /api/v1/plans/{id}/delete-page/{page}` · `POST /api/v1/plans/{id}/restore-page/{page}`
 
-### Materiales y presupuesto
-- `GET /api/v1/materials` (catálogo)
-- `POST /api/v1/projects/{id}/budget` con asignaciones material↔elemento
-- `GET /api/v1/projects/{id}/budget`
-- `GET /api/v1/projects/{id}/budget/export?format=xlsx|pdf`
+### Escalas
+- `POST /api/v1/plans/{id}/scale` `{p1, p2, real_distance_m, page}` (manual)
+- `POST /api/v1/plans/{id}/scale-direct` `{page, px_per_m, source}` (mediana multi-ref)
+- `POST /api/v1/plans/{id}/scale-ratio` `{page, denominator}` (1:N directo)
+- `POST /api/v1/plans/{id}/bulk-scale-ratio` `{ "1": 100, "2": 75, ... }`
+- `POST /api/v1/plans/{id}/auto-detect-scale` · `GET /api/v1/plans/{id}/preview-auto-detect`
+- `DELETE /api/v1/plans/{id}/scale/{page}` (limpia una página)
+
+### Elementos detectados (muros, recintos, aberturas)
+- `POST /api/v1/plans/{id}/elements` · `GET /api/v1/plans/{id}/elements?page=N`
+- `PATCH /api/v1/plans/{id}/elements/{eid}` · `DELETE /api/v1/plans/{id}/elements/{eid}`
+
+### Materiales
+- `GET /api/v1/materials/` · `POST /api/v1/materials/` · `GET/PUT/DELETE /api/v1/materials/{id}`
+- `PATCH /api/v1/materials/{id}/price` (edit inline)
+- `GET /api/v1/materials/export/xlsx` · `POST /api/v1/materials/import/excel`
+
+### Asignación material ↔ elemento
+- `POST /api/v1/plans/{id}/elements/{eid}/materials` · `DELETE …/materials/{material_id}`
+- `POST /api/v1/plans/{id}/elements/bulk/materials` (asigna a N elementos a la vez)
+- `POST /api/v1/plans/{id}/elements/bulk/materials/remove`
+
+### Presupuesto + Export
+- `GET /api/v1/plans/{id}/materials-summary?page=N` → cantidades + subtotales
+- `GET /api/v1/plans/{id}/export/xlsx` → planilla estilada
+- `GET /api/v1/plans/{id}/export/pdf` → PDF estilado
 
 ---
 
 ## 4. Roadmap por sprints
 
-El orden no sigue 1→2→3→4 puro. El objetivo es llegar a un MVP vendible **sin IA** y luego incorporar modelos como asistencia progresiva: cada modelo pre-rellena el dibujo que el usuario ya sabe hacer manualmente, nunca lo reemplaza.
+| Sprint | Estado | Entrega |
+|---|---|---|
+| **0** | ✅ | Scaffolding, auth JWT, CRUD proyectos, docker-compose |
+| **1** | ✅ | Rasterización PyMuPDF + preprocesamiento + visor con pan/zoom |
+| **2** | ✅ | Calibración por página: auto (regex sobre texto), manual single, manual multi-ref con mediana, edición 1:N en tabla |
+| **3** | ✅ | Dibujo manual de muros / recintos / aberturas con cálculo automático de longitudes y áreas |
+| **4** | ✅ | Catálogo de materiales con yields, asignación, presupuesto, export XLSX + PDF |
+| **5** | ✅ | **Asistencia a calibración**: extracción de cotas desde el texto vectorial del PDF, badges sobre el plano, pre-llenado automático del modal con la cota más cercana |
+| **9** | ✅ | **Selección múltiple y eliminación en lote**: Shift+click, Ctrl+A, Delete/Backspace, cuadro de selección con drag, selección de tipo completo, confirmación de eliminación en lote |
+| **10** | ✅ | **Visor 3D interactivo** + **Panel de Detección IA**: muros extruidos, puertas/ventanas, suelos de recintos, modos Blueprint/Render Blanco. Panel IA en sidebar con botones Detectar Muros / Recintos / Aberturas, preview con checkboxes, importación en lote. |
+| **6** | pendiente | **Fase 2.2 IA**: OCR (Tesseract/PaddleOCR) para PDFs escaneados sin capa de texto |
+| **7** | pendiente | **Fase 3.3 IA**: YOLOv8 para puertas/ventanas (símbolos estándar, dataset chico) |
+| **8** | pendiente | **Fase 3.1/3.2 IA**: SAM o U-Net para muros + contornos para recintos |
 
-| Sprint | Duración | Entrega | Por qué primero |
-|---|---|---|---|
-| **0** | 1 sem | Scaffolding, auth, CRUD proyectos, upload PDF crudo | Base sólida antes de tocar IA |
-| **1** | 1-2 sem | **Fase 1**: rasterización + binarización + visor Konva mostrando el plano | El usuario ya ve su PDF en el navegador |
-| **2** | 1 sem | **Calibración manual** (Paso 2.3 sin 2.1/2.2): el usuario marca 2 puntos y escribe "esto son 5 m" | Desbloquea todo el cómputo métrico sin entrenar modelos |
-| **3** | 1-2 sem | **Dibujo manual** de muros, recintos y vanos + cálculo de áreas/longitudes/descuentos | MVP vendible: sustituye a AutoCAD para cómputo rápido |
-| **4** | 1 sem | **Fase 4 completa**: catálogo de materiales, fórmulas, presupuesto, export xlsx/pdf | Cierra el ciclo de valor |
-| **5** | — | **Fase 2 IA**: OCR de cotas con PaddleOCR + YOLOv8 para barra de escala | Calibración asistida, reduce trabajo manual |
-| **6** | — | **Fase 3.3**: YOLOv8 para puertas/ventanas | El modelo más rentable: símbolos estándar, dataset chico |
-| **7** | — | **Fase 3.1/3.2**: SAM o U-Net para muros + contornos para recintos | Lo más caro de afinar; al final del roadmap |
-
----
-
-## 5. Fases originales del motor de IA (referencia técnica)
-
-### Fase 1 — Ingesta y preprocesamiento
-- **1.1 Rasterización adaptativa**: PyMuPDF / pdf2image convierten el PDF a PNG/TIFF a 300 DPI mínimo.
-- **1.2 Binarización y limpieza**: OpenCV convierte a blanco y negro puro, elimina ruido, texturas y gradientes.
-
-### Fase 2 — Sistema de referencia (escala)
-- **2.1 Detección del bloque de escala**: YOLOv8 localiza la barra gráfica o el texto "1:100".
-- **2.2 OCR de cotas**: PaddleOCR lee los números de las cotas en los ejes principales.
-- **2.3 Calibración del píxel**: `relación = píxeles / metros reales`. Cualquier distancia en píxeles se traduce a metros.
-
-### Fase 3 — Segmentación y extracción de geometrías
-- **3.1 Muros**: SAM o U-Net aíslan paredes. Combinando largo × grosor × altura estándar se obtiene m³ de mampostería/hormigón.
-- **3.2 Recintos**: detección de contornos cerrados con OpenCV. Cada polígono cerrado entrega m² para acabados (pisos, cielorrasos, pintura).
-- **3.3 Aberturas**: YOLOv8 reconoce símbolos de puertas y ventanas; sus áreas se descuentan del total de muros.
-
-### Fase 4 — Motor de cómputo y base de datos
-- **4.1 Asignación guiada**: el frontend muestra mediciones detectadas y el usuario asigna tipos de material (global o por sector).
-- **4.2 Fórmulas de rendimiento**: FastAPI consulta PostgreSQL.
-  `Cantidad = Área × Consumo_por_m² × Factor_desperdicio`
-- **4.3 Consolidación y exportación**: backend agrupa insumos en JSON; frontend genera tablas y exporta a xlsx o PDF.
+El MVP vendible (Sprints 0-5, 9, 10) **ya está terminado**. Los sprints 6-8 incorporan IA como **asistencia progresiva**: pre-rellenan lo que hoy hace el usuario a mano, pero nunca lo reemplazan totalmente.
 
 ---
 
-## 6. Decisiones a cerrar antes de codear
-
-1. **Cola de trabajo async**: RQ (Redis, simple) vs Celery (más potente, más config). Recomendado para arrancar: **RQ**.
-2. **Storage de PDFs/rasters**: filesystem local con volumen Docker vs S3/MinIO desde el día uno. Recomendado: **local con interfaz abstraída**.
-3. **Autenticación**: JWT propio vs Clerk/Auth.js. Recomendado: **JWT propio** (trivial en FastAPI, sin lock-in).
-4. **PostGIS**: probablemente no al inicio. **GeoJSON en JSONB**.
-5. **Deploy objetivo**: VPS propio (Hetzner) / Railway / Fly / cloud grande. Define `docker-compose` y CI.
-
----
-
-## Estado actual
-
-**Sprint 0 + Sprint 1 completados.**
+## 5. Estado actual — detalle de lo entregado
 
 ### Sprint 0 (base)
+- Monorepo Next.js + FastAPI, docker-compose con postgres/redis.
+- Auth JWT, CRUD proyectos, edición/eliminación con confirmación.
+- Sidebar persistente con navegación, perfil editable, theme switch.
 
-- Monorepo con `frontend/` (Next.js 14 + Tailwind) y `backend/` (FastAPI).
-- `docker-compose.yml` con postgres, redis, backend y frontend.
-- Backend: auth JWT (`/auth/register`, `/auth/login`), CRUD de proyectos, upload de PDF.
-- Modelos SQLAlchemy: `User`, `Project`, `Plan`. Alembic con migración inicial.
-- Frontend: landing, `/login`, `/register`, `/projects`, `/projects/[id]` con uploader.
-- Toggle light/dark con persistencia y sin flash.
+### Sprint 1 (ingesta + visor)
+- Upload de PDF instantáneo (solo guarda + cuenta páginas).
+- **BackgroundTask** pre-renderiza todas las páginas a 150 DPI con gamma + dilatación morfológica (mantiene líneas finas visibles).
+- Render-status endpoint + barra de progreso en el visor.
+- Visor con `<img>` + CSS transform: pan, zoom (rueda + botones), reset.
 
-### Sprint 1 (Fase 1 — ingesta y visor)
+### Sprint 2 (escala por página)
+- Campo `page_scales` JSONB (px/m por página).
+- **Auto-detección** al subir: regex sobre el texto del PDF (`Esc 1:100`, `Escala: 1:75`, etc.) + fallback por keywords.
+- **Calibración manual multi-referencia**: marcar N cotas conocidas, ver el `1:N` de cada una en el banner, aplicar la **mediana** (robusto contra una mala medición). Líneas mostaza para refs guardadas, roja para la en curso.
+- **Tabla de escalas**: modal editable página por página, con input `1:N` + acción "Calibrar" que salta al visor en esa página y entra en modo manual.
+- Páginas eliminables (`deleted_pages`): se ocultan del navegador, scales modal y export.
 
-- **Rasterización** con PyMuPDF a 300 DPI: [backend/app/services/pdf.py](backend/app/services/pdf.py).
-- **Binarización** Otsu con OpenCV (planos digitales y escaneados): [backend/app/services/preprocess.py](backend/app/services/preprocess.py).
-- Procesamiento síncrono en el upload: el endpoint `POST /projects/{id}/plans` ahora deja el plan con `status="ready"` y `raster_path` apuntando al PNG binarizado.
-- Nuevo endpoint `GET /api/v1/plans/{id}/raster` que sirve el PNG (autenticado por JWT, descargado como Blob desde el frontend).
-- **Visor React-Konva** ([frontend/components/plan-viewer-inner.tsx](frontend/components/plan-viewer-inner.tsx)) con:
-  - Zoom centrado en el cursor (rueda del mouse).
-  - Pan arrastrando el lienzo.
-  - Auto-fit al cargar y botón "Centrar".
-- Integrado en `/projects/[id]`: al subir un PDF se muestra automáticamente, y los planos previos tienen botón "Ver".
+### Sprint 3 (dibujo + cómputo)
+- Tres herramientas: **Muro** (L), **Recinto** (P), **Abertura** (O) + **Pan** (H).
+- Atajos de teclado para cambiar tool, snapping al primer vértice para cerrar polígonos.
+- Etiquetas editables sobre cada elemento (doble click).
+- Panel lateral izquierdo: lista filtrable de muros/recintos/aberturas, hover destaca el elemento en el canvas.
+- Cálculo automático de `length_m` (muros, aberturas, perímetros) y `area_m2` (recintos) usando `page_scales[page]`.
+- **Barra de herramientas unificada** (bottom-right): tools + zoom in/out + centrar en una sola fila horizontal — no choca con el banner de calibración.
 
-## Arranque local
+### Sprint 9 (selección múltiple y eliminación en lote)
+- **Modo Selección** (`S`) nuevo en la barra de herramientas.
+- **Shift + click** sobre cualquier elemento lo añade/quita de la selección.
+- **Ctrl + A** selecciona todos los elementos de la página actual.
+- **Clic en un tipo** ("Muros", "Recintos", "Aberturas") en el panel lateral selecciona todos los de ese tipo.
+- **Cuadro de selección por drag** (rubber-band) cuando se arrastra sobre el canvas en modo Selección.
+- Elementos seleccionados se resaltan con un halo cian animado.
+- **Delete / Backspace** elimina todos los seleccionados con modal de confirmación (`Eliminar N elemento(s)`).
+- Compatible con el panel de presupuesto: si se eliminan elementos asignados a materiales, los cálculos se recalculan automáticamente.
+
+### Sprint 10 (visor 3D interactivo)
+- Botón **"Vista 3D"** en la barra de herramientas (shortcut: `3`) alterna entre el visor 2D y el visor 3D.
+- Visor 3D implementado en [`plan-3d-viewer.tsx`](frontend/components/plan-3d-viewer.tsx) con Three.js + React Three Fiber v8.
+- **Muros extruidos** con altura real (`height_m`, default 2.8 m) y espesor estándar de 15 cm.
+- **Aberturas** recortadas del muro: puertas (vacío hasta 2.1 m + dintel), ventanas (antepecho 0.9 m + vidrio translúcido + dintel).
+- **Suelos de recintos** como extrusión 2D desde los polígonos detectados.
+- **Modo Blueprint** (CAD oscuro con bordes cian brillantes) y **Modo Render Blanco** (materiales blancos con iluminación suave).
+- **OrbitControls**: orbitar (click izq), mover cámara (click der / Shift+click), zoom (scroll).
+- Carga dinámica con `next/dynamic` + `ssr: false` para evitar incompatibilidades SSR.
+- Stack de dependencias: `three@^0.184`, `@react-three/fiber@^8.17` (React 18 compatible), `@react-three/drei@^9.122`.
+
+### Sprint 5 (asistencia a calibración con texto vectorial)
+- Backend: [backend/app/services/dimension_text.py](backend/app/services/dimension_text.py) usa PyMuPDF para extraer todos los spans de texto con sus bounding boxes. Filtra los que matchean patrón decimal (`X.XX` / `X,XX`) en rango plausible (5 cm – 500 m).
+- Endpoint `GET /api/v1/plans/{id}/dimensions?page=N` devuelve `[{text, value, bbox, cx, cy}]` en píxeles del raster.
+- Visor: al entrar en modo calibración, las cotas aparecen como **badges teal** sobre el plano (con el número resaltado).
+- Cuando el usuario marca dos puntos, el modal se abre **pre-llenado** con la cota más cercana al midpoint (umbral: 200 px de papel, ~3.4 cm a 150 DPI). El input se resalta en teal y muestra "Sugerencia del PDF: cota X · editá si no es la correcta".
+- No requiere instalar OCR ni nuevas dependencias. Cubre el 95% de los planos profesionales (CAD-exportados con capa de texto).
+
+### Sprint 4 (materiales + presupuesto)
+- Catálogo de materiales en `/materials`: CRUD completo, edición inline de precios, import/export Excel.
+- Materiales con N yields (un material puede aplicarse a muros y a perímetros de recintos con consumos distintos).
+- Asignación M2M material↔elemento, individual o bulk.
+- **Panel de presupuesto** lateral derecho: agrupa materiales, calcula cantidades con `consumption × medida × (1 + waste_factor)`, precio editable inline.
+- Export XLSX estilado (openpyxl: header navy, alineaciones, formato moneda, total destacado).
+- Export PDF estilado (reportlab: paleta corporativa, tabla con grid, total con borde doble).
+
+### UX / theming
+- **Theme switch** light/dark accesible (`role="switch"` + `aria-checked`), persistente sin flash.
+- Colores diferenciados por tipo de elemento en light **y dark**: recinto=verde, muro=azul, abertura=naranja/ámbar.
+- Audit dark/light global: todas las páginas con pares `bg-X dark:bg-Y` consistentes.
+
+---
+
+## 6. Arranque local
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-- API: http://localhost:8000 (docs en `/docs`)
+- API: http://localhost:8000 (docs OpenAPI en `/docs`)
 - App: http://localhost:3000
 
-Las migraciones corren automáticamente al iniciar el backend.
+Las migraciones Alembic corren automáticamente al iniciar el backend.
 
-### Sprint 2 (calibración de escala — automática + manual)
+### Notas de dependencias frontend
 
-- **Escala por página**: nuevo campo `page_scales: dict[str, float]` en `plans` (migración 0004). Cada página tiene su propio `px/m` porque planos reales mezclan 1:100 en plantas, 1:75 en cortes, 1:25 en detalles.
-- **Auto-detección al subir**: [backend/app/services/auto_scale.py](backend/app/services/auto_scale.py) extrae el texto del PDF con PyMuPDF y matchea regex `esc(ala)?\s*1[:/]N`. Para cada match calcula `px_per_m = (DPI × 1000) / (25.4 × N)`. Se guarda automáticamente con `scale_source="auto_text"`. En el PDF de prueba del usuario (31 hojas), detecta correctamente 1:100, 1:75, 1:50, 1:25.
-- Endpoint `POST /api/v1/plans/{id}/auto-detect-scale` para re-correrlo manualmente (preserva calibraciones manuales previas).
-- **Calibración manual por página**: `POST /api/v1/plans/{id}/scale` con `{ p1, p2, real_distance_m, page }`. Sobreescribe `page_scales[page]`. Útil para páginas sin notación "Esc 1:N" en texto.
-- Visor con dos botones: **"Auto-detectar escalas"** (corre todo el PDF) y **"Calibrar página"** (modo manual con clicks + overlay SVG). Footer muestra `Esc. pág. N: X px/m` y `N de M con escala`.
+| Paquete | Versión | Nota |
+|---|---|---|
+| `@react-three/fiber` | `^8.17.10` | v8 = compatible React 16-18; v9+ requiere React 19 |
+| `@react-three/drei` | `^9.122.0` | Par de fiber v8 |
+| `three` | `^0.184.0` | Motor 3D base |
+| `react` / `react-dom` | `18.3.1` | Fijado — no actualizar a 19 sin revisar todo el stack |
 
-## Próximo paso — Sprint 3
+> [!IMPORTANT]
+> El `docker-compose.yml` usa **named volumes** (`frontend_node_modules`, `frontend_next`) en lugar de volúmenes anónimos para evitar que el bind mount de `./frontend:/app` pise el `node_modules` instalado en la imagen. Si se cambian dependencias en `package.json`, ejecutar `docker compose down -v && docker compose up --build` para recrear los volúmenes desde cero.
 
-Dibujo manual de muros, recintos y vanos sobre el plano con cálculo automático de longitudes/áreas usando la escala ya calibrada. Es el MVP vendible: cómputo métrico sin IA.
+---
+
+## 7. Próximo paso — Sprint 6 (OCR para PDFs escaneados)
+
+El Sprint 5 resolvió la asistencia de cotas leyendo el texto vectorial del PDF (PyMuPDF). Funciona perfecto en CAD-exportados pero **no** en PDFs escaneados (sin capa de texto). Ese caso es minoritario pero existe — planos viejos, fotos del plano subidas como PDF, etc.
+
+**Alcance del Sprint 6:**
+- Agregar Tesseract al `backend/Dockerfile` (apt install `tesseract-ocr` + `tesseract-ocr-spa`).
+- `pytesseract` a `requirements.txt`.
+- En `dimension_text.py`: si PyMuPDF no devuelve texto para la página, fallback a OCR sobre el raster cacheado.
+- Cache JSON del resultado en `storage/plans/{id}/{file}_p{N}.dims.json` para no re-OCRizar.
+- Si Tesseract es insuficiente para CAD (símbolos raros, texto rotado), considerar PaddleOCR como alternativa.
+
+Sprints 7 y 8 (YOLO aberturas + SAM muros) vienen después y siguen el mismo patrón: la IA propone, el usuario confirma o corrige.

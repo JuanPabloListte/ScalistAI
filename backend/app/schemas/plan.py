@@ -16,6 +16,7 @@ class PlanRead(BaseModel):
     scale_px_per_m: float | None
     scale_source: str | None
     page_scales: dict[str, float] | None
+    deleted_pages: list[int] | None = None
     created_at: datetime
 
 
@@ -34,3 +35,9 @@ class ScaleCalibration(BaseModel):
 class ScaleByRatio(BaseModel):
     page: int = Field(ge=1)
     denominator: float = Field(gt=0, le=10000, description="N en una escala 1:N")
+
+
+class ScaleDirect(BaseModel):
+    page: int = Field(ge=1)
+    px_per_m: float = Field(gt=0, description="px_per_m ya calculado (típicamente mediana de varias referencias)")
+    source: str = Field(default="manual_multi", max_length=32)

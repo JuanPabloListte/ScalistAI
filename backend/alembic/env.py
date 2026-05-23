@@ -5,7 +5,8 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
-from app.models import Plan, Project, User  # noqa: F401 — registra tablas
+from app.models import DetectedElement, Plan, Project, User, Material, MaterialYield, element_materials  # noqa: F401 — registra tablas
+
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

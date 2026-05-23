@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.user import Token, UserCreate, UserRead
+from app.core.deps import get_current_user
+from app.schemas.user import Token, UserCreate, UserRead, UserUpdate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,3 +34,27 @@ def login(
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
     token = create_access_token(subject=user.id)
     return Token(access_token=token)
+
+
+@router.get("/me", response_model=UserRead)
+def get_me(user: User = Depends(get_current_user)) -> User:
+    return user
+
+
+@router.patch("/profile", response_model=UserRead)
+def update_profile(
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> User:
+    if payload.email:
+        existing = db.scalar(select(User).where(User.email == payload.email, User.id != user.id))
+        if existing:
+            raise HTTPException(status_code=400, detail="El email ya está registrado")
+        user.email = payload.email
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+    db.commit()
+    db.refresh(user)
+    return user
+
