@@ -5,7 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type DetectedElement,
+  type ElementGeometry,
   type ElementType,
+  type Material,
+  type MaterialSummaryItem,
   type Plan,
 } from "@/lib/api";
 
@@ -13,10 +16,11 @@ type Props = {
   planId: number;
   pageCount?: number | null;
   pageScales?: Record<string, number> | null;
+  deletedPages?: number[] | null;
   scaleSource?: string | null;
   planDpi?: number | null;
   calRequest?: { page: number; ts: number } | null;
-  onScaleCalibrated?: (plan: Plan) => void;
+  onPlanUpdated?: (plan: Plan) => void;
   height?: number;
 };
 
@@ -62,14 +66,36 @@ function chunkPoints(flat: number[]): Point[] {
   return out;
 }
 
+// Largo geométrico (calculado desde la línea dibujada). Solo aplica a wall/opening.
+function geometricLengthM(el: DetectedElement, pxPerM: number | null): number | null {
+  if (!pxPerM) return null;
+  if (el.type !== "wall" && el.type !== "opening") return null;
+  const [x1, y1, x2, y2] = el.geometry.points;
+  if ([x1, y1, x2, y2].some((v) => v == null)) return null;
+  return Math.hypot(x2 - x1, y2 - y1) / pxPerM;
+}
+
+// Materiales aplicables a un tipo de elemento (al menos un yield compatible).
+function applicableMaterials(type: ElementType, all: Material[]): Material[] {
+  return all.filter((mat) =>
+    mat.yields.some((y) => {
+      if (type === "wall") return y.applies_to === "wall";
+      if (type === "room") return ["room_floor", "room_wall", "room_perimeter"].includes(y.applies_to);
+      if (type === "opening") return ["opening", "opening_perimeter"].includes(y.applies_to);
+      return false;
+    }),
+  );
+}
+
 export default function PlanViewerInner({
   planId,
   pageCount = 1,
   pageScales = null,
+  deletedPages = null,
   scaleSource = null,
   planDpi: _planDpi = 150,
   calRequest = null,
-  onScaleCalibrated,
+  onPlanUpdated,
   height = 640,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,6 +124,24 @@ export default function PlanViewerInner({
   const [elements, setElements] = useState<DetectedElement[]>([]);
   const [elementsLoading, setElementsLoading] = useState(false);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: number[]; label: string } | null>(null);
+  const [scaleModalOpen, setScaleModalOpen] = useState(false);
+  const [scaleFactor, setScaleFactor] = useState("1");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
+  const [bulkAssignMaterialId, setBulkAssignMaterialId] = useState<number | null>(null);
+
+  // Catálogo de materiales y cómputo
+  const [materialsList, setMaterialsList] = useState<Material[]>([]);
+  const [summary, setSummary] = useState<MaterialSummaryItem[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // Páginas eliminadas
+  const [confirmDeletePage, setConfirmDeletePage] = useState<number | null>(null);
+  const [pageBusy, setPageBusy] = useState(false);
 
   // Calibración
   const [calibrating, setCalibrating] = useState(false);
@@ -117,6 +161,17 @@ export default function PlanViewerInner({
   const totalPages = Math.max(1, statusTotal ?? pageCount ?? 1);
   const currentPageScale = pageScales?.[String(page)] ?? null;
   const drawingDisabled = !currentPageScale;
+  const activePages = useMemo(() => {
+    const deleted = new Set(deletedPages ?? []);
+    return Array.from({ length: totalPages }, (_, i) => i + 1).filter((p) => !deleted.has(p));
+  }, [totalPages, deletedPages]);
+
+  // Si la página actual quedó eliminada, saltar a la primera activa
+  useEffect(() => {
+    if (activePages.length > 0 && !activePages.includes(page)) {
+      setPage(activePages[0]);
+    }
+  }, [activePages, page]);
 
   // Reset al cambiar de plan
   useEffect(() => {
@@ -135,6 +190,8 @@ export default function PlanViewerInner({
     setActivePoints([]);
     setMousePos(null);
     setHoveredId(null);
+    setSelectedIds(new Set());
+    setEditingId(null);
   }, [page]);
 
   useEffect(() => {
@@ -220,6 +277,46 @@ export default function PlanViewerInner({
       cancelled = true;
     };
   }, [planId, page]);
+
+  // Catálogo de materiales (una vez por montaje)
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listMaterials()
+      .then((data) => {
+        if (!cancelled) setMaterialsList(data);
+      })
+      .catch(() => {
+        if (!cancelled) setMaterialsList([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Cómputo agregado: recargar cuando cambia plan, página, o cualquier cosa
+  // que pueda alterar las cantidades (asignación, edición de length/area/height).
+  const summaryDeps = elements
+    .map((e) => `${e.id}:${e.length_m}:${e.area_m2}:${e.height_m}:${e.materials.map((m) => m.id).join(",")}`)
+    .join("|");
+  useEffect(() => {
+    let cancelled = false;
+    setSummaryLoading(true);
+    api
+      .getMaterialsSummary(planId, page)
+      .then((data) => {
+        if (!cancelled) setSummary(data);
+      })
+      .catch(() => {
+        if (!cancelled) setSummary([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [planId, page, summaryDeps]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -466,8 +563,56 @@ export default function PlanViewerInner({
   }
 
   function goToPage(n: number) {
-    const clamped = Math.max(1, Math.min(totalPages, n));
-    if (clamped !== page) setPage(clamped);
+    if (activePages.length === 0) return;
+    if (activePages.includes(n)) {
+      if (n !== page) setPage(n);
+      return;
+    }
+    // Si la página pedida no es válida (eliminada o fuera de rango), ir a la más cercana activa
+    const closest = activePages.reduce((prev, curr) =>
+      Math.abs(curr - n) < Math.abs(prev - n) ? curr : prev,
+    );
+    if (closest !== page) setPage(closest);
+  }
+
+  function goToFirstActive() {
+    if (activePages.length > 0) setPage(activePages[0]);
+  }
+
+  function goToLastActive() {
+    if (activePages.length > 0) setPage(activePages[activePages.length - 1]);
+  }
+
+  function goToPrevActive() {
+    const idx = activePages.indexOf(page);
+    if (idx > 0) setPage(activePages[idx - 1]);
+  }
+
+  function goToNextActive() {
+    const idx = activePages.indexOf(page);
+    if (idx >= 0 && idx < activePages.length - 1) setPage(activePages[idx + 1]);
+  }
+
+  async function applyDeletePage(p: number) {
+    setPageBusy(true);
+    try {
+      const updated = await api.deletePage(planId, p);
+      onPlanUpdated?.(updated);
+      setConfirmDeletePage(null);
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al eliminar página");
+    } finally {
+      setPageBusy(false);
+    }
+  }
+
+  async function handleRestorePage(p: number) {
+    try {
+      const updated = await api.restorePage(planId, p);
+      onPlanUpdated?.(updated);
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al restaurar página");
+    }
   }
 
   function startCalibration() {
@@ -521,7 +666,7 @@ export default function PlanViewerInner({
     setCalError(null);
     try {
       const updated = await api.setBulkScaleRatios(planId, payload);
-      onScaleCalibrated?.(updated);
+      onPlanUpdated?.(updated);
       setDetectedPreview(null);
     } catch (err) {
       setCalError(err instanceof Error ? err.message : "Error al guardar las escalas");
@@ -556,7 +701,7 @@ export default function PlanViewerInner({
         meters,
         page,
       );
-      onScaleCalibrated?.(updated);
+      onPlanUpdated?.(updated);
       setDistanceModalOpen(false);
       setDistanceInput("");
       setCalPoints([]);
@@ -568,12 +713,159 @@ export default function PlanViewerInner({
     }
   }
 
-  async function deleteElementById(id: number) {
+  function toggleSelected(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set(elements.map((e) => e.id)));
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function requestDelete(ids: number[]) {
+    if (ids.length === 0) return;
+    const label =
+      ids.length === 1
+        ? (() => {
+            const el = elements.find((e) => e.id === ids[0]);
+            return el?.geometry.label ?? labelFor(el?.type ?? "wall", 1);
+          })()
+        : `${ids.length} elementos`;
+    setConfirmDelete({ ids, label });
+  }
+
+  async function applyDelete(ids: number[]) {
+    setBulkBusy(true);
     try {
-      await api.deleteElement(planId, id);
-      setElements((prev) => prev.filter((e) => e.id !== id));
+      if (ids.length === 1) {
+        await api.deleteElement(planId, ids[0]);
+      } else {
+        await api.bulkDeleteElements(planId, ids);
+      }
+      setElements((prev) => prev.filter((e) => !ids.includes(e.id)));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (editingId !== null && ids.includes(editingId)) setEditingId(null);
+      setConfirmDelete(null);
     } catch (err) {
       setDrawError(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function applyScale(factor: number) {
+    if (!Number.isFinite(factor) || factor <= 0) {
+      setDrawError("Factor inválido");
+      return;
+    }
+    const targets = elements.filter((e) => selectedIds.has(e.id));
+    if (targets.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const updated = await Promise.all(
+        targets.map((el) => {
+          const patch: { length_m?: number; area_m2?: number } = {};
+          if (el.length_m != null) patch.length_m = el.length_m * factor;
+          if (el.area_m2 != null) patch.area_m2 = el.area_m2 * factor * factor;
+          return api.updateElement(planId, el.id, patch);
+        }),
+      );
+      setElements((prev) => prev.map((el) => updated.find((u) => u.id === el.id) ?? el));
+      setScaleModalOpen(false);
+      setScaleFactor("1");
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al escalar");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function assignMaterialToElement(elementId: number, materialId: number) {
+    try {
+      const updated = await api.assignMaterial(planId, elementId, materialId);
+      setElements((prev) => prev.map((e) => (e.id === elementId ? updated : e)));
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al asignar material");
+    }
+  }
+
+  async function removeMaterialFromElement(elementId: number, materialId: number) {
+    try {
+      const updated = await api.removeMaterial(planId, elementId, materialId);
+      setElements((prev) => prev.map((e) => (e.id === elementId ? updated : e)));
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al quitar material");
+    }
+  }
+
+  async function applyBulkAssign(materialId: number) {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const updated = await api.bulkAssignMaterial(planId, ids, materialId);
+      setElements((prev) => prev.map((el) => updated.find((u) => u.id === el.id) ?? el));
+      setBulkAssignOpen(false);
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al asignar en lote");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExporting(true);
+    try {
+      const blob = await api.exportXlsx(planId, page);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `computo_plan${planId}_p${page}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al exportar");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function updateElementInline(
+    id: number,
+    patch: { label?: string; height_m?: number; length_m?: number },
+  ) {
+    const el = elements.find((e) => e.id === id);
+    if (!el) return;
+    const apiPatch: { geometry?: ElementGeometry; height_m?: number; length_m?: number } = {};
+    if (patch.label !== undefined) {
+      apiPatch.geometry = { ...el.geometry, label: patch.label };
+    }
+    if (patch.height_m !== undefined) {
+      apiPatch.height_m = patch.height_m;
+    }
+    if (patch.length_m !== undefined) {
+      apiPatch.length_m = patch.length_m;
+    }
+    if (Object.keys(apiPatch).length === 0) return;
+    try {
+      const updated = await api.updateElement(planId, id, apiPatch);
+      setElements((prev) => prev.map((e) => (e.id === id ? updated : e)));
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al guardar");
     }
   }
 
@@ -661,10 +953,29 @@ export default function PlanViewerInner({
 
       <div className="flex flex-col gap-3 lg:flex-row" style={{ minHeight: height + 80 }}>
         {/* PANEL IZQUIERDO — Elementos */}
-        <aside className="w-full shrink-0 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
-          <h3 className="mb-1 text-sm font-bold text-slate-800 dark:text-slate-100">
-            Elementos
-          </h3>
+        <aside className="flex w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+              Elementos
+            </h3>
+            {elements.length > 0 && (
+              <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 select-none">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === elements.length && elements.length > 0}
+                  ref={(el) => {
+                    if (el) {
+                      el.indeterminate =
+                        selectedIds.size > 0 && selectedIds.size < elements.length;
+                    }
+                  }}
+                  onChange={(e) => (e.target.checked ? selectAll() : clearSelection())}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-1 focus:ring-brand dark:border-slate-600 dark:bg-slate-900"
+                />
+                Todos
+              </label>
+            )}
+          </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             Página {page} · {elements.length} dibujado{elements.length === 1 ? "" : "s"}
           </p>
@@ -691,8 +1002,52 @@ export default function PlanViewerInner({
             </div>
           </div>
 
+          {/* Barra de acciones bulk */}
+          {selectedIds.size > 0 && (
+            <div className="mb-2 flex items-center justify-between gap-1 rounded-lg border border-brand/30 bg-sky-50/60 px-2 py-1.5 text-xs dark:border-sky-800 dark:bg-sky-950/30">
+              <span className="font-semibold text-brand dark:text-sky-300">
+                {selectedIds.size} seleccionado{selectedIds.size === 1 ? "" : "s"}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setBulkAssignOpen(true)}
+                  className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Asignar el mismo material a todos los seleccionados"
+                >
+                  Asignar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScaleModalOpen(true)}
+                  className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Escalar dimensiones de los elementos seleccionados"
+                >
+                  Escalar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => requestDelete([...selectedIds])}
+                  className="rounded px-1.5 py-0.5 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                  title="Eliminar seleccionados"
+                >
+                  Eliminar
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-white dark:text-slate-400 dark:hover:bg-slate-800"
+                  title="Limpiar selección"
+                  aria-label="Limpiar selección"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
           {elementsLoading ? (
-            <p className="text-center text-xs text-slate-400 py-4">Cargando elementos...</p>
+            <p className="py-4 text-center text-xs text-slate-400">Cargando elementos...</p>
           ) : elements.length === 0 ? (
             <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
               <div>
@@ -701,50 +1056,89 @@ export default function PlanViewerInner({
               </div>
             </div>
           ) : (
-            <ul className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
-              {elements.map((el, idx) => (
-                <li
-                  key={el.id}
-                  onMouseEnter={() => setHoveredId(el.id)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs transition ${
-                    hoveredId === el.id
-                      ? "border-brand bg-sky-50/60 dark:border-sky-500 dark:bg-sky-950/30"
-                      : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-                  }`}
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                      style={{
-                        backgroundColor:
-                          el.type === "wall" ? "#2563eb"
-                          : el.type === "room" ? "#22c55e"
-                          : "#ea580c",
-                      }}
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
-                        {el.geometry.label ?? labelFor(el.type, idx + 1)}
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        {el.type === "wall" && `${el.length_m?.toFixed(2)} m`}
-                        {el.type === "room" && `${el.area_m2?.toFixed(2)} m²`}
-                        {el.type === "opening" && `${el.length_m?.toFixed(2)} m ancho`}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => deleteElementById(el.id)}
-                    title="Eliminar"
-                    aria-label="Eliminar elemento"
-                    className="rounded p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+            <ul className="max-h-[480px] flex-1 space-y-1.5 overflow-y-auto pr-1">
+              {elements.map((el, idx) => {
+                const selected = selectedIds.has(el.id);
+                const editing = editingId === el.id;
+                const hovered = hoveredId === el.id;
+                return (
+                  <li
+                    key={el.id}
+                    onMouseEnter={() => setHoveredId(el.id)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    className={`rounded-md border text-xs transition ${
+                      selected
+                        ? "border-brand bg-sky-50/70 dark:border-sky-500 dark:bg-sky-950/40"
+                        : hovered || editing
+                          ? "border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50"
+                          : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+                    }`}
                   >
-                    <TrashIcon />
-                  </button>
-                </li>
-              ))}
+                    <div className="flex items-center gap-2 px-2 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleSelected(el.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand focus:ring-1 focus:ring-brand dark:border-slate-600 dark:bg-slate-900"
+                        aria-label="Seleccionar elemento"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(editing ? null : el.id)}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        aria-expanded={editing}
+                      >
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                          style={{
+                            backgroundColor:
+                              el.type === "wall" ? "#2563eb"
+                              : el.type === "room" ? "#22c55e"
+                              : "#ea580c",
+                          }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
+                            {el.geometry.label ?? labelFor(el.type, idx + 1)}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            {el.type === "wall" && `${el.length_m?.toFixed(2)} m · alt ${(el.height_m ?? 2.8).toFixed(2)} m`}
+                            {el.type === "room" && `${el.area_m2?.toFixed(2)} m² · perím ${el.length_m?.toFixed(2)} m`}
+                            {el.type === "opening" && `${el.length_m?.toFixed(2)} m ancho · alt ${(el.height_m ?? 2.1).toFixed(2)} m`}
+                          </p>
+                        </div>
+                        <ChevronIcon open={editing} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => requestDelete([el.id])}
+                        title="Eliminar"
+                        aria-label="Eliminar elemento"
+                        className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      >
+                        <TrashIcon />
+                      </button>
+                    </div>
+                    {editing && (
+                      <>
+                        <InlineEditForm
+                          element={el}
+                          defaultLabel={el.geometry.label ?? labelFor(el.type, idx + 1)}
+                          pageScale={currentPageScale}
+                          onSave={(patch) => updateElementInline(el.id, patch)}
+                        />
+                        <ElementMaterialsBlock
+                          element={el}
+                          materialsList={materialsList}
+                          onAssign={(materialId) => assignMaterialToElement(el.id, materialId)}
+                          onRemove={(materialId) => removeMaterialFromElement(el.id, materialId)}
+                        />
+                      </>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </aside>
@@ -753,13 +1147,21 @@ export default function PlanViewerInner({
         <div className="min-w-0 flex-1">
           {/* Controles de página */}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-            {totalPages > 1 ? (
+            {activePages.length > 1 ? (
               <>
                 <div className="flex items-center gap-1">
-                  <PageButton onClick={() => goToPage(1)} disabled={page === 1} title="Primera página">
+                  <PageButton
+                    onClick={goToFirstActive}
+                    disabled={page === activePages[0]}
+                    title="Primera página"
+                  >
                     «
                   </PageButton>
-                  <PageButton onClick={() => goToPage(page - 1)} disabled={page === 1} title="Anterior">
+                  <PageButton
+                    onClick={goToPrevActive}
+                    disabled={page === activePages[0]}
+                    title="Anterior"
+                  >
                     ‹ Anterior
                   </PageButton>
                 </div>
@@ -774,18 +1176,28 @@ export default function PlanViewerInner({
                     className="w-16 rounded border border-slate-300 px-2 py-1 text-center dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                   />
                   <span>de {totalPages}</span>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeletePage(page)}
+                    title="Ocultar esta página de la vista"
+                    aria-label="Eliminar página"
+                    className="ml-2 flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/60"
+                  >
+                    <TrashIcon />
+                    Eliminar
+                  </button>
                 </div>
                 <div className="flex items-center gap-1">
                   <PageButton
-                    onClick={() => goToPage(page + 1)}
-                    disabled={page === totalPages}
+                    onClick={goToNextActive}
+                    disabled={page === activePages[activePages.length - 1]}
                     title="Siguiente"
                   >
                     Siguiente ›
                   </PageButton>
                   <PageButton
-                    onClick={() => goToPage(totalPages)}
-                    disabled={page === totalPages}
+                    onClick={goToLastActive}
+                    disabled={page === activePages[activePages.length - 1]}
                     title="Última página"
                   >
                     »
@@ -793,9 +1205,56 @@ export default function PlanViewerInner({
                 </div>
               </>
             ) : (
-              <div />
+              <div className="flex w-full items-center justify-between gap-2 text-slate-600 dark:text-slate-300">
+                <span>
+                  Página {page} de {totalPages}
+                  {activePages.length === 1 && totalPages > 1 && (
+                    <span className="ml-2 text-xs text-slate-400">
+                      (única página activa)
+                    </span>
+                  )}
+                </span>
+                {totalPages > 1 && activePages.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeletePage(page)}
+                    title="Ocultar esta página de la vista"
+                    className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/60"
+                  >
+                    <TrashIcon />
+                    Eliminar página
+                  </button>
+                )}
+              </div>
             )}
           </div>
+
+          {/* Páginas ocultadas */}
+          {(deletedPages ?? []).length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50/40 px-2.5 py-1.5 text-xs dark:border-slate-800 dark:bg-slate-950/30">
+              <span className="font-semibold text-slate-500 dark:text-slate-400">
+                Páginas ocultadas:
+              </span>
+              {(deletedPages ?? [])
+                .slice()
+                .sort((a, b) => a - b)
+                .map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => handleRestorePage(p)}
+                    title="Restaurar página"
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 font-medium text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    Pág. {p}
+                    <span className="text-slate-400" aria-hidden>
+                      +
+                    </span>
+                    <span className="sr-only">Restaurar</span>
+                  </button>
+                ))}
+            </div>
+          )}
 
           {calibrating && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700 dark:bg-amber-950/40">
@@ -921,15 +1380,27 @@ export default function PlanViewerInner({
                         const pts = chunkPoints(el.geometry.points);
                         const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                         const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
                         return (
-                          <polygon
-                            key={el.id}
-                            points={ptsStr}
-                            fill={hovered ? "rgba(34, 197, 94, 0.45)" : "rgba(34, 197, 94, 0.22)"}
-                            stroke={hovered ? "#16a34a" : "#22c55e"}
-                            strokeWidth={(hovered ? 3 : 2) / scale}
-                            strokeLinejoin="round"
-                          />
+                          <g key={el.id}>
+                            <polygon
+                              points={ptsStr}
+                              fill={hovered ? "rgba(34, 197, 94, 0.45)" : "rgba(34, 197, 94, 0.22)"}
+                              stroke={hovered ? "#16a34a" : "#22c55e"}
+                              strokeWidth={(hovered ? 3 : 2) / scale}
+                              strokeLinejoin="round"
+                            />
+                            {sel && (
+                              <polygon
+                                points={ptsStr}
+                                fill="none"
+                                stroke="#1f4e8c"
+                                strokeWidth={3 / scale}
+                                strokeDasharray={`${8 / scale} ${4 / scale}`}
+                                strokeLinejoin="round"
+                              />
+                            )}
+                          </g>
                         );
                       })}
 
@@ -939,18 +1410,32 @@ export default function PlanViewerInner({
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
                         return (
-                          <line
-                            key={el.id}
-                            x1={x1}
-                            y1={y1}
-                            x2={x2}
-                            y2={y2}
-                            stroke={hovered ? "#3b82f6" : "#2563eb"}
-                            strokeWidth={(hovered ? 8 : 6) / scale}
-                            strokeLinecap="round"
-                            opacity={0.85}
-                          />
+                          <g key={el.id}>
+                            {sel && (
+                              <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                stroke="#1f4e8c"
+                                strokeWidth={12 / scale}
+                                strokeLinecap="round"
+                                opacity={0.35}
+                              />
+                            )}
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke={hovered ? "#3b82f6" : "#2563eb"}
+                              strokeWidth={(hovered ? 8 : 6) / scale}
+                              strokeLinecap="round"
+                              opacity={0.85}
+                            />
+                          </g>
                         );
                       })}
 
@@ -960,18 +1445,32 @@ export default function PlanViewerInner({
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
                         return (
-                          <line
-                            key={el.id}
-                            x1={x1}
-                            y1={y1}
-                            x2={x2}
-                            y2={y2}
-                            stroke={hovered ? "#fb923c" : "#ea580c"}
-                            strokeWidth={(hovered ? 10 : 8) / scale}
-                            strokeLinecap="square"
-                            opacity={0.9}
-                          />
+                          <g key={el.id}>
+                            {sel && (
+                              <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                stroke="#1f4e8c"
+                                strokeWidth={14 / scale}
+                                strokeLinecap="square"
+                                opacity={0.35}
+                              />
+                            )}
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke={hovered ? "#fb923c" : "#ea580c"}
+                              strokeWidth={(hovered ? 10 : 8) / scale}
+                              strokeLinecap="square"
+                              opacity={0.9}
+                            />
+                          </g>
                         );
                       })}
 
@@ -1163,24 +1662,309 @@ export default function PlanViewerInner({
           )}
         </div>
 
-        {/* PANEL DERECHO — Cómputo (placeholder Etapa 5) */}
-        <aside className="w-full shrink-0 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
-          <h3 className="mb-1 text-sm font-bold text-slate-800 dark:text-slate-100">
-            Cómputo
-          </h3>
-          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Cantidades acumuladas por material.
-          </p>
-          <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
-            <div>
-              <p className="font-medium">Sin materiales asignados</p>
-              <p className="mt-1">
-                Asigná materiales a los elementos para ver el cómputo agregado.
-              </p>
-            </div>
+        {/* PANEL DERECHO — Cómputo */}
+        <aside className="flex w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+              Cómputo
+            </h3>
+            <button
+              type="button"
+              onClick={downloadXlsx}
+              disabled={exporting || summary.length === 0}
+              title="Exportar a Excel"
+              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              {exporting ? "..." : "XLSX"}
+            </button>
           </div>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            Página {page} · cantidades por material
+          </p>
+
+          {summaryLoading ? (
+            <p className="py-4 text-center text-xs text-slate-400">Calculando...</p>
+          ) : summary.length === 0 ? (
+            <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
+              <div>
+                <p className="font-medium">Sin materiales asignados</p>
+                <p className="mt-1">
+                  Asigná materiales a los elementos para ver el cómputo agregado.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="max-h-[420px] flex-1 space-y-1.5 overflow-y-auto pr-1">
+                {summary.map((item) => (
+                  <div
+                    key={item.material.id}
+                    className="rounded-md border border-slate-100 bg-slate-50/30 px-2 py-1.5 dark:border-slate-800 dark:bg-slate-950/30"
+                  >
+                    <div className="flex items-start justify-between gap-2 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
+                          {item.material.name}
+                        </p>
+                        <p className="text-[10px] text-slate-400">{item.material.category}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-bold text-brand dark:text-sky-400">
+                          {item.quantity.toLocaleString(undefined, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 2,
+                          })}
+                          <span className="ml-1 text-[10px] font-semibold text-slate-500">
+                            {item.unit}
+                          </span>
+                        </p>
+                        {item.subtotal > 0 && (
+                          <p className="text-[10px] text-slate-500">
+                            ${item.subtotal.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {summary.some((s) => s.subtotal > 0) && (
+                <div className="mt-2 flex items-center justify-between rounded-md border border-brand/30 bg-sky-50/60 px-2 py-1.5 text-xs font-bold dark:border-sky-800 dark:bg-sky-950/30">
+                  <span className="text-slate-700 dark:text-slate-200">Total estimado</span>
+                  <span className="text-brand dark:text-sky-300">
+                    ${summary.reduce((a, s) => a + s.subtotal, 0).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
         </aside>
       </div>
+
+      {/* Modal confirmación eliminar */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => !bulkBusy && setConfirmDelete(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+          >
+            <h3 className="text-lg font-semibold">Eliminar elemento{confirmDelete.ids.length === 1 ? "" : "s"}</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              ¿Eliminar <span className="font-semibold">{confirmDelete.label}</span>? Esta acción no se puede deshacer.
+            </p>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(null)}
+                disabled={bulkBusy}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => applyDelete(confirmDelete.ids)}
+                disabled={bulkBusy}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {bulkBusy ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal eliminar página */}
+      {confirmDeletePage != null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => !pageBusy && setConfirmDeletePage(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+          >
+            <h3 className="text-lg font-semibold">Eliminar página {confirmDeletePage}</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              La página queda oculta de la navegación y se eliminan los elementos dibujados en ella.
+              Podés restaurarla después desde la lista de páginas ocultadas, pero los elementos no
+              se recuperan.
+            </p>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeletePage(null)}
+                disabled={pageBusy}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => applyDeletePage(confirmDeletePage)}
+                disabled={pageBusy}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {pageBusy ? "Eliminando..." : "Eliminar página"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal bulk-assign material */}
+      {bulkAssignOpen && (() => {
+        const selectedElements = elements.filter((e) => selectedIds.has(e.id));
+        const selectedTypes = Array.from(new Set(selectedElements.map((e) => e.type)));
+        const bulkApplicable = materialsList.filter((mat) =>
+          selectedTypes.every((t) => applicableMaterials(t, [mat]).length > 0),
+        );
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+            onClick={() => !bulkBusy && setBulkAssignOpen(false)}
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (bulkAssignMaterialId != null) applyBulkAssign(bulkAssignMaterialId);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+            >
+              <div>
+                <h3 className="text-lg font-semibold">
+                  Asignar material a {selectedIds.size} elemento{selectedIds.size === 1 ? "" : "s"}
+                </h3>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Tipos seleccionados: {selectedTypes.map((t) => labelFor(t, 0).split(" ")[0]).join(", ")}
+                </p>
+              </div>
+
+              {materialsList.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  El catálogo está vacío.{" "}
+                  <a href="/materials" className="font-medium text-brand hover:underline dark:text-sky-400">
+                    Crear materiales →
+                  </a>
+                </p>
+              ) : bulkApplicable.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  Ningún material del catálogo aplica a la mezcla de tipos seleccionada.
+                  Probá seleccionar elementos de un solo tipo.
+                </p>
+              ) : (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium">Material</span>
+                  <select
+                    autoFocus
+                    value={bulkAssignMaterialId ?? ""}
+                    onChange={(e) =>
+                      setBulkAssignMaterialId(e.target.value ? parseInt(e.target.value, 10) : null)
+                    }
+                    className="rounded-md border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
+                  >
+                    <option value="">Seleccioná un material</option>
+                    {bulkApplicable.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.category} · {m.unit})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Si el material ya está asignado a algún elemento de la selección, se omite.
+                  </span>
+                </label>
+              )}
+
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkAssignOpen(false)}
+                  disabled={bulkBusy}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkBusy || bulkAssignMaterialId == null || bulkApplicable.length === 0}
+                  className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+                >
+                  {bulkBusy ? "Asignando..." : "Asignar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
+
+      {/* Modal escalar selección */}
+      {scaleModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => !bulkBusy && setScaleModalOpen(false)}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              applyScale(parseFloat(scaleFactor.replace(",", ".")));
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+          >
+            <div>
+              <h3 className="text-lg font-semibold">
+                Escalar {selectedIds.size} elemento{selectedIds.size === 1 ? "" : "s"}
+              </h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Multiplica las dimensiones físicas (largo, perímetro, área) por el factor.
+                Útil cuando la escala del plano se recalibra después de dibujar.
+              </p>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Factor</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                autoFocus
+                value={scaleFactor}
+                onChange={(e) => setScaleFactor(e.target.value)}
+                className="rounded-md border border-slate-300 px-3 py-2 text-lg focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
+              />
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Ej: 0.5 reduce a la mitad · 2 duplica · 1.1 aumenta 10%. Las áreas se escalan al cuadrado.
+              </span>
+            </label>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setScaleModalOpen(false)}
+                disabled={bulkBusy}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={bulkBusy || !scaleFactor.trim()}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+              >
+                {bulkBusy ? "Aplicando..." : "Aplicar"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Modal calibración */}
       {distanceModalOpen && (
@@ -1488,5 +2272,261 @@ function TrashIcon() {
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
       <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
     </svg>
+  );
+}
+
+function ElementMaterialsBlock({
+  element,
+  materialsList,
+  onAssign,
+  onRemove,
+}: {
+  element: DetectedElement;
+  materialsList: Material[];
+  onAssign: (materialId: number) => void;
+  onRemove: (materialId: number) => void;
+}) {
+  const assignedIds = new Set(element.materials.map((m) => m.id));
+  const available = applicableMaterials(element.type, materialsList).filter(
+    (m) => !assignedIds.has(m.id),
+  );
+
+  return (
+    <div className="space-y-1.5 border-t border-slate-200 px-2 pb-2.5 pt-2 dark:border-slate-800">
+      <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-slate-400">
+        <span>Materiales</span>
+        {element.materials.length > 0 && (
+          <span className="text-slate-300">{element.materials.length}</span>
+        )}
+      </div>
+
+      {element.materials.length > 0 && (
+        <div className="space-y-1">
+          {element.materials.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center justify-between gap-2 rounded bg-slate-100/60 px-1.5 py-1 text-[11px] dark:bg-slate-800/40"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium text-slate-700 dark:text-slate-200" title={m.name}>
+                  {m.name}
+                </p>
+                <p className="text-[9px] text-slate-400">{m.unit}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(m.id)}
+                title="Quitar material"
+                aria-label={`Quitar material ${m.name}`}
+                className="rounded p-0.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {available.length > 0 ? (
+        <select
+          value=""
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val) onAssign(parseInt(val, 10));
+          }}
+          className="w-full rounded border border-dashed border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-600 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:focus:border-sky-400"
+        >
+          <option value="">+ Asignar material</option>
+          {available.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} ({m.category} · {m.unit})
+            </option>
+          ))}
+        </select>
+      ) : materialsList.length === 0 ? (
+        <p className="text-[10px] italic text-slate-400">
+          No hay materiales en el catálogo. <a href="/materials" className="text-brand hover:underline dark:text-sky-400">Crear catálogo</a>
+        </p>
+      ) : (
+        <p className="text-[10px] italic text-slate-400">
+          Todos los materiales aplicables ya están asignados.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function InlineEditForm({
+  element,
+  defaultLabel,
+  pageScale,
+  onSave,
+}: {
+  element: DetectedElement;
+  defaultLabel: string;
+  pageScale: number | null;
+  onSave: (patch: { label?: string; height_m?: number; length_m?: number }) => void;
+}) {
+  const defaultHeight = element.type === "opening" ? 2.1 : 2.8;
+  const [label, setLabel] = useState(defaultLabel);
+  const [heightStr, setHeightStr] = useState(String(element.height_m ?? defaultHeight));
+  const [lengthStr, setLengthStr] = useState(
+    element.length_m != null ? element.length_m.toFixed(3) : "",
+  );
+
+  // Re-sync inputs cuando el elemento cambia (post-save o cambio de pestaña)
+  useEffect(() => {
+    setLabel(element.geometry.label ?? defaultLabel);
+    setHeightStr(String(element.height_m ?? defaultHeight));
+    setLengthStr(element.length_m != null ? element.length_m.toFixed(3) : "");
+  }, [element.id, element.geometry.label, element.height_m, element.length_m, defaultLabel, defaultHeight]);
+
+  const canEditLength = element.type === "wall" || element.type === "opening";
+  const lengthInputLabel = element.type === "opening" ? "Ancho (m)" : "Largo (m)";
+
+  const geoLength = geometricLengthM(element, pageScale);
+  const isEdited =
+    canEditLength &&
+    geoLength != null &&
+    element.length_m != null &&
+    Math.abs(geoLength - element.length_m) > 0.01;
+
+  function commitLabel() {
+    const trimmed = label.trim();
+    if (trimmed && trimmed !== (element.geometry.label ?? defaultLabel)) {
+      onSave({ label: trimmed });
+    } else {
+      setLabel(element.geometry.label ?? defaultLabel);
+    }
+  }
+
+  function commitHeight() {
+    const parsed = parseFloat(heightStr.replace(",", "."));
+    if (Number.isFinite(parsed) && parsed > 0 && parsed !== element.height_m) {
+      onSave({ height_m: parsed });
+    } else {
+      setHeightStr(String(element.height_m ?? defaultHeight));
+    }
+  }
+
+  function commitLength() {
+    const parsed = parseFloat(lengthStr.replace(",", "."));
+    if (
+      Number.isFinite(parsed) &&
+      parsed > 0 &&
+      element.length_m != null &&
+      Math.abs(parsed - element.length_m) > 0.001
+    ) {
+      onSave({ length_m: parsed });
+    } else if (element.length_m != null) {
+      setLengthStr(element.length_m.toFixed(3));
+    }
+  }
+
+  function restoreFromGeometry() {
+    if (geoLength == null) return;
+    setLengthStr(geoLength.toFixed(3));
+    onSave({ length_m: geoLength });
+  }
+
+  return (
+    <div className="space-y-1.5 border-t border-slate-200 px-2 pt-2 pb-2.5 dark:border-slate-800">
+      <label className="flex items-center justify-between gap-2 text-[11px]">
+        <span className="text-slate-500 dark:text-slate-400">Nombre</span>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={commitLabel}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="w-36 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-sky-400"
+        />
+      </label>
+
+      {canEditLength && (
+        <label className="flex items-center justify-between gap-2 text-[11px]">
+          <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+            {lengthInputLabel}
+            {isEdited && (
+              <button
+                type="button"
+                onClick={restoreFromGeometry}
+                title={`Editado a mano. Valor de la geometría: ${geoLength?.toFixed(3)} m. Clic para restaurar.`}
+                className="rounded-full bg-amber-100 px-1.5 py-[1px] text-[9px] font-semibold uppercase leading-tight text-amber-700 hover:bg-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-900/70"
+              >
+                editado
+              </button>
+            )}
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={lengthStr}
+            onChange={(e) => setLengthStr(e.target.value)}
+            onBlur={commitLength}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className="w-36 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-sky-400"
+          />
+        </label>
+      )}
+
+      <label className="flex items-center justify-between gap-2 text-[11px]">
+        <span className="text-slate-500 dark:text-slate-400">Altura (m)</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={heightStr}
+          onChange={(e) => setHeightStr(e.target.value)}
+          onBlur={commitHeight}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="w-36 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-sky-400"
+        />
+      </label>
+
+      <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] text-slate-400">
+        <span>
+          {element.type === "wall" && `Dibujado ${geoLength?.toFixed(2) ?? "—"} m`}
+          {element.type === "room" && `Área ${element.area_m2?.toFixed(2)} m² · Perím ${element.length_m?.toFixed(2)} m`}
+          {element.type === "opening" && `Dibujado ${geoLength?.toFixed(2) ?? "—"} m`}
+        </span>
+        <span className="text-slate-300">Enter guarda</span>
+      </div>
+    </div>
   );
 }

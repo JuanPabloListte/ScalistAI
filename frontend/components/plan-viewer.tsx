@@ -17,10 +17,11 @@ export function PlanViewer(props: {
   planId: number;
   pageCount?: number | null;
   pageScales?: Record<string, number> | null;
+  deletedPages?: number[] | null;
   scaleSource?: string | null;
   planDpi?: number | null;
   calRequest?: { page: number; ts: number } | null;
-  onScaleCalibrated?: (plan: Plan) => void;
+  onPlanUpdated?: (plan: Plan) => void;
   height?: number;
 }) {
   return <PlanViewerInner {...props} />;

@@ -137,10 +137,11 @@ export default function ProjectDetailPage() {
             planId={activePlan.id}
             pageCount={activePlan.page_count}
             pageScales={activePlan.page_scales}
+            deletedPages={activePlan.deleted_pages}
             scaleSource={activePlan.scale_source}
             planDpi={activePlan.dpi}
             calRequest={calRequest}
-            onScaleCalibrated={(updated) =>
+            onPlanUpdated={(updated) =>
               setPlans((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
             }
           />

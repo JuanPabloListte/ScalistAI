@@ -19,6 +19,7 @@ export type Plan = {
   scale_px_per_m: number | null;
   scale_source: string | null;
   page_scales: Record<string, number> | null;
+  deleted_pages: number[] | null;
   created_at: string;
 };
 
@@ -77,6 +78,35 @@ export type ElementUpdatePayload = {
   length_m?: number | null;
   area_m2?: number | null;
   height_m?: number | null;
+};
+
+export type MaterialYieldInput = {
+  applies_to: string; // wall | room_floor | room_wall | room_perimeter | opening | opening_perimeter
+  consumption: number;
+  waste_factor: number;
+  unit_price: number;
+};
+
+export type MaterialCreatePayload = {
+  name: string;
+  category: string;
+  unit: string;
+  yields: MaterialYieldInput[];
+};
+
+export type MaterialUpdatePayload = {
+  name?: string;
+  category?: string;
+  unit?: string;
+  yields?: MaterialYieldInput[];
+};
+
+export type MaterialSummaryItem = {
+  material: Material;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  subtotal: number;
 };
 
 function getToken(): string | null {
@@ -205,6 +235,18 @@ export const api = {
       method: "DELETE",
     }),
 
+  deletePage: (planId: number, page: number) =>
+    request<Plan>(`/api/v1/plans/${planId}/delete-page/${page}`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  restorePage: (planId: number, page: number) =>
+    request<Plan>(`/api/v1/plans/${planId}/restore-page/${page}`, {
+      method: "POST",
+      body: "{}",
+    }),
+
   fetchPlanRaster: async (planId: number, page = 1): Promise<Blob> => {
     const token = getToken();
     const res = await fetch(`${API_URL}/api/v1/plans/${planId}/raster?page=${page}`, {
@@ -265,5 +307,94 @@ export const api = {
     if (!res.ok && res.status !== 204) {
       throw new Error(`No se pudo eliminar en lote (HTTP ${res.status})`);
     }
+  },
+
+  // ----- Materiales (catálogo) -----
+  listMaterials: () => request<Material[]>("/api/v1/materials/"),
+
+  createMaterial: (payload: MaterialCreatePayload) =>
+    request<Material>("/api/v1/materials/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateMaterial: (id: number, payload: MaterialUpdatePayload) =>
+    request<Material>(`/api/v1/materials/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteMaterial: async (id: number): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/materials/${id}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`No se pudo eliminar el material (HTTP ${res.status})`);
+    }
+  },
+
+  // ----- Asignación elemento ↔ material -----
+  assignMaterial: (planId: number, elementId: number, materialId: number) =>
+    request<DetectedElement>(
+      `/api/v1/plans/${planId}/elements/${elementId}/materials`,
+      {
+        method: "POST",
+        body: JSON.stringify({ material_id: materialId }),
+      },
+    ),
+
+  removeMaterial: async (
+    planId: number,
+    elementId: number,
+    materialId: number,
+  ): Promise<DetectedElement> => {
+    const token = getToken();
+    const res = await fetch(
+      `${API_URL}/api/v1/plans/${planId}/elements/${elementId}/materials/${materialId}`,
+      {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
+    if (!res.ok) throw new Error(`No se pudo quitar el material (HTTP ${res.status})`);
+    return res.json() as Promise<DetectedElement>;
+  },
+
+  bulkAssignMaterial: (planId: number, elementIds: number[], materialId: number) =>
+    request<DetectedElement[]>(
+      `/api/v1/plans/${planId}/elements/bulk/materials`,
+      {
+        method: "POST",
+        body: JSON.stringify({ element_ids: elementIds, material_id: materialId }),
+      },
+    ),
+
+  bulkRemoveMaterial: (planId: number, elementIds: number[], materialId: number) =>
+    request<DetectedElement[]>(
+      `/api/v1/plans/${planId}/elements/bulk/materials/remove`,
+      {
+        method: "POST",
+        body: JSON.stringify({ element_ids: elementIds, material_id: materialId }),
+      },
+    ),
+
+  // ----- Cómputo agregado -----
+  getMaterialsSummary: (planId: number, page?: number) => {
+    const qs = page !== undefined ? `?page=${page}` : "";
+    return request<MaterialSummaryItem[]>(
+      `/api/v1/plans/${planId}/materials-summary${qs}`,
+    );
+  },
+
+  exportXlsx: async (planId: number, page?: number): Promise<Blob> => {
+    const token = getToken();
+    const qs = page !== undefined ? `?page=${page}` : "";
+    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/export/xlsx${qs}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`No se pudo exportar (HTTP ${res.status})`);
+    return res.blob();
   },
 };
