@@ -1198,15 +1198,17 @@ export default function PlanViewerInner({
 
   const processing = rendered !== null && rendered < totalPages;
   const detectedCount = pageScales ? Object.keys(pageScales).length : 0;
-  const cursor = calibrating
-    ? "crosshair"
-    : dragging
-      ? "grabbing"
-      : tool !== "pan" && !drawingDisabled
-        ? "crosshair"
-        : imgUrl
-          ? "grab"
-          : "default";
+  const cursor = draggingVertex
+    ? "grabbing"
+    : calibrating
+      ? "crosshair"
+      : dragging
+        ? "grabbing"
+        : tool !== "pan" && !drawingDisabled
+          ? "crosshair"
+          : imgUrl
+            ? "grab"
+            : "default";
 
   // Totales de la página actual (sidebar izquierdo)
   const totalWallM = elements
@@ -1816,7 +1818,10 @@ export default function PlanViewerInner({
               {/* Overlay SVG: elementos + preview + calibración */}
               {natural && (
                 <svg className="pointer-events-none absolute inset-0 h-full w-full">
-                  <g transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}>
+                  <g
+                    transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
+                    className={draggingVertex ? "pointer-events-none" : ""}
+                  >
                     {/* Recintos (atrás) */}
                     {elements
                       .filter((el) => el.type === "room")
@@ -1833,9 +1838,13 @@ export default function PlanViewerInner({
                               stroke={hovered ? "#16a34a" : "#22c55e"}
                               strokeWidth={(hovered ? 3 : 2) / scale}
                               strokeLinejoin="round"
-                              className="pointer-events-auto cursor-pointer"
-                              onMouseEnter={() => setHoveredId(el.id)}
-                              onMouseLeave={() => setHoveredId(null)}
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleSelected(el.id);
@@ -1906,9 +1915,13 @@ export default function PlanViewerInner({
                               y2={y2}
                               stroke="transparent"
                               strokeWidth={24 / scale}
-                              className="pointer-events-auto cursor-pointer"
-                              onMouseEnter={() => setHoveredId(el.id)}
-                              onMouseLeave={() => setHoveredId(null)}
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleSelected(el.id);
@@ -1995,9 +2008,13 @@ export default function PlanViewerInner({
                               y2={y2}
                               stroke="transparent"
                               strokeWidth={24 / scale}
-                              className="pointer-events-auto cursor-pointer"
-                              onMouseEnter={() => setHoveredId(el.id)}
-                              onMouseLeave={() => setHoveredId(null)}
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleSelected(el.id);
