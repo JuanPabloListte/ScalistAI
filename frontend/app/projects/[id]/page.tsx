@@ -71,7 +71,7 @@ export default function ProjectDetailPage() {
   const activePlan = plans.find((p) => p.id === activePlanId) ?? null;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="mx-auto max-w-screen-2xl px-6 py-10">
       <header className="mb-6">
         <a href="/projects" className="text-sm text-brand hover:underline dark:text-sky-400">
           ← Volver
@@ -106,7 +106,7 @@ export default function ProjectDetailPage() {
       </section>
 
       {activePlan && (
-        <section className="mb-8 rounded-xl bg-white p-6 shadow dark:bg-slate-800 dark:shadow-slate-950/50">
+        <section className="mb-8">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold">{activePlan.original_filename}</h2>
