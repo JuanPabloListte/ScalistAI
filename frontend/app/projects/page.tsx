@@ -29,11 +29,6 @@ export default function ProjectsPage() {
       .finally(() => setLoading(false));
   }, [router]);
 
-  function handleLogout() {
-    api.logout();
-    router.push("/login");
-  }
-
   function handleUpdated(updated: Project) {
     setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     setEditing(null);
@@ -46,14 +41,8 @@ export default function ProjectsPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
+      <header className="mb-8">
         <h1 className="text-3xl font-bold text-brand dark:text-sky-400">Proyectos</h1>
-        <button
-          onClick={handleLogout}
-          className="text-sm text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-        >
-          Cerrar sesión
-        </button>
       </header>
 
       <div className="mb-8 flex justify-end">

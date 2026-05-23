@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { ThemeToggle } from "@/components/theme-toggle";
+import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,8 +31,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        <ThemeToggle />
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
