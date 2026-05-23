@@ -22,6 +22,63 @@ export type Plan = {
   created_at: string;
 };
 
+export type ElementType = "wall" | "room" | "opening";
+
+export type ElementGeometry = {
+  points: number[]; // flat [x1, y1, x2, y2, ...]
+  label?: string;
+  subtype?: string;
+};
+
+export type MaterialYield = {
+  id: number;
+  material_id: number;
+  applies_to: string;
+  consumption: number;
+  waste_factor: number;
+  unit_price: number;
+};
+
+export type Material = {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  yields: MaterialYield[];
+};
+
+export type DetectedElement = {
+  id: number;
+  plan_id: number;
+  page: number;
+  type: ElementType;
+  geometry: ElementGeometry;
+  length_m: number | null;
+  area_m2: number | null;
+  height_m: number | null;
+  source: "manual" | "ai";
+  created_at: string;
+  updated_at: string;
+  materials: Material[];
+};
+
+export type ElementCreatePayload = {
+  page: number;
+  type: ElementType;
+  geometry: ElementGeometry;
+  length_m?: number | null;
+  area_m2?: number | null;
+  height_m?: number | null;
+  source?: "manual" | "ai";
+};
+
+export type ElementUpdatePayload = {
+  geometry?: ElementGeometry;
+  length_m?: number | null;
+  area_m2?: number | null;
+  height_m?: number | null;
+};
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("muroai_token");
@@ -155,5 +212,58 @@ export const api = {
     });
     if (!res.ok) throw new Error(`No se pudo cargar el raster (HTTP ${res.status})`);
     return res.blob();
+  },
+
+  listElements: (planId: number, page?: number) => {
+    const qs = page !== undefined ? `?page=${page}` : "";
+    return request<DetectedElement[]>(`/api/v1/plans/${planId}/elements${qs}`);
+  },
+
+  createElement: (planId: number, payload: ElementCreatePayload) =>
+    request<DetectedElement>(`/api/v1/plans/${planId}/elements`, {
+      method: "POST",
+      body: JSON.stringify({
+        source: "manual",
+        height_m: 2.8,
+        ...payload,
+      }),
+    }),
+
+  updateElement: (planId: number, elementId: number, patch: ElementUpdatePayload) =>
+    request<DetectedElement>(`/api/v1/plans/${planId}/elements/${elementId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteElement: async (planId: number, elementId: number): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(
+      `${API_URL}/api/v1/plans/${planId}/elements/${elementId}`,
+      {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`No se pudo eliminar (HTTP ${res.status})`);
+    }
+  },
+
+  bulkDeleteElements: async (planId: number, ids: number[]): Promise<void> => {
+    if (ids.length === 0) return;
+    const token = getToken();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(
+      `${API_URL}/api/v1/plans/${planId}/elements/bulk/delete`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(ids),
+      },
+    );
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`No se pudo eliminar en lote (HTTP ${res.status})`);
+    }
   },
 };
