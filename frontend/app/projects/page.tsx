@@ -5,10 +5,19 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api, type Project } from "@/lib/api";
+import { BUILDING_FIELDS } from "@/components/wizard/step-4-building";
+
+const TYPE_LABEL: Record<string, string> = {
+  casa: "Casa",
+  edificio: "Edificio",
+  condominio: "Condominio",
+  comercial: "Comercial",
+};
 
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [planCounts, setPlanCounts] = useState<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,7 +27,19 @@ export default function ProjectsPage() {
   useEffect(() => {
     api
       .listProjects()
-      .then(setProjects)
+      .then(async (list) => {
+        setProjects(list);
+        // Traer conteo de planos en paralelo. Errores por proyecto se ignoran.
+        const counts = await Promise.all(
+          list.map((p) =>
+            api
+              .listPlans(p.id)
+              .then((plans) => [p.id, plans.length] as const)
+              .catch(() => [p.id, 0] as const),
+          ),
+        );
+        setPlanCounts(Object.fromEntries(counts));
+      })
       .catch((err) => {
         if (err instanceof Error && err.message.includes("401")) {
           router.push("/login");
@@ -40,7 +61,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-10">
+    <main className="mx-auto max-w-6xl px-6 py-10">
       <header className="mb-8">
         <h1 className="text-3xl font-bold text-brand dark:text-sky-400">Proyectos</h1>
       </header>
@@ -69,40 +90,101 @@ export default function ProjectsPage() {
           </Link>
         </div>
       ) : (
-        <ul className="divide-y divide-slate-200 rounded-xl bg-white shadow dark:divide-slate-700 dark:bg-slate-800 dark:shadow-slate-950/50">
-          {projects.map((p) => (
-            <li
-              key={p.id}
-              className="group flex items-start gap-2 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/40"
-            >
-              <Link href={`/projects/${p.id}`} className="min-w-0 flex-1">
-                <p className="font-semibold text-brand dark:text-sky-400">{p.name}</p>
-                {p.description && (
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
-                    {p.description}
+        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {projects.map((p) => {
+            const isDraft = p.status === "draft";
+            const href = isDraft ? `/projects/new?id=${p.id}` : `/projects/${p.id}`;
+            const planCount = planCounts[p.id];
+            const buildingFieldsList = p.building_type
+              ? BUILDING_FIELDS[p.building_type]
+              : [];
+            return (
+              <li
+                key={p.id}
+                className="group relative flex flex-col rounded-xl bg-white p-4 shadow transition hover:shadow-md dark:bg-slate-800 dark:shadow-slate-950/50"
+              >
+                <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                  <IconButton
+                    label="Editar proyecto"
+                    onClick={() => setEditing(p)}
+                  >
+                    <MoreIcon />
+                  </IconButton>
+                  <IconButton
+                    label="Eliminar proyecto"
+                    variant="danger"
+                    onClick={() => setDeleting(p)}
+                  >
+                    <TrashIcon />
+                  </IconButton>
+                </div>
+
+                <Link href={href} className="flex flex-1 flex-col">
+                  <div className="flex flex-wrap items-center gap-2 pr-16">
+                    <h2 className="font-semibold text-brand dark:text-sky-400">{p.name}</h2>
+                    {isDraft && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+                        Borrador · paso {p.wizard_step}/5
+                      </span>
+                    )}
+                  </div>
+
+                  {p.description && (
+                    <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">
+                      {p.description}
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex flex-1 flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
+                    {p.address && (
+                      <p className="flex items-center gap-1">
+                        <span aria-hidden>📍</span>
+                        <span className="line-clamp-1">{p.address}</span>
+                      </p>
+                    )}
+                    {p.building_type && (
+                      <p className="flex items-center gap-1">
+                        <span aria-hidden>🏗️</span>
+                        <span>{TYPE_LABEL[p.building_type] ?? p.building_type}</span>
+                        {p.building_info && buildingFieldsList[0] && (
+                          <span className="text-slate-400 dark:text-slate-500">
+                            · {p.building_info[buildingFieldsList[0].key]}
+                            {buildingFieldsList[0].suffix
+                              ? ` ${buildingFieldsList[0].suffix}`
+                              : ""}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {planCount !== undefined && (
+                      <p className="flex items-center gap-1">
+                        <span aria-hidden>📄</span>
+                        <span>
+                          {planCount === 0
+                            ? "Sin planos"
+                            : `${planCount} plano${planCount === 1 ? "" : "s"}`}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+
+                  <p className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                    {new Date(p.created_at).toLocaleDateString()}
+                    {isDraft ? " · Continuar wizard →" : " · Abrir editor →"}
                   </p>
+                </Link>
+
+                {!isDraft && (
+                  <Link
+                    href={`/projects/new?id=${p.id}&edit=1`}
+                    className="mt-2 inline-block text-xs font-medium text-brand hover:underline dark:text-sky-400"
+                  >
+                    Editar datos del proyecto
+                  </Link>
                 )}
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {new Date(p.created_at).toLocaleDateString()} · {p.status}
-                </p>
-              </Link>
-              <div className="flex shrink-0 items-center gap-1">
-                <IconButton
-                  label="Editar proyecto"
-                  onClick={() => setEditing(p)}
-                >
-                  <MoreIcon />
-                </IconButton>
-                <IconButton
-                  label="Eliminar proyecto"
-                  variant="danger"
-                  onClick={() => setDeleting(p)}
-                >
-                  <TrashIcon />
-                </IconButton>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 

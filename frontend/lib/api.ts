@@ -1,11 +1,44 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+export type BuildingType = "casa" | "edificio" | "condominio" | "comercial";
+
 export type Project = {
   id: number;
   name: string;
   description: string | null;
   status: string;
+  wizard_step: number;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  city: string | null;
+  country: string | null;
+  building_type: BuildingType | null;
+  building_info: Record<string, number> | null;
   created_at: string;
+};
+
+export type LocationPayload = {
+  address: string;
+  latitude: number;
+  longitude: number;
+  city?: string | null;
+  country?: string | null;
+};
+
+export type BuildingInfoPayload = {
+  building_type: BuildingType;
+  building_info: Record<string, number>;
+};
+
+export type AiStage = "pending" | "running" | "done" | "failed";
+
+export type AiStatus = {
+  scales: AiStage;
+  walls: AiStage;
+  rooms: AiStage;
+  openings: AiStage;
+  started_at: number | null;
 };
 
 export type Plan = {
@@ -163,6 +196,23 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
+  updateProjectLocation: (id: number, payload: LocationPayload) =>
+    request<Project>(`/api/v1/projects/${id}/location`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  updateProjectBuildingInfo: (id: number, payload: BuildingInfoPayload) =>
+    request<Project>(`/api/v1/projects/${id}/building-info`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  activateProject: (id: number) =>
+    request<Project>(`/api/v1/projects/${id}/activate`, {
+      method: "POST",
+      body: "{}",
+    }),
+  getAiStatus: (planId: number) =>
+    request<AiStatus>(`/api/v1/plans/${planId}/ai-status`),
   deleteProject: async (id: number): Promise<void> => {
     const token = getToken();
     const res = await fetch(`${API_URL}/api/v1/projects/${id}`, {

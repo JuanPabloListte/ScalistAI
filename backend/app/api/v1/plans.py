@@ -37,6 +37,7 @@ from app.schemas.material import (
 
 from app.schemas.plan import PlanRead, ScaleByRatio, ScaleCalibration, ScaleDirect
 
+from app.services.auto_detect_pipeline import get_ai_status, run_initial_detection
 from app.services.auto_scale import detect_scales
 from app.services.dimension_text import extract_dimensions
 from app.services.opening_detection import detect_opening_labels
@@ -120,6 +121,10 @@ async def upload_plan(
     # caso el endpoint /raster cae al fallback síncrono y renderiza la página
     # individual que se pidió.
     background_tasks.add_task(prewarm_plan_pages, plan.id)
+    # Pipeline de IA: detecta muros, recintos y aberturas mientras el usuario
+    # completa los pasos siguientes del wizard. Al entrar al editor ya tiene
+    # los candidatos listos para aceptar o rechazar.
+    background_tasks.add_task(run_initial_detection, plan.id)
 
     return plan
 
@@ -738,6 +743,23 @@ def create_openings_bulk(
             db.refresh(el)
 
     return created
+
+
+@router.get("/plans/{plan_id}/ai-status")
+def get_ai_pipeline_status(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Devuelve el progreso del pipeline de IA (scales, walls, rooms, openings).
+
+    El frontend lo polea para mostrar un banner mientras la deteccion automatica
+    se ejecuta en background despues del upload del PDF.
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    return get_ai_status(plan_id)
 
 
 @router.get("/plans/{plan_id}/render-status")
