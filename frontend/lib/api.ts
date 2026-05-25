@@ -397,6 +397,11 @@ export const api = {
   detectOpenings: (planId: number, page: number) =>
     request<any[]>(`/api/v1/plans/${planId}/detect-openings?page=${page}`),
 
+  recommendPages: (planId: number) =>
+    request<{ page: number; score: number; recommended: boolean; reason: string }[]>(
+      `/api/v1/plans/${planId}/recommend-pages`,
+    ),
+
   createElementsBulk: (planId: number, payload: any[]) =>
     request<DetectedElement[]>(`/api/v1/plans/${planId}/elements-bulk`, {
       method: "POST",
