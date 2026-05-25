@@ -189,6 +189,14 @@ export default function PlanViewerInner({
   const [editedScales, setEditedScales] = useState<Record<string, string>>({});
   const [savingBulk, setSavingBulk] = useState(false);
 
+  const [recommendedPages, setRecommendedPages] = useState<{
+    page: number;
+    score: number;
+    recommended: boolean;
+    reason: string;
+  }[]>([]);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+
   const totalPages = Math.max(1, statusTotal ?? pageCount ?? 1);
   const currentPageScale = pageScales?.[String(page)] ?? null;
   const drawingDisabled = !currentPageScale;
@@ -247,6 +255,18 @@ export default function PlanViewerInner({
 
   useEffect(() => {
     api.startPrewarm(planId).catch(() => {});
+  }, [planId]);
+
+  useEffect(() => {
+    setLoadingRecommendations(true);
+    api.recommendPages(planId)
+      .then((data) => {
+        setRecommendedPages(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        setLoadingRecommendations(false);
+      });
   }, [planId]);
 
   useEffect(() => {
@@ -1009,6 +1029,190 @@ export default function PlanViewerInner({
     setDraggingVertex({ elementId, pointIndex });
   };
 
+  const startDragMidpoint = (
+    e: React.MouseEvent,
+    elementId: number,
+    edgeIndex: number,
+    mx: number,
+    my: number
+  ) => {
+    e.stopPropagation();
+    const el = elements.find((item) => item.id === elementId);
+    if (!el || el.type !== "room") return;
+    const pts = [...el.geometry.points];
+    
+    // Insertar nuevo vértice en el índice (edgeIndex + 1) * 2
+    const insertIndex = (edgeIndex + 1) * 2;
+    pts.splice(insertIndex, 0, mx, my);
+    
+    setElements((prev) =>
+      prev.map((item) => {
+        if (item.id !== elementId) return item;
+        return {
+          ...item,
+          geometry: {
+            ...item.geometry,
+            points: pts,
+          },
+        };
+      })
+    );
+    
+    setDraggingVertex({ elementId, pointIndex: insertIndex });
+  };
+
+  const deleteVertex = (e: React.MouseEvent, elementId: number, pointIndex: number) => {
+    e.stopPropagation();
+    const el = elements.find((item) => item.id === elementId);
+    if (!el || el.type !== "room") return;
+    const pts = [...el.geometry.points];
+    if (pts.length <= 6) return; // Mínimo 3 vértices
+    
+    pts.splice(pointIndex, 2);
+    const metrics = getCalculatedMetrics(el.type, pts, currentPageScale);
+    const updatedGeometry = { ...el.geometry, points: pts };
+
+    setElements((prev) =>
+      prev.map((item) => {
+        if (item.id !== elementId) return item;
+        return {
+          ...item,
+          geometry: updatedGeometry,
+          ...metrics,
+        };
+      })
+    );
+
+    void api.updateElement(planId, elementId, {
+      geometry: updatedGeometry,
+      length_m: metrics.length_m,
+      area_m2: metrics.area_m2,
+    });
+  };
+
+  const autoAdjustRoomToWalls = async (roomId: number) => {
+    const room = elements.find((el) => el.id === roomId);
+    if (!room || room.type !== "room") return;
+
+    // Obtener muros de la pagina actual
+    const pageWalls = elements.filter(
+      (el) => el.type === "wall" && el.page === room.page
+    );
+
+    if (pageWalls.length === 0) {
+      setDrawError("No hay muros dibujados en esta pagina para ajustar el recinto.");
+      return;
+    }
+
+    const pts = room.geometry.points;
+    if (pts.length < 6) return;
+
+    let sumX = 0;
+    let sumY = 0;
+    const count = pts.length / 2;
+    for (let i = 0; i < pts.length; i += 2) {
+      sumX += pts[i];
+      sumY += pts[i + 1];
+    }
+    const cx = sumX / count;
+    const cy = sumY / count;
+
+    let leftX: number | null = null;
+    let rightX: number | null = null;
+    let topY: number | null = null;
+    let bottomY: number | null = null;
+
+    const tol = 120; // pixeles de tolerancia (~60cm)
+
+    for (const wall of pageWalls) {
+      const [wx1, wy1, wx2, wy2] = wall.geometry.points;
+      const dx = Math.abs(wx2 - wx1);
+      const dy = Math.abs(wy2 - wy1);
+      const isVertical = dy >= dx;
+
+      if (isVertical) {
+        const xAvg = (wx1 + wx2) / 2;
+        const yMin = Math.min(wy1, wy2);
+        const yMax = Math.max(wy1, wy2);
+
+        if (yMin - tol <= cy && cy <= yMax + tol) {
+          if (xAvg < cx) {
+            if (leftX === null || xAvg > leftX) {
+              leftX = xAvg;
+            }
+          } else if (xAvg > cx) {
+            if (rightX === null || xAvg < rightX) {
+              rightX = xAvg;
+            }
+          }
+        }
+      } else {
+        const yAvg = (wy1 + wy2) / 2;
+        const xMin = Math.min(wx1, wx2);
+        const xMax = Math.max(wx1, wx2);
+
+        if (xMin - tol <= cx && cx <= xMax + tol) {
+          if (yAvg < cy) {
+            if (topY === null || yAvg > topY) {
+              topY = yAvg;
+            }
+          } else if (yAvg > cy) {
+            if (bottomY === null || yAvg < bottomY) {
+              bottomY = yAvg;
+            }
+          }
+        }
+      }
+    }
+
+    let minX = pts[0];
+    let maxX = pts[0];
+    let minY = pts[1];
+    let maxY = pts[1];
+    for (let i = 0; i < pts.length; i += 2) {
+      if (pts[i] < minX) minX = pts[i];
+      if (pts[i] > maxX) maxX = pts[i];
+      if (pts[i + 1] < minY) minY = pts[i + 1];
+      if (pts[i + 1] > maxY) maxY = pts[i + 1];
+    }
+
+    const xmin = leftX !== null ? leftX : minX;
+    const xmax = rightX !== null ? rightX : maxX;
+    const ymin = topY !== null ? topY : minY;
+    const ymax = bottomY !== null ? bottomY : maxY;
+
+    const newPts = [
+      xmin, ymin,
+      xmax, ymin,
+      xmax, ymax,
+      xmin, ymax
+    ];
+
+    const metrics = getCalculatedMetrics("room", newPts, currentPageScale);
+    const updatedGeometry = { ...room.geometry, points: newPts };
+
+    setElements((prev) =>
+      prev.map((item) => {
+        if (item.id !== roomId) return item;
+        return {
+          ...item,
+          geometry: updatedGeometry,
+          ...metrics,
+        };
+      })
+    );
+
+    try {
+      await api.updateElement(planId, roomId, {
+        geometry: updatedGeometry,
+        length_m: metrics.length_m,
+        area_m2: metrics.area_m2,
+      });
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al ajustar recinto");
+    }
+  };
+
   function selectAll() {
     setSelectedIds(new Set(elements.map((e) => e.id)));
   }
@@ -1564,6 +1768,7 @@ export default function PlanViewerInner({
                           defaultLabel={el.geometry.label ?? labelFor(el.type, idx + 1)}
                           pageScale={currentPageScale}
                           onSave={(patch) => updateElementInline(el.id, patch)}
+                          onAutoAdjust={autoAdjustRoomToWalls}
                         />
                         <ElementMaterialsBlock
                           element={el}
@@ -1582,6 +1787,51 @@ export default function PlanViewerInner({
 
         {/* CANVAS CENTRAL */}
         <div className="min-w-0 flex-1">
+          {recommendedPages.some((p) => p.recommended) && (
+            <div className="mb-2.5 rounded-lg border border-emerald-200/60 bg-emerald-50/70 p-2.5 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 font-semibold">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    className="text-emerald-600 dark:text-emerald-400"
+                  >
+                    <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+                    <path d="M9 18h6" />
+                    <path d="M10 22h4" />
+                  </svg>
+                  Páginas recomendadas (Plano de Arquitectura / Distribución):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {recommendedPages
+                    .filter((p) => p.recommended)
+                    .map((p) => (
+                      <button
+                        key={p.page}
+                        type="button"
+                        onClick={() => goToPage(p.page)}
+                        title={p.reason}
+                        className={`px-2 py-0.5 text-[11px] font-bold rounded border shadow-sm transition-all duration-200 ${
+                          page === p.page
+                            ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-600/10"
+                            : "bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 dark:bg-slate-900 dark:border-emerald-800/80 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                        }`}
+                      >
+                        Pág. {p.page}
+                      </button>
+                    ))}
+                </div>
+              </div>
+              <span className="text-[10px] text-emerald-600/85 dark:text-emerald-400/80 font-medium">
+                Análisis local instantáneo (Costo $0)
+              </span>
+            </div>
+          )}
+
           {/* Controles de página */}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             {activePages.length > 1 ? (
@@ -2216,13 +2466,16 @@ export default function PlanViewerInner({
                         {selectedElement.type === "room" && (() => {
                           const pts = selectedElement.geometry.points;
                           const handles: React.ReactNode[] = [];
-                          for (let i = 0; i < pts.length; i += 2) {
-                            const x = pts[i];
-                            const y = pts[i + 1];
-                            const pointIndex = i;
+                          const numPoints = pts.length / 2;
+
+                          // 1. Renderizar vertices reales
+                          for (let i = 0; i < numPoints; i++) {
+                            const x = pts[i * 2];
+                            const y = pts[i * 2 + 1];
+                            const pointIndex = i * 2;
                             handles.push(
                               <circle
-                                key={i}
+                                key={`vertex-${i}`}
                                 cx={x}
                                 cy={y}
                                 r={6 / scale}
@@ -2231,9 +2484,42 @@ export default function PlanViewerInner({
                                 strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, pointIndex)}
-                              />
+                                onDoubleClick={(e) => deleteVertex(e, selectedElement.id, pointIndex)}
+                              >
+                                <title>Doble clic para eliminar vertice</title>
+                              </circle>
                             );
                           }
+
+                          // 2. Renderizar tiradores intermedios (midpoints) para subdividir segmentos
+                          for (let i = 0; i < numPoints; i++) {
+                            const next = (i + 1) % numPoints;
+                            const x1 = pts[i * 2];
+                            const y1 = pts[i * 2 + 1];
+                            const x2 = pts[next * 2];
+                            const y2 = pts[next * 2 + 1];
+                            const mx = (x1 + x2) / 2;
+                            const my = (y1 + y2) / 2;
+                            const edgeIndex = i;
+
+                            handles.push(
+                              <circle
+                                key={`midpoint-${i}`}
+                                cx={mx}
+                                cy={my}
+                                r={4.5 / scale}
+                                fill="#22c55e"
+                                stroke="#ffffff"
+                                strokeWidth={1 / scale}
+                                opacity={0.6}
+                                className="pointer-events-auto cursor-pointer hover:opacity-100 hover:scale-125 transition-all"
+                                onMouseDown={(e) => startDragMidpoint(e, selectedElement.id, edgeIndex, mx, my)}
+                              >
+                                <title>Arrastra para crear un nuevo vertice</title>
+                              </circle>
+                            );
+                          }
+
                           return handles;
                         })()}
                       </g>
@@ -3095,11 +3381,13 @@ function InlineEditForm({
   defaultLabel,
   pageScale,
   onSave,
+  onAutoAdjust,
 }: {
   element: DetectedElement;
   defaultLabel: string;
   pageScale: number | null;
   onSave: (patch: { label?: string; height_m?: number; length_m?: number }) => void;
+  onAutoAdjust?: (roomId: number) => void;
 }) {
   const defaultHeight = element.type === "opening" ? 2.1 : 2.8;
   const [label, setLabel] = useState(defaultLabel);
@@ -3231,6 +3519,16 @@ function InlineEditForm({
           className="w-36 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-sky-400"
         />
       </label>
+
+      {element.type === "room" && onAutoAdjust && (
+        <button
+          type="button"
+          onClick={() => onAutoAdjust(element.id)}
+          className="w-full mt-1 px-1.5 py-1 text-[10px] font-semibold text-center text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded transition dark:text-emerald-300 dark:bg-emerald-950/20 dark:border-emerald-900/40 dark:hover:bg-emerald-950/40 focus:outline-none"
+        >
+          Ajustar a muros
+        </button>
+      )}
 
       <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] text-slate-400">
         <span>

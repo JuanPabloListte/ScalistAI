@@ -132,14 +132,14 @@ Geometría: GeoJSON-like en JSONB. **PostGIS descartado** — no hace falta para
 | **0** | ✅ | Scaffolding, auth JWT, CRUD proyectos, docker-compose |
 | **1** | ✅ | Rasterización PyMuPDF + preprocesamiento + visor con pan/zoom |
 | **2** | ✅ | Calibración por página: auto (regex sobre texto), manual single, manual multi-ref con mediana, edición 1:N en tabla |
-| **3** | ✅ | Dibujo manual de muros / recintos / aberturas con cálculo automático de longitudes y áreas |
+| **3** | ✅ | Dibujo manual de muros / recintos / aberturas con cálculo automático de longitudes y áreas. Edición interactiva de vértices (drag handles) y eliminación con doble clic |
 | **4** | ✅ | Catálogo de materiales con yields, asignación, presupuesto, export XLSX + PDF |
 | **5** | ✅ | **Asistencia a calibración**: extracción de cotas desde el texto vectorial del PDF, badges sobre el plano, pre-llenado automático del modal con la cota más cercana |
 | **9** | ✅ | **Selección múltiple y eliminación en lote**: Shift+click, Ctrl+A, Delete/Backspace, cuadro de selección con drag, selección de tipo completo, confirmación de eliminación en lote |
-| **10** | ✅ | **Visor 3D interactivo** + **Panel de Detección IA**: muros extruidos, puertas/ventanas, suelos de recintos, modos Blueprint/Render Blanco. Panel IA en sidebar con botones Detectar Muros / Recintos / Aberturas, preview con checkboxes, importación en lote. |
+| **10** | ✅ | **Visor 3D interactivo**: muros extruidos, puertas/ventanas, suelos de recintos, modos Blueprint/Render Blanco (R3F v8 + Three.js) |
 | **6** | pendiente | **Fase 2.2 IA**: OCR (Tesseract/PaddleOCR) para PDFs escaneados sin capa de texto |
-| **7** | pendiente | **Fase 3.3 IA**: YOLOv8 para puertas/ventanas (símbolos estándar, dataset chico) |
-| **8** | pendiente | **Fase 3.1/3.2 IA**: SAM o U-Net para muros + contornos para recintos |
+| **7** | ✅ | **Fase 3.3 IA (Aberturas)**: detección automática de aberturas (puertas/ventanas) en base a etiquetas vectoriales y anchos |
+| **8** | ✅ | **Fase 3.1/3.2 IA (Muros y Recintos)**: detección automática de muros por líneas paralelas y recintos semánticos. Auto-ajuste de recintos a muros cercanos e indicador inteligente de páginas recomendadas (Costo $0) |
 
 El MVP vendible (Sprints 0-5, 9, 10) **ya está terminado**. Los sprints 6-8 incorporan IA como **asistencia progresiva**: pre-rellenan lo que hoy hace el usuario a mano, pero nunca lo reemplazan totalmente.
 
@@ -213,6 +213,27 @@ El MVP vendible (Sprints 0-5, 9, 10) **ya está terminado**. Los sprints 6-8 inc
 - **Theme switch** light/dark accesible (`role="switch"` + `aria-checked`), persistente sin flash.
 - Colores diferenciados por tipo de elemento en light **y dark**: recinto=verde, muro=azul, abertura=naranja/ámbar.
 - Audit dark/light global: todas las páginas con pares `bg-X dark:bg-Y` consistentes.
+
+### Sprint 7 (Deteccion de Aberturas por IA)
+- Boton **"Detectar Aberturas"** en la barra superior.
+- Escaneo de etiquetas vectoriales (puertas y ventanas como *P1*, *V2*) en el PDF nativo y su ancho asociado.
+- Banner de resultados flotante para aceptar o descartar candidatos en lote (bulk) o de manera individual.
+
+### Sprint 8 (Deteccion de Muros y Recintos por IA)
+- Boton **"Detectar Muros/Recintos"** en la barra superior.
+- **Muros**: Extraccion morfologica y geometrica de parejas de lineas paralelas con espesores de muros standard (8cm - 35cm) y fusion colineal.
+- **Recintos**: Localizacion de etiquetas semanticas de recintos (*Cocina*, *Estar*, *Dormitorio*, *Baño*) y dibujo automatico de rectangulos con areas sugeridas.
+- Banners de resultados flotantes apilables de forma dinamica segun su activacion.
+
+### Edicion Interactiva de Geometrias (Drag Handles)
+- Visualizacion de **handles circulares** en cada vertice del elemento seleccionado sobre el lienzo SVG 2D.
+- Insercion de nuevos vertices al arrastrar handles secundarios (midpoints) situados en la mitad de cada segmento.
+- Eliminacion interactiva de vertices haciendo **doble clic** sobre cualquier handle.
+- Debounce de red y recargas optimistas del presupuesto (recalculo dinamico durante el arrastre, persistencia PATCH unica al soltar).
+
+### Auto-ajuste de Recintos y Recomendacion de Paginas (Costo $0)
+- **Ajustar a muros**: Boton en el panel lateral de recintos para proyectar lineas ortogonales desde el centro geometrico del recinto y encajarlo de forma automatica a los muros circundantes de la pagina, cubriendo camas, mesas y sillones.
+- **Recomendacion Inteligente de Paginas**: Escaneo en milisegundos con PyMuPDF que analiza localmente textos y geometrias para puntuar las paginas mas optimas para arquitectura en PDFs de muchas paginas, sin consumo de APIs de vision. Presenta botones de acceso rapido y motivos en la cabecera del visor.
 
 ---
 

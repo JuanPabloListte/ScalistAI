@@ -41,7 +41,7 @@ from app.services.auto_scale import detect_scales
 from app.services.dimension_text import extract_dimensions
 from app.services.opening_detection import detect_opening_labels
 from app.services.wall_room_detection import detect_walls, detect_rooms
-from app.services.pdf import page_count, rasterize
+from app.services.pdf import page_count, rasterize, recommend_pages
 from app.services.preprocess import enhance_for_display
 from app.services.prewarm import prewarm_plan_pages
 
@@ -346,6 +346,28 @@ def preview_auto_detect_scale(
     finally:
         doc.close()
     return result
+
+
+@router.get("/plans/{plan_id}/recommend-pages")
+def recommend_plan_pages(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Analiza las paginas del PDF y devuelve las recomendaciones de paginas para calzar muros/recintos."""
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    pdf_path = Path(plan.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF original no disponible")
+
+    try:
+        return recommend_pages(pdf_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"Error analizando el PDF para recomendar paginas: {exc}"
+        ) from exc
 
 
 @router.post("/plans/{plan_id}/bulk-scale-ratio", response_model=PlanRead)
