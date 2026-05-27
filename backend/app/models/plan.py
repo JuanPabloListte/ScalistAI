@@ -30,6 +30,9 @@ class Plan(Base):
     page_scales: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # list [1, 2, ...] — páginas eliminadas (1-indexed)
     deleted_pages: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    # dict { "<page>": "recommended" | "rejected" } — overrides manuales del
+    # usuario que sobreescriben la recomendacion del algoritmo.
+    page_overrides: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="uploaded", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

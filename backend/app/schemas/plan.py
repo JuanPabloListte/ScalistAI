@@ -17,6 +17,7 @@ class PlanRead(BaseModel):
     scale_source: str | None
     page_scales: dict[str, float] | None
     deleted_pages: list[int] | None = None
+    page_overrides: dict[str, str] | None = None
     created_at: datetime
 
 

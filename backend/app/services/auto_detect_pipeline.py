@@ -225,8 +225,9 @@ async def run_initial_detection(plan_id: int) -> None:
             return
         dpi = plan.dpi or 150
         page_scales = dict(plan.page_scales or {})
+        deleted_pages = set(plan.deleted_pages or [])
 
-    pages = _recommended_pages(pdf_path)
+    pages = [p for p in _recommended_pages(pdf_path) if p not in deleted_pages]
     logger.info("ai pipeline start plan=%s pages=%s", plan_id, pages)
 
     # Cada stage corre en un thread porque los detectores son CPU-bound
