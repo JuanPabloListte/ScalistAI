@@ -41,6 +41,8 @@ export type AiStatus = {
   started_at: number | null;
 };
 
+export type PageOverride = "recommended" | "rejected";
+
 export type Plan = {
   id: number;
   project_id: number;
@@ -53,7 +55,16 @@ export type Plan = {
   scale_source: string | null;
   page_scales: Record<string, number> | null;
   deleted_pages: number[] | null;
+  page_overrides: Record<string, PageOverride> | null;
   created_at: string;
+};
+
+export type PageRecommendation = {
+  page: number;
+  score: number;
+  recommended: boolean;
+  reason: string;
+  override: PageOverride | null;
 };
 
 export type ElementType = "wall" | "room" | "opening";
@@ -448,9 +459,17 @@ export const api = {
     request<any[]>(`/api/v1/plans/${planId}/detect-openings?page=${page}`),
 
   recommendPages: (planId: number) =>
-    request<{ page: number; score: number; recommended: boolean; reason: string }[]>(
-      `/api/v1/plans/${planId}/recommend-pages`,
-    ),
+    request<PageRecommendation[]>(`/api/v1/plans/${planId}/recommend-pages`),
+
+  setPageOverride: (
+    planId: number,
+    page: number,
+    override: PageOverride | null,
+  ) =>
+    request<Plan>(`/api/v1/plans/${planId}/page-override`, {
+      method: "POST",
+      body: JSON.stringify({ page, override }),
+    }),
 
   createElementsBulk: (planId: number, payload: any[]) =>
     request<DetectedElement[]>(`/api/v1/plans/${planId}/elements-bulk`, {

@@ -359,7 +359,12 @@ def recommend_plan_pages(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """Analiza las paginas del PDF y devuelve las recomendaciones de paginas para calzar muros/recintos."""
+    """Analiza las paginas del PDF y devuelve las recomendaciones de paginas para calzar muros/recintos.
+
+    Aplica los overrides manuales del usuario (plan.page_overrides) por encima
+    del resultado del algoritmo: "recommended" fuerza la pagina como recomendada,
+    "rejected" la descarta sin importar el score.
+    """
     plan = db.get(Plan, plan_id)
     if plan is None or plan.project.user_id != user.id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
@@ -368,11 +373,74 @@ def recommend_plan_pages(
         raise HTTPException(status_code=404, detail="PDF original no disponible")
 
     try:
-        return recommend_pages(pdf_path)
+        recs = recommend_pages(pdf_path)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500, detail=f"Error analizando el PDF para recomendar paginas: {exc}"
         ) from exc
+
+    overrides = plan.page_overrides or {}
+    for rec in recs:
+        page_key = str(rec["page"])
+        override = overrides.get(page_key)
+        if override == "recommended":
+            rec["recommended"] = True
+            rec["score"] = 1000
+            rec["reason"] = "Marcada manualmente como planta"
+            rec["override"] = "recommended"
+        elif override == "rejected":
+            rec["recommended"] = False
+            rec["score"] = -1000
+            rec["reason"] = "Marcada manualmente como NO planta"
+            rec["override"] = "rejected"
+        else:
+            rec["override"] = None
+    return recs
+
+
+@router.post("/plans/{plan_id}/page-override", response_model=PlanRead)
+def set_page_override(
+    plan_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Plan:
+    """Setea o quita el override manual para una pagina.
+
+    Body: { "page": <int>, "override": "recommended" | "rejected" | null }
+    Cuando override es null, se elimina el override y la pagina vuelve a la
+    decision del algoritmo.
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    try:
+        page = int(payload["page"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Falta 'page' (int)")
+
+    override = payload.get("override")
+    if override not in (None, "recommended", "rejected"):
+        raise HTTPException(
+            status_code=400,
+            detail="'override' debe ser 'recommended', 'rejected' o null",
+        )
+
+    if plan.page_count and (page < 1 or page > plan.page_count):
+        raise HTTPException(status_code=400, detail="Pagina fuera de rango")
+
+    overrides = dict(plan.page_overrides or {})
+    page_key = str(page)
+    if override is None:
+        overrides.pop(page_key, None)
+    else:
+        overrides[page_key] = override
+    plan.page_overrides = overrides or None
+    flag_modified(plan, "page_overrides")
+    db.commit()
+    db.refresh(plan)
+    return plan
 
 
 @router.post("/plans/{plan_id}/bulk-scale-ratio", response_model=PlanRead)
@@ -807,6 +875,14 @@ def get_plan_raster(
         raise HTTPException(
             status_code=400,
             detail=f"Página {page} fuera de rango (1..{plan.page_count})",
+        )
+
+    # Si la pagina fue marcada como eliminada, NO regenerar el cache.
+    # Devolvemos 410 Gone para que el frontend salte a la siguiente pagina activa.
+    if plan.deleted_pages and page in plan.deleted_pages:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Página {page} fue eliminada",
         )
 
     cached = _page_raster_path(pdf_path, page)

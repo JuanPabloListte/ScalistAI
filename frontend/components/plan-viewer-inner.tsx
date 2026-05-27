@@ -194,8 +194,15 @@ export default function PlanViewerInner({
     score: number;
     recommended: boolean;
     reason: string;
+    override?: "recommended" | "rejected" | null;
   }[]>([]);
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  const [overridingPage, setOverridingPage] = useState(false);
+
+  const currentRec = useMemo(
+    () => recommendedPages.find((r) => r.page === page) ?? null,
+    [recommendedPages, page],
+  );
 
   const totalPages = Math.max(1, statusTotal ?? pageCount ?? 1);
   const currentPageScale = pageScales?.[String(page)] ?? null;
@@ -455,6 +462,15 @@ export default function PlanViewerInner({
   }
 
   useEffect(() => {
+    // Evita pedir el raster de una pagina marcada como eliminada — el backend
+    // devuelve 410 y, ademas, no queremos disparar la regeneracion del PNG
+    // cacheado para una pagina que el usuario ya descarto.
+    if ((deletedPages ?? []).includes(page)) {
+      setImgUrl(null);
+      setLoading(false);
+      return;
+    }
+
     let blobUrl: string | null = null;
     let cancelled = false;
     setLoading(true);
@@ -479,7 +495,7 @@ export default function PlanViewerInner({
       cancelled = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [planId, page]);
+  }, [planId, page, deletedPages]);
 
   // Cargar elementos al cambiar plan/página
   useEffect(() => {
@@ -861,6 +877,26 @@ export default function PlanViewerInner({
   function goToNextActive() {
     const idx = activePages.indexOf(page);
     if (idx >= 0 && idx < activePages.length - 1) setPage(activePages[idx + 1]);
+  }
+
+  async function applyPageOverride(
+    targetPage: number,
+    next: "recommended" | "rejected" | null,
+  ) {
+    setOverridingPage(true);
+    try {
+      const updatedPlan = await api.setPageOverride(planId, targetPage, next);
+      onPlanUpdated?.(updatedPlan);
+      // Recargar recomendaciones para reflejar el override
+      const recs = await api.recommendPages(planId);
+      setRecommendedPages(recs);
+    } catch (err) {
+      setDrawError(
+        err instanceof Error ? err.message : "Error guardando override",
+      );
+    } finally {
+      setOverridingPage(false);
+    }
   }
 
   async function applyDeletePage(p: number) {
@@ -1863,6 +1899,11 @@ export default function PlanViewerInner({
                     className="w-16 rounded border border-slate-300 px-2 py-1 text-center dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                   />
                   <span>de {totalPages}</span>
+                  <PageOverrideToggle
+                    rec={currentRec}
+                    busy={overridingPage}
+                    onChange={(next) => applyPageOverride(page, next)}
+                  />
                   <button
                     type="button"
                     onClick={() => setConfirmDeletePage(page)}
@@ -3091,6 +3132,68 @@ function labelFor(type: ElementType, n: number): string {
   if (type === "wall") return `Muro ${n}`;
   if (type === "room") return `Recinto ${n}`;
   return `Abertura ${n}`;
+}
+
+function PageOverrideToggle({
+  rec,
+  busy,
+  onChange,
+}: {
+  rec: {
+    recommended: boolean;
+    override?: "recommended" | "rejected" | null;
+    reason?: string;
+  } | null;
+  busy: boolean;
+  onChange: (next: "recommended" | "rejected" | null) => void;
+}) {
+  // Estado actual: forzada, rechazada o automatica
+  const current: "recommended" | "rejected" | "auto" = rec?.override
+    ? rec.override
+    : "auto";
+
+  // Que dice el algoritmo (lo mostramos como pista cuando esta en auto)
+  const autoLabel = rec?.recommended ? "auto: planta" : "auto: no planta";
+  const title =
+    current === "recommended"
+      ? "Marcada manualmente como planta. Click para volver al algoritmo."
+      : current === "rejected"
+        ? "Marcada manualmente como NO planta. Click para volver al algoritmo."
+        : `Algoritmo: ${rec?.reason || "sin senales"}. Click para forzar manualmente.`;
+
+  function cycle() {
+    if (busy) return;
+    // auto -> recommended -> rejected -> auto
+    if (current === "auto") onChange("recommended");
+    else if (current === "recommended") onChange("rejected");
+    else onChange(null);
+  }
+
+  const styles =
+    current === "recommended"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+      : current === "rejected"
+        ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300"
+        : "border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300";
+
+  const label =
+    current === "recommended"
+      ? "✓ Planta"
+      : current === "rejected"
+        ? "✗ No planta"
+        : autoLabel;
+
+  return (
+    <button
+      type="button"
+      onClick={cycle}
+      disabled={busy}
+      title={title}
+      className={`ml-2 inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-semibold transition disabled:opacity-50 ${styles}`}
+    >
+      {label}
+    </button>
+  );
 }
 
 function PageButton({
