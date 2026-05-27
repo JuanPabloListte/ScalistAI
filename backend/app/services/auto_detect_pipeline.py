@@ -207,12 +207,29 @@ def _process_stage(
         _mark(plan_id, stage, "failed")
 
 
-async def run_initial_detection(plan_id: int) -> None:
-    """Punto de entrada del background task. Corre los tres detectores en serie
-    (CPU-bound: paralelizar no ayuda y triplicaria el pico de RAM).
+def _pages_for_role(page_roles: dict[str, list[str]], role: str) -> list[int]:
+    """Devuelve la lista ordenada de páginas (1-indexed) que tienen el rol dado."""
+    pages: list[int] = []
+    for page_str, roles in page_roles.items():
+        if role in roles:
+            try:
+                pages.append(int(page_str))
+            except (TypeError, ValueError):
+                continue
+    return sorted(set(pages))
 
-    Se ejecuta como BackgroundTask de FastAPI: el cliente ya recibio la
-    respuesta del upload cuando esto arranca.
+
+async def run_initial_detection(plan_id: int) -> None:
+    """Punto de entrada del background task. Lee `plan.page_roles` y corre cada
+    detector **solo sobre sus páginas asignadas**.
+
+    Esto reemplaza el comportamiento previo de correr los 3 detectores sobre
+    las mismas páginas "recomendadas": ahora el usuario decide explícitamente
+    en el wizard qué página sirve para muros, cuál para aberturas y cuál para
+    recintos. Resultados mucho más limpios.
+
+    Si `page_roles` está vacío o nulo, no se hace nada (el wizard debería
+    forzar al usuario a asignar al menos una página).
     """
     _init_progress(plan_id)
 
@@ -226,24 +243,49 @@ async def run_initial_detection(plan_id: int) -> None:
         dpi = plan.dpi or 150
         page_scales = dict(plan.page_scales or {})
         deleted_pages = set(plan.deleted_pages or [])
+        page_roles = dict(plan.page_roles or {})
 
-    pages = [p for p in _recommended_pages(pdf_path) if p not in deleted_pages]
-    logger.info("ai pipeline start plan=%s pages=%s", plan_id, pages)
+    if not page_roles:
+        logger.info("ai pipeline skip plan=%s: sin page_roles asignados", plan_id)
+        return
 
-    # Cada stage corre en un thread porque los detectores son CPU-bound
-    # (PyMuPDF + OpenCV) y bloquean el event loop si los llamamos directo.
-    await asyncio.to_thread(
-        _process_stage,
-        plan_id, "walls", pages, pdf_path, dpi, page_scales,
-        detect_walls, _create_wall_elements, False,
+    def _filter(pages: list[int]) -> list[int]:
+        return [p for p in pages if p not in deleted_pages]
+
+    wall_pages = _filter(_pages_for_role(page_roles, "walls"))
+    room_pages = _filter(_pages_for_role(page_roles, "rooms"))
+    opening_pages = _filter(_pages_for_role(page_roles, "openings"))
+    logger.info(
+        "ai pipeline start plan=%s walls=%s rooms=%s openings=%s",
+        plan_id, wall_pages, room_pages, opening_pages,
     )
-    await asyncio.to_thread(
-        _process_stage,
-        plan_id, "rooms", pages, pdf_path, dpi, page_scales,
-        detect_rooms, _create_room_elements, False,
-    )
-    await asyncio.to_thread(
-        _process_stage,
-        plan_id, "openings", pages, pdf_path, dpi, page_scales,
-        detect_opening_labels, _create_opening_elements, True,
-    )
+
+    # Cada stage corre en un thread (CPU-bound). Si una etapa no tiene páginas
+    # asignadas la marcamos como "done" para que el polling del frontend no
+    # quede esperando indefinidamente.
+    if wall_pages:
+        await asyncio.to_thread(
+            _process_stage,
+            plan_id, "walls", wall_pages, pdf_path, dpi, page_scales,
+            detect_walls, _create_wall_elements, False,
+        )
+    else:
+        _mark(plan_id, "walls", "done")
+
+    if room_pages:
+        await asyncio.to_thread(
+            _process_stage,
+            plan_id, "rooms", room_pages, pdf_path, dpi, page_scales,
+            detect_rooms, _create_room_elements, False,
+        )
+    else:
+        _mark(plan_id, "rooms", "done")
+
+    if opening_pages:
+        await asyncio.to_thread(
+            _process_stage,
+            plan_id, "openings", opening_pages, pdf_path, dpi, page_scales,
+            detect_opening_labels, _create_opening_elements, True,
+        )
+    else:
+        _mark(plan_id, "openings", "done")

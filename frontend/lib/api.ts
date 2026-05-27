@@ -43,6 +43,8 @@ export type AiStatus = {
 
 export type PageOverride = "recommended" | "rejected";
 
+export type PageRole = "walls" | "openings" | "rooms";
+
 export type Plan = {
   id: number;
   project_id: number;
@@ -56,6 +58,7 @@ export type Plan = {
   page_scales: Record<string, number> | null;
   deleted_pages: number[] | null;
   page_overrides: Record<string, PageOverride> | null;
+  page_roles: Record<string, PageRole[]> | null;
   created_at: string;
 };
 
@@ -302,11 +305,6 @@ export const api = {
       body: "{}",
     }),
 
-  restorePage: (planId: number, page: number) =>
-    request<Plan>(`/api/v1/plans/${planId}/restore-page/${page}`, {
-      method: "POST",
-      body: "{}",
-    }),
 
   fetchPlanRaster: async (planId: number, page = 1): Promise<Blob> => {
     const token = getToken();
@@ -469,6 +467,16 @@ export const api = {
     request<Plan>(`/api/v1/plans/${planId}/page-override`, {
       method: "POST",
       body: JSON.stringify({ page, override }),
+    }),
+
+  setPageRoles: (
+    planId: number,
+    pageRoles: Record<string, PageRole[]>,
+    skipAiDetection?: boolean,
+  ) =>
+    request<Plan>(`/api/v1/plans/${planId}/page-roles`, {
+      method: "PATCH",
+      body: JSON.stringify({ page_roles: pageRoles, skip_ai_detection: skipAiDetection }),
     }),
 
   createElementsBulk: (planId: number, payload: any[]) =>

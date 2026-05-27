@@ -96,7 +96,7 @@ def update_project_location(
     project.longitude = payload.longitude
     project.city = payload.city
     project.country = payload.country
-    project.wizard_step = max(project.wizard_step, 3)
+    project.wizard_step = max(project.wizard_step, 4)
 
     db.commit()
     db.refresh(project)
@@ -116,7 +116,7 @@ def update_project_building_info(
 
     project.building_type = payload.building_type
     project.building_info = payload.building_info
-    project.wizard_step = max(project.wizard_step, 4)
+    project.wizard_step = max(project.wizard_step, 5)
 
     db.commit()
     db.refresh(project)
@@ -148,7 +148,7 @@ def activate_project(
         raise HTTPException(status_code=400, detail="Falta la informacion de construccion")
 
     project.status = "active"
-    project.wizard_step = 5
+    project.wizard_step = 6
     db.commit()
     db.refresh(project)
     return project
