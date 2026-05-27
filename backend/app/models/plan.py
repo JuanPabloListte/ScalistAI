@@ -33,6 +33,12 @@ class Plan(Base):
     # dict { "<page>": "recommended" | "rejected" } — overrides manuales del
     # usuario que sobreescriben la recomendacion del algoritmo.
     page_overrides: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+    # dict { "<page>": ["walls", "openings", "rooms"] } — rol(es) que cumple
+    # cada pagina para la deteccion automatica. Una pagina sin entrada (o con
+    # lista vacia) no se procesa. Permite que un mismo plano use diferentes
+    # paginas para muros, aberturas y recintos, en lugar de correr todo sobre
+    # las mismas paginas.
+    page_roles: Mapped[dict[str, list[str]] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="uploaded", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

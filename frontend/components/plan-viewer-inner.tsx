@@ -25,6 +25,7 @@ type Props = {
   scaleSource?: string | null;
   planDpi?: number | null;
   calRequest?: { page: number; ts: number } | null;
+  allowedPages?: number[] | null;
   onPlanUpdated?: (plan: Plan) => void;
   height?: number;
 };
@@ -71,6 +72,34 @@ function chunkPoints(flat: number[]): Point[] {
   return out;
 }
 
+function calculatePolygonCentroid(pts: Point[]): Point {
+  let A = 0;
+  let cx = 0;
+  let cy = 0;
+  const n = pts.length;
+  if (n < 3) return pts[0] || { x: 0, y: 0 };
+  
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const x0 = pts[i].x;
+    const y0 = pts[i].y;
+    const x1 = pts[j].x;
+    const y1 = pts[j].y;
+    const factor = (x0 * y1 - x1 * y0);
+    A += factor;
+    cx += (x0 + x1) * factor;
+    cy += (y0 + y1) * factor;
+  }
+  
+  A = A / 2;
+  if (A === 0) return pts[0]; // fallback
+  
+  cx = cx / (6 * A);
+  cy = cy / (6 * A);
+  return { x: cx, y: cy };
+}
+
+
 // Largo geométrico (calculado desde la línea dibujada). Solo aplica a wall/opening.
 function geometricLengthM(el: DetectedElement, pxPerM: number | null): number | null {
   if (!pxPerM) return null;
@@ -100,13 +129,27 @@ export default function PlanViewerInner({
   scaleSource = null,
   planDpi: _planDpi = 150,
   calRequest = null,
+  allowedPages = null,
   onPlanUpdated,
   height = 640,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
 
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => {
+    if (allowedPages && allowedPages.length > 0) {
+      const deleted = new Set(deletedPages ?? []);
+      const active = allowedPages.filter((p) => !deleted.has(p));
+      if (active.length > 0) return active[0];
+    }
+    if (deletedPages && deletedPages.length > 0) {
+      const deleted = new Set(deletedPages);
+      const total = Math.max(1, pageCount ?? 1);
+      const active = Array.from({ length: total }, (_, i) => i + 1).filter((p) => !deleted.has(p));
+      if (active.length > 0) return active[0];
+    }
+    return 1;
+  });
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [dims, setDims] = useState({ w: 0, h: height });
@@ -135,6 +178,15 @@ export default function PlanViewerInner({
     const id = Array.from(selectedIds)[0];
     return elements.find((e) => e.id === id) || null;
   }, [selectedIds, elements]);
+
+  const [hideAiElements, setHideAiElements] = useState(false);
+  const visibleElements = useMemo(() => {
+    if (hideAiElements) {
+      return elements.filter((e) => e.source !== "ai");
+    }
+    return elements;
+  }, [elements, hideAiElements]);
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: number[]; label: string } | null>(null);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
@@ -151,6 +203,7 @@ export default function PlanViewerInner({
 
   // Páginas eliminadas
   const [confirmDeletePage, setConfirmDeletePage] = useState<number | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [pageBusy, setPageBusy] = useState(false);
 
   const [show3D, setShow3D] = useState(false);
@@ -208,9 +261,13 @@ export default function PlanViewerInner({
   const currentPageScale = pageScales?.[String(page)] ?? null;
   const drawingDisabled = !currentPageScale;
   const activePages = useMemo(() => {
+    if (allowedPages) {
+      const deleted = new Set(deletedPages ?? []);
+      return allowedPages.filter((p) => !deleted.has(p));
+    }
     const deleted = new Set(deletedPages ?? []);
     return Array.from({ length: totalPages }, (_, i) => i + 1).filter((p) => !deleted.has(p));
-  }, [totalPages, deletedPages]);
+  }, [totalPages, deletedPages, allowedPages]);
 
   // Si la página actual quedó eliminada, saltar a la primera activa
   useEffect(() => {
@@ -221,7 +278,20 @@ export default function PlanViewerInner({
 
   // Reset al cambiar de plan
   useEffect(() => {
-    setPage(1);
+    if (allowedPages && allowedPages.length > 0) {
+      const deleted = new Set(deletedPages ?? []);
+      const active = allowedPages.filter((p) => !deleted.has(p));
+      if (active.length > 0) {
+        setPage(active[0]);
+      } else {
+        setPage(1);
+      }
+    } else {
+      const deleted = new Set(deletedPages ?? []);
+      const total = Math.max(1, pageCount ?? 1);
+      const active = Array.from({ length: total }, (_, i) => i + 1).filter((p) => !deleted.has(p));
+      setPage(active[0] ?? 1);
+    }
     setRendered(null);
     setStatusTotal(null);
     setTool("pan");
@@ -360,15 +430,20 @@ export default function PlanViewerInner({
     }
   }
 
-  function toggleCandidateSelected(candidateId: string) {
+  function toggleCandidateSelected(candidateId: string, multi: boolean = false) {
     setSelectedCandidateIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(candidateId)) {
-        next.delete(candidateId);
+      if (multi) {
+        const next = new Set(prev);
+        if (next.has(candidateId)) {
+          next.delete(candidateId);
+        } else {
+          next.add(candidateId);
+        }
+        return next;
       } else {
-        next.add(candidateId);
+        if (prev.has(candidateId) && prev.size === 1) return new Set();
+        return new Set([candidateId]);
       }
-      return next;
     });
   }
 
@@ -905,19 +980,13 @@ export default function PlanViewerInner({
       const updated = await api.deletePage(planId, p);
       onPlanUpdated?.(updated);
       setConfirmDeletePage(null);
+      setDeleteConfirmText("");
+      const recs = await api.recommendPages(planId);
+      setRecommendedPages(recs);
     } catch (err) {
       setDrawError(err instanceof Error ? err.message : "Error al eliminar página");
     } finally {
       setPageBusy(false);
-    }
-  }
-
-  async function handleRestorePage(p: number) {
-    try {
-      const updated = await api.restorePage(planId, p);
-      onPlanUpdated?.(updated);
-    } catch (err) {
-      setDrawError(err instanceof Error ? err.message : "Error al restaurar página");
     }
   }
 
@@ -1019,12 +1088,17 @@ export default function PlanViewerInner({
     }
   }
 
-  function toggleSelected(id: number) {
+  function toggleSelected(id: number, multi: boolean = false) {
     setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+      if (multi) {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      } else {
+        if (prev.has(id) && prev.size === 1) return new Set();
+        return new Set([id]);
+      }
     });
   }
 
@@ -1250,7 +1324,7 @@ export default function PlanViewerInner({
   };
 
   function selectAll() {
-    setSelectedIds(new Set(elements.map((e) => e.id)));
+    setSelectedIds(new Set(visibleElements.map((e) => e.id)));
   }
 
   function clearSelection() {
@@ -1451,13 +1525,13 @@ export default function PlanViewerInner({
             : "default";
 
   // Totales de la página actual (sidebar izquierdo)
-  const totalWallM = elements
+  const totalWallM = visibleElements
     .filter((e) => e.type === "wall")
     .reduce((acc, e) => acc + (e.length_m ?? 0), 0);
-  const totalRoomM2 = elements
+  const totalRoomM2 = visibleElements
     .filter((e) => e.type === "room")
     .reduce((acc, e) => acc + (e.area_m2 ?? 0), 0);
-  const totalOpenings = elements.filter((e) => e.type === "opening").length;
+  const totalOpenings = visibleElements.filter((e) => e.type === "opening").length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1480,6 +1554,8 @@ export default function PlanViewerInner({
         </div>
       )}
 
+
+
       <div className="flex flex-col gap-3 lg:flex-row" style={{ minHeight: height + 80 }}>
         {/* PANEL IZQUIERDO — Elementos */}
         <aside className="flex w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
@@ -1487,15 +1563,15 @@ export default function PlanViewerInner({
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
               Elementos
             </h3>
-            {elements.length > 0 && (
+            {visibleElements.length > 0 && (
               <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 select-none">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size === elements.length && elements.length > 0}
+                  checked={selectedIds.size === visibleElements.length && visibleElements.length > 0}
                   ref={(el) => {
                     if (el) {
                       el.indeterminate =
-                        selectedIds.size > 0 && selectedIds.size < elements.length;
+                        selectedIds.size > 0 && selectedIds.size < visibleElements.length;
                     }
                   }}
                   onChange={(e) => (e.target.checked ? selectAll() : clearSelection())}
@@ -1506,7 +1582,7 @@ export default function PlanViewerInner({
             )}
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Página {page} · {elements.length} dibujado{elements.length === 1 ? "" : "s"}
+            Página {page} · {visibleElements.length} dibujado{visibleElements.length === 1 ? "" : "s"}
           </p>
 
           {/* Totales */}
@@ -1580,8 +1656,21 @@ export default function PlanViewerInner({
                   </button>
                 </div>
 
+                {/* Ocultar Detección de IA */}
+                <button
+                  type="button"
+                  onClick={() => setHideAiElements((v) => !v)}
+                  className={`flex w-full items-center justify-center gap-1.5 rounded border py-1.5 text-[11px] font-semibold transition-colors ${
+                    hideAiElements
+                      ? "border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-400"
+                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {hideAiElements ? "Mostrar dibujos IA" : "Ocultar dibujos IA"}
+                </button>
+
                 {/* Resumen Candidatos Muros */}
-                {wallCandidates.length > 0 && (() => {
+                {!hideAiElements && wallCandidates.length > 0 && (() => {
                   const selCount = wallCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
                   return (
                     <div className="rounded-lg bg-sky-50/50 border border-sky-100 p-2 space-y-1.5 dark:bg-sky-950/20 dark:border-sky-900/50">
@@ -1613,7 +1702,7 @@ export default function PlanViewerInner({
                 })()}
 
                 {/* Resumen Candidatos Recintos */}
-                {roomCandidates.length > 0 && (() => {
+                {!hideAiElements && roomCandidates.length > 0 && (() => {
                   const selCount = roomCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
                   return (
                     <div className="rounded-lg bg-emerald-50/50 border border-emerald-100 p-2 space-y-1.5 dark:bg-emerald-950/20 dark:border-emerald-900/50">
@@ -1645,7 +1734,7 @@ export default function PlanViewerInner({
                 })()}
 
                 {/* Resumen Candidatos Aberturas */}
-                {openingCandidates.length > 0 && (() => {
+                {!hideAiElements && openingCandidates.length > 0 && (() => {
                   const selCount = openingCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
                   return (
                     <div className="rounded-lg bg-amber-50/50 border border-amber-100 p-2 space-y-1.5 dark:bg-amber-950/20 dark:border-amber-900/50">
@@ -1725,16 +1814,18 @@ export default function PlanViewerInner({
 
           {elementsLoading ? (
             <p className="py-4 text-center text-xs text-slate-400">Cargando elementos...</p>
-          ) : elements.length === 0 ? (
+          ) : visibleElements.length === 0 ? (
             <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
               <div>
                 <p className="font-medium">Sin elementos en esta página</p>
-                <p className="mt-1">Activá Muro, Recinto o Abertura.</p>
+                <p className="mt-1 font-normal text-slate-500 dark:text-slate-400">
+                  {hideAiElements ? "Se ocultaron los elementos de la IA." : "Activá Muro, Recinto o Abertura."}
+                </p>
               </div>
             </div>
           ) : (
             <ul className="max-h-[480px] flex-1 space-y-1.5 overflow-y-auto pr-1">
-              {elements.map((el, idx) => {
+              {visibleElements.map((el, idx) => {
                 const selected = selectedIds.has(el.id);
                 const editing = editingId === el.id;
                 const hovered = hoveredId === el.id;
@@ -1755,7 +1846,7 @@ export default function PlanViewerInner({
                       <input
                         type="checkbox"
                         checked={selected}
-                        onChange={() => toggleSelected(el.id)}
+                        onChange={() => toggleSelected(el.id, true)}
                         onClick={(e) => e.stopPropagation()}
                         className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand focus:ring-1 focus:ring-brand dark:border-slate-600 dark:bg-slate-900"
                         aria-label="Seleccionar elemento"
@@ -1770,9 +1861,9 @@ export default function PlanViewerInner({
                           className="h-2.5 w-2.5 shrink-0 rounded-sm"
                           style={{
                             backgroundColor:
-                              el.type === "wall" ? "#2563eb"
-                              : el.type === "room" ? "#22c55e"
-                              : "#ea580c",
+                              el.type === "wall" ? "#16A34A"
+                              : el.type === "room" ? "#2563EB"
+                              : "#D97706",
                           }}
                         />
                         <div className="min-w-0 flex-1">
@@ -1823,50 +1914,6 @@ export default function PlanViewerInner({
 
         {/* CANVAS CENTRAL */}
         <div className="min-w-0 flex-1">
-          {recommendedPages.some((p) => p.recommended) && (
-            <div className="mb-2.5 rounded-lg border border-emerald-200/60 bg-emerald-50/70 p-2.5 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 font-semibold">
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    className="text-emerald-600 dark:text-emerald-400"
-                  >
-                    <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
-                    <path d="M9 18h6" />
-                    <path d="M10 22h4" />
-                  </svg>
-                  Páginas recomendadas (Plano de Arquitectura / Distribución):
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {recommendedPages
-                    .filter((p) => p.recommended)
-                    .map((p) => (
-                      <button
-                        key={p.page}
-                        type="button"
-                        onClick={() => goToPage(p.page)}
-                        title={p.reason}
-                        className={`px-2 py-0.5 text-[11px] font-bold rounded border shadow-sm transition-all duration-200 ${
-                          page === p.page
-                            ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-600/10"
-                            : "bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 dark:bg-slate-900 dark:border-emerald-800/80 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-                        }`}
-                      >
-                        Pág. {p.page}
-                      </button>
-                    ))}
-                </div>
-              </div>
-              <span className="text-[10px] text-emerald-600/85 dark:text-emerald-400/80 font-medium">
-                Análisis local instantáneo (Costo $0)
-              </span>
-            </div>
-          )}
 
           {/* Controles de página */}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -1957,32 +2004,6 @@ export default function PlanViewerInner({
             )}
           </div>
 
-          {/* Páginas ocultadas */}
-          {(deletedPages ?? []).length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50/40 px-2.5 py-1.5 text-xs dark:border-slate-800 dark:bg-slate-950/30">
-              <span className="font-semibold text-slate-500 dark:text-slate-400">
-                Páginas ocultadas:
-              </span>
-              {(deletedPages ?? [])
-                .slice()
-                .sort((a, b) => a - b)
-                .map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => handleRestorePage(p)}
-                    title="Restaurar página"
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 font-medium text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                  >
-                    Pág. {p}
-                    <span className="text-slate-400" aria-hidden>
-                      +
-                    </span>
-                    <span className="sr-only">Restaurar</span>
-                  </button>
-                ))}
-            </div>
-          )}
 
           {calibrating && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700 dark:bg-amber-950/40">
@@ -2069,7 +2090,7 @@ export default function PlanViewerInner({
             >
               {show3D ? (
                 <Plan3DViewer
-                  elements={elements}
+                  elements={visibleElements}
                   scale={currentPageScale ?? 100}
                   page={page}
                   onClose={() => setShow3D(false)}
@@ -2109,27 +2130,69 @@ export default function PlanViewerInner({
               {/* Overlay SVG: elementos + preview + calibración */}
               {natural && (
                 <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                  <defs>
+                    <filter id="shadow-glow" x="-20%" y="-20%" width="140%" height="140%">
+                      <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="rgba(0,0,0,0.25)" />
+                    </filter>
+                    <filter id="shadow-glow-sm" x="-20%" y="-20%" width="140%" height="140%">
+                      <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.3)" />
+                    </filter>
+                    <filter id="wall-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur in="SourceAlpha" stdDeviation="1.4" />
+                      <feOffset dx="0" dy="1.2" result="off" />
+                      <feComponentTransfer><feFuncA type="linear" slope="0.35" /></feComponentTransfer>
+                      <feMerge>
+                        <feMergeNode />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                    <style>{`
+                      @keyframes muroai-pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+                      @keyframes muroai-dash { to { stroke-dashoffset: -24; } }
+                      .muroai-pulse { animation: muroai-pulse 1.6s ease-in-out infinite; }
+                      .muroai-dash { animation: muroai-dash 1.4s linear infinite; }
+                    `}</style>
+                  </defs>
                   <g
                     transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
-                    className={draggingVertex ? "pointer-events-none" : ""}
                   >
                     {/* Recintos (atrás) */}
-                    {elements
+                    {visibleElements
                       .filter((el) => el.type === "room")
                       .map((el) => {
                         const pts = chunkPoints(el.geometry.points);
                         const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                         const hovered = hoveredId === el.id;
                         const sel = selectedIds.has(el.id);
+                        
+                        // Plan0 style colors
+                        const fillColor = sel ? "rgba(192, 232, 255, 0.45)" : hovered ? "rgba(192, 232, 255, 0.35)" : "rgba(192, 232, 255, 0.25)";
+                        const strokeColor = sel ? "#2563EB" : hovered ? "#3B82F6" : "#60A5FA";
+                        
+                        const centroid = calculatePolygonCentroid(pts);
+                        const labelText = (el.geometry.label || "Recinto").toUpperCase();
+                        const areaText = el.area_m2 ? `${el.area_m2.toFixed(1)} m²` : "";
+                        const pillText = areaText ? `${labelText} · ${areaText}` : labelText;
+                        // Largo visual del pill — basado en caracteres aproximados
+                        const pillW = pillText.length * 6.6 + 22;
+
                         return (
-                          <g key={el.id}>
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {sel && (
+                              <polygon
+                                points={ptsStr}
+                                fill="rgba(37, 99, 235, 0.1)"
+                                className="pointer-events-none"
+                              />
+                            )}
                             <polygon
                               points={ptsStr}
-                              fill={hovered ? "rgba(34, 197, 94, 0.45)" : "rgba(34, 197, 94, 0.22)"}
-                              stroke={hovered ? "#16a34a" : "#22c55e"}
-                              strokeWidth={(hovered ? 3 : 2) / scale}
+                              fill={fillColor}
+                              stroke={strokeColor}
+                              strokeWidth={(sel || hovered ? 3 : 2) / scale}
                               strokeLinejoin="round"
-                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              filter={sel || hovered ? "url(#shadow-glow)" : "none"}
+                              className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
                               onMouseEnter={() => {
                                 if (!draggingVertex) setHoveredId(el.id);
                               }}
@@ -2138,25 +2201,53 @@ export default function PlanViewerInner({
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toggleSelected(el.id);
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
                               }}
                             />
-                            {sel && (
-                              <polygon
-                                points={ptsStr}
-                                fill="none"
-                                stroke="#1f4e8c"
-                                strokeWidth={3 / scale}
-                                strokeDasharray={`${8 / scale} ${4 / scale}`}
-                                strokeLinejoin="round"
+                            {/* Pill Label — limpio, alta contraste, tipografía tracked */}
+                            <g
+                              transform={`translate(${centroid.x}, ${centroid.y}) scale(${1 / scale})`}
+                              className="pointer-events-none transition-all duration-200"
+                            >
+                              {/* Outline blanco sutil para contraste sobre cualquier fondo */}
+                              <rect
+                                x={-pillW / 2 - 1}
+                                y={-13}
+                                width={pillW + 2}
+                                height={26}
+                                rx={13}
+                                fill="#FFFFFF"
+                                opacity={0.35}
                               />
-                            )}
+                              <rect
+                                x={-pillW / 2}
+                                y={-12}
+                                width={pillW}
+                                height={24}
+                                rx={12}
+                                fill={sel ? "#1D4ED8" : "#0F172A"}
+                                opacity={sel || hovered ? 0.96 : 0.82}
+                                filter="url(#shadow-glow-sm)"
+                              />
+                              <text
+                                x={0}
+                                y={4}
+                                fill="#FFFFFF"
+                                fontSize={10.5}
+                                fontWeight="700"
+                                textAnchor="middle"
+                                style={{ letterSpacing: "0.04em" }}
+                                className="font-sans"
+                              >
+                                {pillText}
+                              </text>
+                            </g>
                           </g>
                         );
                       })}
 
                     {/* Candidatos Recintos */}
-                    {roomCandidates.map((c) => {
+                    {!hideAiElements && roomCandidates.map((c) => {
                       const pts = chunkPoints(c.geometry.points);
                       const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                       const selected = selectedCandidateIds.has(c.id);
@@ -2166,35 +2257,40 @@ export default function PlanViewerInner({
                           points={ptsStr}
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleCandidateSelected(c.id);
+                            toggleCandidateSelected(c.id, e.shiftKey || e.metaKey || e.ctrlKey);
                           }}
-                          className="pointer-events-auto cursor-pointer"
-                          fill={selected ? "rgba(16, 185, 129, 0.15)" : "rgba(148, 163, 184, 0.05)"}
-                          stroke={selected ? "#10b981" : "#94a3b8"}
-                          strokeWidth={(selected ? 2 : 1) / scale}
-                          strokeDasharray={`${6 / scale} ${4 / scale}`}
-                          opacity={0.8}
+                          className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
+                          fill={selected ? "rgba(59, 130, 246, 0.25)" : "rgba(96, 165, 250, 0.15)"}
+                          stroke={selected ? "#2563EB" : "#3B82F6"}
+                          strokeWidth={(selected ? 2.5 : 2) / scale}
+                          strokeDasharray={`${8 / scale} ${4 / scale}`}
+                          strokeLinejoin="round"
+                          opacity={1}
                         />
                       );
                     })}
 
                     {/* Muros */}
-                    {elements
+                    {visibleElements
                       .filter((el) => el.type === "wall")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
                         const sel = selectedIds.has(el.id);
+                        // Espesor visual del muro: 8px base, +1 hover, halo de selección detrás
+                        const baseW = 8 / scale;
+                        const hoverW = 9.5 / scale;
+                        const w = hovered ? hoverW : baseW;
                         return (
-                          <g key={el.id}>
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <line
                                 x1={x1}
                                 y1={y1}
                                 x2={x2}
                                 y2={y2}
-                                stroke="#1f4e8c"
-                                strokeWidth={12 / scale}
+                                stroke="#3B82F6"
+                                strokeWidth={(8 / scale) + (12 / scale)}
                                 strokeLinecap="round"
                                 opacity={0.35}
                               />
@@ -2205,7 +2301,7 @@ export default function PlanViewerInner({
                               x2={x2}
                               y2={y2}
                               stroke="transparent"
-                              strokeWidth={24 / scale}
+                              strokeWidth={34 / scale}
                               className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
                               onMouseEnter={() => {
                                 if (!draggingVertex) setHoveredId(el.id);
@@ -2215,7 +2311,7 @@ export default function PlanViewerInner({
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toggleSelected(el.id);
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
                               }}
                             />
                             <line
@@ -2223,18 +2319,18 @@ export default function PlanViewerInner({
                               y1={y1}
                               x2={x2}
                               y2={y2}
-                              stroke={hovered ? "#3b82f6" : "#2563eb"}
-                              strokeWidth={(hovered ? 8 : 6) / scale}
+                              stroke={hovered ? "#334155" : "#1E293B"}
+                              strokeWidth={(hovered ? 10 : 8) / scale}
                               strokeLinecap="round"
-                              opacity={0.85}
-                              className="pointer-events-none"
+                              opacity={1}
+                              className="pointer-events-none transition-colors duration-200"
                             />
                           </g>
                         );
                       })}
 
                     {/* Candidatos Muros */}
-                    {wallCandidates.map((c) => {
+                    {!hideAiElements && wallCandidates.map((c) => {
                       const pts = c.geometry.points;
                       if (pts.length < 4) return null;
                       const [x1, y1, x2, y2] = pts;
@@ -2244,9 +2340,9 @@ export default function PlanViewerInner({
                           key={c.id}
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleCandidateSelected(c.id);
+                            toggleCandidateSelected(c.id, e.shiftKey || e.metaKey || e.ctrlKey);
                           }}
-                          className="pointer-events-auto cursor-pointer"
+                          className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
                         >
                           <line
                             x1={x1}
@@ -2261,44 +2357,71 @@ export default function PlanViewerInner({
                             y1={y1}
                             x2={x2}
                             y2={y2}
-                            stroke={selected ? "#eab308" : "#94a3b8"}
-                            strokeWidth={(selected ? 8 : 4) / scale}
-                            strokeLinecap="square"
-                            strokeDasharray={`${6 / scale} ${4 / scale}`}
-                            opacity={selected ? 0.9 : 0.4}
+                            stroke={selected ? "#1E293B" : "#64748B"}
+                            strokeWidth={(selected ? 8 : 5.5) / scale}
+                            strokeLinecap="round"
+                            strokeDasharray={`${10 / scale} ${6 / scale}`}
+                            opacity={1}
                           />
                         </g>
                       );
                     })}
 
-                    {/* Aberturas */}
-                    {elements
+                    {/* Aberturas — símbolos arquitectónicos según subtipo */}
+                    {visibleElements
                       .filter((el) => el.type === "opening")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
                         const sel = selectedIds.has(el.id);
+                        const subtype = (el.geometry.subtype || "door").toLowerCase();
+                        const isWindow = subtype.includes("window") || subtype.includes("ventana");
+                        const isSliding = subtype.includes("sliding") || subtype.includes("corrediza");
+
+                        const dx = x2 - x1;
+                        const dy = y2 - y1;
+                        const L = Math.hypot(dx, dy);
+                        if (L < 0.01) return null;
+                        const ux = dx / L;
+                        const uy = dy / L;
+                        // Perpendicular hacia donde se dibuja el barrido / espesor
+                        const nx = -uy;
+                        const ny = ux;
+
+                        // Paleta: ámbar para puertas, sky-blue para ventanas
+                        const baseColor = isWindow ? "#0EA5E9" : "#D97706";
+                        const hotColor = isWindow ? "#0284C7" : "#B45309";
+                        const color = hovered ? hotColor : baseColor;
+                        const sw = (hovered ? 2.4 : 2.0) / scale;
+                        const off = 3.5 / scale; // separación de jambas
+
+                        // Endpoint del barrido (puerta abierta 90°)
+                        const swingX = x1 + nx * L;
+                        const swingY = y1 + ny * L;
+
                         return (
-                          <g key={el.id}>
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {/* Halo de selección */}
                             {sel && (
                               <line
                                 x1={x1}
                                 y1={y1}
                                 x2={x2}
                                 y2={y2}
-                                stroke="#1f4e8c"
-                                strokeWidth={14 / scale}
-                                strokeLinecap="square"
-                                opacity={0.35}
+                                stroke={baseColor}
+                                strokeWidth={16 / scale}
+                                strokeLinecap="round"
+                                opacity={0.22}
                               />
                             )}
+                            {/* Hit area invisible */}
                             <line
                               x1={x1}
                               y1={y1}
                               x2={x2}
                               y2={y2}
                               stroke="transparent"
-                              strokeWidth={24 / scale}
+                              strokeWidth={28 / scale}
                               className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
                               onMouseEnter={() => {
                                 if (!draggingVertex) setHoveredId(el.id);
@@ -2308,58 +2431,330 @@ export default function PlanViewerInner({
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toggleSelected(el.id);
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
                               }}
                             />
+                            {/* "Hueco" en el muro — línea blanca gruesa que interrumpe el trazo */}
                             <line
                               x1={x1}
                               y1={y1}
                               x2={x2}
                               y2={y2}
-                              stroke={hovered ? "#fb923c" : "#ea580c"}
-                              strokeWidth={(hovered ? 10 : 8) / scale}
-                              strokeLinecap="square"
-                              opacity={0.9}
+                              stroke="#FFFFFF"
+                              strokeWidth={11 / scale}
+                              strokeLinecap="butt"
                               className="pointer-events-none"
                             />
+
+                            {isWindow ? (
+                              <g className="pointer-events-none">
+                                {/* Jamba superior */}
+                                <line
+                                  x1={x1 + nx * off}
+                                  y1={y1 + ny * off}
+                                  x2={x2 + nx * off}
+                                  y2={y2 + ny * off}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                                {/* Vidrio (línea central, más fina) */}
+                                <line
+                                  x1={x1}
+                                  y1={y1}
+                                  x2={x2}
+                                  y2={y2}
+                                  stroke={color}
+                                  strokeWidth={sw * 0.6}
+                                  strokeLinecap="round"
+                                  opacity={0.85}
+                                />
+                                {/* Jamba inferior */}
+                                <line
+                                  x1={x1 - nx * off}
+                                  y1={y1 - ny * off}
+                                  x2={x2 - nx * off}
+                                  y2={y2 - ny * off}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                                {/* Marcas de jamba en extremos */}
+                                <line
+                                  x1={x1 + nx * (off + 1.5 / scale)}
+                                  y1={y1 + ny * (off + 1.5 / scale)}
+                                  x2={x1 - nx * (off + 1.5 / scale)}
+                                  y2={y1 - ny * (off + 1.5 / scale)}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1={x2 + nx * (off + 1.5 / scale)}
+                                  y1={y2 + ny * (off + 1.5 / scale)}
+                                  x2={x2 - nx * (off + 1.5 / scale)}
+                                  y2={y2 - ny * (off + 1.5 / scale)}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                              </g>
+                            ) : isSliding ? (
+                              <g className="pointer-events-none">
+                                {/* Corrediza: 2 panels desplazados perpendicularmente */}
+                                <line
+                                  x1={x1 + nx * (off * 0.6)}
+                                  y1={y1 + ny * (off * 0.6)}
+                                  x2={(x1 + x2) / 2 + nx * (off * 0.6)}
+                                  y2={(y1 + y2) / 2 + ny * (off * 0.6)}
+                                  stroke={color}
+                                  strokeWidth={sw * 1.4}
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1={(x1 + x2) / 2 - nx * (off * 0.6)}
+                                  y1={(y1 + y2) / 2 - ny * (off * 0.6)}
+                                  x2={x2 - nx * (off * 0.6)}
+                                  y2={y2 - ny * (off * 0.6)}
+                                  stroke={color}
+                                  strokeWidth={sw * 1.4}
+                                  strokeLinecap="round"
+                                />
+                                {/* Marcas de jamba */}
+                                <line
+                                  x1={x1 + nx * off}
+                                  y1={y1 + ny * off}
+                                  x2={x1 - nx * off}
+                                  y2={y1 - ny * off}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1={x2 + nx * off}
+                                  y1={y2 + ny * off}
+                                  x2={x2 - nx * off}
+                                  y2={y2 - ny * off}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                              </g>
+                            ) : (
+                              <g className="pointer-events-none">
+                                {/* Puerta: hoja perpendicular + arco de barrido 90° */}
+                                {/* Arco (más sutil) */}
+                                <path
+                                  d={`M ${x2} ${y2} A ${L} ${L} 0 0 1 ${swingX} ${swingY}`}
+                                  fill="none"
+                                  stroke={color}
+                                  strokeWidth={sw * 0.55}
+                                  strokeLinecap="round"
+                                  opacity={0.55}
+                                />
+                                {/* Hoja de puerta */}
+                                <line
+                                  x1={x1}
+                                  y1={y1}
+                                  x2={swingX}
+                                  y2={swingY}
+                                  stroke={color}
+                                  strokeWidth={sw * 1.4}
+                                  strokeLinecap="round"
+                                />
+                                {/* Marcas de jamba en cada extremo */}
+                                <line
+                                  x1={x1 + nx * off}
+                                  y1={y1 + ny * off}
+                                  x2={x1 - nx * off}
+                                  y2={y1 - ny * off}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1={x2 + nx * off}
+                                  y1={y2 + ny * off}
+                                  x2={x2 - nx * off}
+                                  y2={y2 - ny * off}
+                                  stroke={color}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                              </g>
+                            )}
                           </g>
                         );
                       })}
 
-                    {/* Candidatos Aberturas */}
-                    {openingCandidates.map((c) => {
-                      const bbox = c.bbox;
-                      if (!bbox || bbox.length < 4) return null;
-                      const [bx1, by1, bx2, by2] = bbox;
+                    {/* Candidatos Aberturas — preview con símbolos arquitectónicos */}
+                    {!hideAiElements && openingCandidates.map((c) => {
                       const selected = selectedCandidateIds.has(c.id);
+                      const subtype = (c.subtype || "door").toLowerCase();
+                      const isWindow = subtype.includes("window") || subtype.includes("ventana");
+                      const isSliding = subtype.includes("sliding") || subtype.includes("corrediza");
+
+                      // Computamos endpoints desde cx/cy + orientación + ancho
+                      const pxPerM = currentPageScale || 150;
+                      const cx = typeof c.cx === "number" ? c.cx : null;
+                      const cy = typeof c.cy === "number" ? c.cy : null;
+                      const widthM = typeof c.default_width_m === "number" ? c.default_width_m : 0.8;
+                      const orientation = (c.orientation || "h").toLowerCase();
+
+                      let x1: number, y1: number, x2: number, y2: number;
+                      if (cx != null && cy != null) {
+                        const half = (widthM / 2) * pxPerM;
+                        if (orientation === "v") {
+                          x1 = cx; y1 = cy - half;
+                          x2 = cx; y2 = cy + half;
+                        } else {
+                          x1 = cx - half; y1 = cy;
+                          x2 = cx + half; y2 = cy;
+                        }
+                      } else if (c.bbox && c.bbox.length >= 4) {
+                        // Fallback: usar bbox
+                        const [bx1, by1, bx2, by2] = c.bbox;
+                        const bw = bx2 - bx1;
+                        const bh = by2 - by1;
+                        if (bw >= bh) {
+                          x1 = bx1; y1 = (by1 + by2) / 2;
+                          x2 = bx2; y2 = (by1 + by2) / 2;
+                        } else {
+                          x1 = (bx1 + bx2) / 2; y1 = by1;
+                          x2 = (bx1 + bx2) / 2; y2 = by2;
+                        }
+                      } else {
+                        return null;
+                      }
+
+                      const dx = x2 - x1;
+                      const dy = y2 - y1;
+                      const L = Math.hypot(dx, dy);
+                      if (L < 0.01) return null;
+                      const ux = dx / L;
+                      const uy = dy / L;
+                      const nx = -uy;
+                      const ny = ux;
+
+                      const baseColor = isWindow ? "#0284C7" : "#D97706";
+                      const dimColor = isWindow ? "#38BDF8" : "#F59E0B";
+                      const color = selected ? baseColor : dimColor;
+                      const sw = (selected ? 2.5 : 1.8) / scale;
+                      const off = 3.5 / scale;
+                      const swingX = x1 + nx * L;
+                      const swingY = y1 + ny * L;
+
+                      // Posición del label (un poco arriba del centro perpendicular)
+                      const midX = (x1 + x2) / 2 + nx * (L * 0.6);
+                      const midY = (y1 + y2) / 2 + ny * (L * 0.6);
+
                       return (
                         <g
                           key={c.id}
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleCandidateSelected(c.id);
+                            toggleCandidateSelected(c.id, e.shiftKey || e.metaKey || e.ctrlKey);
                           }}
-                          className="pointer-events-auto cursor-pointer select-none"
+                          className={`pointer-events-auto cursor-pointer select-none transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
                         >
+                          {/* Hit area */}
                           <rect
-                            x={bx1}
-                            y={by1}
-                            width={bx2 - bx1}
-                            height={by2 - by1}
-                            fill={selected ? "rgba(245, 158, 11, 0.15)" : "rgba(148, 163, 184, 0.05)"}
-                            stroke={selected ? "#f59e0b" : "#94a3b8"}
-                            strokeWidth={(selected ? 1.5 : 1) / scale}
-                            strokeDasharray={`${4 / scale} ${3 / scale}`}
+                            x={Math.min(x1, x2, swingX) - 10 / scale}
+                            y={Math.min(y1, y2, swingY) - 10 / scale}
+                            width={Math.abs(Math.max(x1, x2, swingX) - Math.min(x1, x2, swingX)) + 20 / scale}
+                            height={Math.abs(Math.max(y1, y2, swingY) - Math.min(y1, y2, swingY)) + 20 / scale}
+                            fill="transparent"
                           />
-                          <text
-                            x={(bx1 + bx2) / 2}
-                            y={(by1 + by2) / 2 + 3 / scale}
-                            textAnchor="middle"
-                            fontSize={`${Math.max(9, 10 / scale)}px`}
-                            className="font-bold fill-amber-700 dark:fill-amber-400 select-none pointer-events-none"
-                          >
-                            {c.label}
-                          </text>
+                          {/* Hueco en muro */}
+                          <line
+                            x1={x1}
+                            y1={y1}
+                            x2={x2}
+                            y2={y2}
+                            stroke="#FFFFFF"
+                            strokeWidth={9 / scale}
+                            strokeLinecap="butt"
+                            opacity={0.85}
+                          />
+
+                          {isWindow ? (
+                            <g>
+                              <line
+                                x1={x1 + nx * off} y1={y1 + ny * off}
+                                x2={x2 + nx * off} y2={y2 + ny * off}
+                                stroke={color} strokeWidth={sw} strokeLinecap="round"
+                                strokeDasharray={`${6 / scale} ${4 / scale}`}
+                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                              />
+                              <line
+                                x1={x1 - nx * off} y1={y1 - ny * off}
+                                x2={x2 - nx * off} y2={y2 - ny * off}
+                                stroke={color} strokeWidth={sw} strokeLinecap="round"
+                                strokeDasharray={`${6 / scale} ${4 / scale}`}
+                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                              />
+                            </g>
+                          ) : isSliding ? (
+                            <g>
+                              <line
+                                x1={x1 + nx * off * 0.6} y1={y1 + ny * off * 0.6}
+                                x2={(x1 + x2) / 2 + nx * off * 0.6} y2={(y1 + y2) / 2 + ny * off * 0.6}
+                                stroke={color} strokeWidth={sw * 1.3} strokeLinecap="round"
+                                strokeDasharray={`${6 / scale} ${4 / scale}`}
+                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                              />
+                              <line
+                                x1={(x1 + x2) / 2 - nx * off * 0.6} y1={(y1 + y2) / 2 - ny * off * 0.6}
+                                x2={x2 - nx * off * 0.6} y2={y2 - ny * off * 0.6}
+                                stroke={color} strokeWidth={sw * 1.3} strokeLinecap="round"
+                                strokeDasharray={`${6 / scale} ${4 / scale}`}
+                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                              />
+                            </g>
+                          ) : (
+                            <g>
+                              <path
+                                d={`M ${x2} ${y2} A ${L} ${L} 0 0 1 ${swingX} ${swingY}`}
+                                fill="none"
+                                stroke={color}
+                                strokeWidth={sw * 0.55}
+                                opacity={0.6}
+                                strokeDasharray={`${4 / scale} ${3 / scale}`}
+                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                              />
+                              <line
+                                x1={x1} y1={y1} x2={swingX} y2={swingY}
+                                stroke={color} strokeWidth={sw * 1.3} strokeLinecap="round"
+                                strokeDasharray={`${6 / scale} ${4 / scale}`}
+                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                              />
+                            </g>
+                          )}
+
+                          {/* Label flotante */}
+                          {c.label && (
+                            <g transform={`translate(${midX}, ${midY}) scale(${1 / scale})`} className="pointer-events-none">
+                              <rect
+                                x={-c.label.length * 3.2 - 6}
+                                y={-8}
+                                width={c.label.length * 6.4 + 12}
+                                height={16}
+                                rx={8}
+                                fill={selected ? baseColor : "#475569"}
+                                opacity={0.92}
+                              />
+                              <text
+                                x={0}
+                                y={3.5}
+                                textAnchor="middle"
+                                fontSize={10}
+                                fontWeight={600}
+                                fill="#FFFFFF"
+                              >
+                                {c.label}
+                              </text>
+                            </g>
+                          )}
                         </g>
                       );
                     })}
@@ -2373,7 +2768,7 @@ export default function PlanViewerInner({
                           y1={activePoints[0].y}
                           x2={mousePos.x}
                           y2={mousePos.y}
-                          stroke={tool === "wall" ? "#2563eb" : "#ea580c"}
+                          stroke={tool === "wall" ? "#16A34A" : "#D97706"}
                           strokeWidth={6 / scale}
                           strokeLinecap="round"
                           strokeDasharray={`${6 / scale} ${4 / scale}`}
@@ -2401,8 +2796,8 @@ export default function PlanViewerInner({
                       const isFirstClosing = i === 0 && isClosingRoom;
                       const color =
                         isFirstClosing ? "#fbbf24"
-                        : tool === "wall" ? "#2563eb"
-                        : tool === "opening" ? "#ea580c"
+                        : tool === "wall" ? "#16A34A"
+                        : tool === "opening" ? "#D97706"
                         : "#22c55e";
                       return (
                         <circle
@@ -2452,26 +2847,20 @@ export default function PlanViewerInner({
                           const [x1, y1, x2, y2] = pts;
                           return (
                             <>
-                              <circle
-                                cx={x1}
-                                cy={y1}
-                                r={6 / scale}
-                                fill="#2563eb"
-                                stroke="#ffffff"
-                                strokeWidth={1.5 / scale}
+                              <g
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 0)}
-                              />
-                              <circle
-                                cx={x2}
-                                cy={y2}
-                                r={6 / scale}
-                                fill="#2563eb"
-                                stroke="#ffffff"
-                                strokeWidth={1.5 / scale}
+                              >
+                                <circle cx={x1} cy={y1} r={22 / scale} fill="transparent" />
+                                <circle cx={x1} cy={y1} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                              </g>
+                              <g
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 2)}
-                              />
+                              >
+                                <circle cx={x2} cy={y2} r={22 / scale} fill="transparent" />
+                                <circle cx={x2} cy={y2} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                              </g>
                             </>
                           );
                         })()}
@@ -2481,26 +2870,20 @@ export default function PlanViewerInner({
                           const [x1, y1, x2, y2] = pts;
                           return (
                             <>
-                              <circle
-                                cx={x1}
-                                cy={y1}
-                                r={6 / scale}
-                                fill="#ea580c"
-                                stroke="#ffffff"
-                                strokeWidth={1.5 / scale}
+                              <g
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 0)}
-                              />
-                              <circle
-                                cx={x2}
-                                cy={y2}
-                                r={6 / scale}
-                                fill="#ea580c"
-                                stroke="#ffffff"
-                                strokeWidth={1.5 / scale}
+                              >
+                                <circle cx={x1} cy={y1} r={22 / scale} fill="transparent" />
+                                <circle cx={x1} cy={y1} r={6 / scale} fill="#ea580c" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                              </g>
+                              <g
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 2)}
-                              />
+                              >
+                                <circle cx={x2} cy={y2} r={22 / scale} fill="transparent" />
+                                <circle cx={x2} cy={y2} r={6 / scale} fill="#ea580c" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                              </g>
                             </>
                           );
                         })()}
@@ -2515,20 +2898,16 @@ export default function PlanViewerInner({
                             const y = pts[i * 2 + 1];
                             const pointIndex = i * 2;
                             handles.push(
-                              <circle
+                              <g
                                 key={`vertex-${i}`}
-                                cx={x}
-                                cy={y}
-                                r={6 / scale}
-                                fill="#22c55e"
-                                stroke="#ffffff"
-                                strokeWidth={1.5 / scale}
                                 className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, pointIndex)}
                                 onDoubleClick={(e) => deleteVertex(e, selectedElement.id, pointIndex)}
                               >
                                 <title>Doble clic para eliminar vertice</title>
-                              </circle>
+                                <circle cx={x} cy={y} r={22 / scale} fill="transparent" />
+                                <circle cx={x} cy={y} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                              </g>
                             );
                           }
 
@@ -2544,20 +2923,16 @@ export default function PlanViewerInner({
                             const edgeIndex = i;
 
                             handles.push(
-                              <circle
+                              <g
                                 key={`midpoint-${i}`}
-                                cx={mx}
-                                cy={my}
-                                r={4.5 / scale}
-                                fill="#22c55e"
-                                stroke="#ffffff"
-                                strokeWidth={1 / scale}
-                                opacity={0.6}
                                 className="pointer-events-auto cursor-pointer hover:opacity-100 hover:scale-125 transition-all"
+                                opacity={0.6}
                                 onMouseDown={(e) => startDragMidpoint(e, selectedElement.id, edgeIndex, mx, my)}
                               >
                                 <title>Arrastra para crear un nuevo vertice</title>
-                              </circle>
+                                <circle cx={mx} cy={my} r={22 / scale} fill="transparent" />
+                                <circle cx={mx} cy={my} r={4.5 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1 / scale} />
+                              </g>
                             );
                           }
 
@@ -2813,22 +3188,42 @@ export default function PlanViewerInner({
       {confirmDeletePage != null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-          onClick={() => !pageBusy && setConfirmDeletePage(null)}
+          onClick={() => {
+            if (!pageBusy) {
+              setConfirmDeletePage(null);
+              setDeleteConfirmText("");
+            }
+          }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
           >
-            <h3 className="text-lg font-semibold">Eliminar página {confirmDeletePage}</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              La página queda oculta de la navegación y se eliminan los elementos dibujados en ella.
-              Podés restaurarla después desde la lista de páginas ocultadas, pero los elementos no
-              se recuperan.
-            </p>
+            <h3 className="text-lg font-semibold text-red-600 dark:text-red-400">Eliminar página {confirmDeletePage}</h3>
+            <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
+              <p>
+                Esta acción <strong>modificará el archivo PDF original</strong> eliminando la página físicamente.
+                Todos los elementos dibujados en ella se perderán y las páginas posteriores cambiarán de numeración.
+              </p>
+              <p className="font-semibold text-red-600 dark:text-red-400">Esta acción NO se puede deshacer.</p>
+              <p>Escribe <strong>ELIMINAR</strong> para confirmar:</p>
+            </div>
+            
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="ELIMINAR"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+            />
+
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmDeletePage(null)}
+                onClick={() => {
+                  setConfirmDeletePage(null);
+                  setDeleteConfirmText("");
+                }}
                 disabled={pageBusy}
                 className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
               >
@@ -2837,10 +3232,11 @@ export default function PlanViewerInner({
               <button
                 type="button"
                 onClick={() => applyDeletePage(confirmDeletePage)}
-                disabled={pageBusy}
+                disabled={pageBusy || deleteConfirmText !== "ELIMINAR"}
                 className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {pageBusy ? "Eliminando..." : "Eliminar página"}
+
               </button>
             </div>
           </div>

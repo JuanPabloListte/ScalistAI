@@ -91,6 +91,16 @@ export default function ProjectsPage() {
         </div>
       ) : (
         <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <li className="group relative flex flex-col rounded-xl border-2 border-dashed border-slate-300 bg-transparent p-4 transition hover:border-brand hover:bg-slate-50 dark:border-slate-700 dark:hover:border-sky-400 dark:hover:bg-slate-800/50">
+            <Link href="/projects/new" className="flex h-full min-h-[140px] flex-col items-center justify-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition group-hover:bg-brand/10 group-hover:text-brand dark:bg-slate-800 dark:text-slate-400 dark:group-hover:bg-sky-400/10 dark:group-hover:text-sky-400">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              </div>
+              <span className="font-semibold text-slate-500 transition group-hover:text-brand dark:text-slate-400 dark:group-hover:text-sky-400">
+                Crear nuevo proyecto
+              </span>
+            </Link>
+          </li>
           {projects.map((p) => {
             const isDraft = p.status === "draft";
             const href = isDraft ? `/projects/new?id=${p.id}` : `/projects/${p.id}`;
@@ -137,14 +147,14 @@ export default function ProjectsPage() {
 
                   <div className="mt-3 flex flex-1 flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
                     {p.address && (
-                      <p className="flex items-center gap-1">
-                        <span aria-hidden>📍</span>
+                      <p className="flex items-center gap-1.5">
+                        <MapPinIcon />
                         <span className="line-clamp-1">{p.address}</span>
                       </p>
                     )}
                     {p.building_type && (
-                      <p className="flex items-center gap-1">
-                        <span aria-hidden>🏗️</span>
+                      <p className="flex items-center gap-1.5">
+                        <BuildingIcon />
                         <span>{TYPE_LABEL[p.building_type] ?? p.building_type}</span>
                         {p.building_info && buildingFieldsList[0] && (
                           <span className="text-slate-400 dark:text-slate-500">
@@ -157,8 +167,8 @@ export default function ProjectsPage() {
                       </p>
                     )}
                     {planCount !== undefined && (
-                      <p className="flex items-center gap-1">
-                        <span aria-hidden>📄</span>
+                      <p className="flex items-center gap-1.5">
+                        <FileIcon />
                         <span>
                           {planCount === 0
                             ? "Sin planos"
@@ -436,6 +446,45 @@ function TrashIcon() {
       <path d="M10 11v6" />
       <path d="M14 11v6" />
       <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
+function MapPinIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+function BuildingIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+      <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+      <path d="M9 22v-4h6v4" />
+      <path d="M8 6h.01" />
+      <path d="M16 6h.01" />
+      <path d="M12 6h.01" />
+      <path d="M12 10h.01" />
+      <path d="M12 14h.01" />
+      <path d="M16 10h.01" />
+      <path d="M16 14h.01" />
+      <path d="M8 10h.01" />
+      <path d="M8 14h.01" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
     </svg>
   );
 }

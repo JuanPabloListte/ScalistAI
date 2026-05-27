@@ -7,12 +7,13 @@ import { useCallback, useEffect, useState } from "react";
 import { Stepper } from "@/components/wizard/stepper";
 import { Step1Basics } from "@/components/wizard/step-1-basics";
 import { Step2Plan } from "@/components/wizard/step-2-plan";
+import { Step3PageRoles } from "@/components/wizard/step-3-page-roles";
 import { Step3Location } from "@/components/wizard/step-3-location";
 import { Step4Building } from "@/components/wizard/step-4-building";
 import { Step5Review } from "@/components/wizard/step-5-review";
 import { api, type Project } from "@/lib/api";
 
-export default function NewProjectWizard() {
+function NewProjectWizardInner() {
   const router = useRouter();
   const params = useSearchParams();
   const resumeId = params.get("id");
@@ -36,7 +37,7 @@ export default function NewProjectWizard() {
         }
         // En edit mode arrancamos en el paso 3 (lo primero "editable" mas alla
         // del nombre); en wizard normal arrancamos en el siguiente al completado.
-        const startStep = editMode ? 3 : Math.min(5, Math.max(1, p.wizard_step + 1));
+        const startStep = editMode ? 3 : Math.min(6, Math.max(1, p.wizard_step + 1));
         setStep(startStep);
       })
       .catch((err) => {
@@ -47,9 +48,8 @@ export default function NewProjectWizard() {
         setLoadError(err instanceof Error ? err.message : "No se pudo cargar el proyecto");
       })
       .finally(() => setLoading(false));
-  }, [resumeId, router]);
+  }, [resumeId, router, editMode]);
 
-  const goNext = useCallback(() => setStep((s) => Math.min(5, s + 1)), []);
   const goBack = useCallback(() => setStep((s) => Math.max(1, s - 1)), []);
   const jumpTo = useCallback((target: number) => setStep(target), []);
 
@@ -104,18 +104,15 @@ export default function NewProjectWizard() {
         )}
 
         {step === 3 && project && (
-          <Step3Location
+          <Step3PageRoles
             project={project}
-            onSaved={(p) => {
-              setProject(p);
-              setStep(4);
-            }}
+            onSaved={() => setStep(4)}
             onBack={goBack}
           />
         )}
 
         {step === 4 && project && (
-          <Step4Building
+          <Step3Location
             project={project}
             onSaved={(p) => {
               setProject(p);
@@ -126,6 +123,17 @@ export default function NewProjectWizard() {
         )}
 
         {step === 5 && project && (
+          <Step4Building
+            project={project}
+            onSaved={(p) => {
+              setProject(p);
+              setStep(6);
+            }}
+            onBack={goBack}
+          />
+        )}
+
+        {step === 6 && project && (
           <Step5Review
             project={project}
             onActivate={(p) => router.push(`/projects/${p.id}`)}
@@ -141,5 +149,15 @@ export default function NewProjectWizard() {
         </p>
       )}
     </main>
+  );
+}
+
+import { Suspense } from "react";
+
+export default function NewProjectWizard() {
+  return (
+    <Suspense fallback={<main className="mx-auto max-w-2xl px-6 py-10"><p className="text-sm text-slate-500">Cargando...</p></main>}>
+      <NewProjectWizardInner />
+    </Suspense>
   );
 }

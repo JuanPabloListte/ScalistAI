@@ -3,9 +3,10 @@
 export const WIZARD_STEPS: { num: number; label: string }[] = [
   { num: 1, label: "Datos" },
   { num: 2, label: "Plano PDF" },
-  { num: 3, label: "Ubicación" },
-  { num: 4, label: "Construcción" },
-  { num: 5, label: "Revisión" },
+  { num: 3, label: "Páginas" },
+  { num: 4, label: "Ubicación" },
+  { num: 5, label: "Construcción" },
+  { num: 6, label: "Revisión" },
 ];
 
 export function Stepper({

@@ -35,7 +35,13 @@ from app.schemas.material import (
     MaterialBulkRemoveRequest,
 )
 
-from app.schemas.plan import PlanRead, ScaleByRatio, ScaleCalibration, ScaleDirect
+from app.schemas.plan import (
+    PageRolesUpdate,
+    PlanRead,
+    ScaleByRatio,
+    ScaleCalibration,
+    ScaleDirect,
+)
 
 from app.services.auto_detect_pipeline import get_ai_status, run_initial_detection
 from app.services.auto_scale import detect_scales
@@ -113,6 +119,10 @@ async def upload_plan(
         scale_source="auto_text" if auto_scales else None,
     )
     db.add(plan)
+    # Avanzamos wizard_step del proyecto a 2 (plano subido) si todavía estaba
+    # en el paso anterior. Permite reanudar el wizard en el paso siguiente.
+    if project.wizard_step < 2:
+        project.wizard_step = 2
     db.commit()
     db.refresh(plan)
 
@@ -121,10 +131,11 @@ async def upload_plan(
     # caso el endpoint /raster cae al fallback síncrono y renderiza la página
     # individual que se pidió.
     background_tasks.add_task(prewarm_plan_pages, plan.id)
-    # Pipeline de IA: detecta muros, recintos y aberturas mientras el usuario
-    # completa los pasos siguientes del wizard. Al entrar al editor ya tiene
-    # los candidatos listos para aceptar o rechazar.
-    background_tasks.add_task(run_initial_detection, plan.id)
+    # NOTA: el pipeline de IA NO se dispara acá. Se dispara en
+    # PATCH /plans/{id}/page-roles cuando el usuario asigna explícitamente qué
+    # páginas usar para qué (muros / aberturas / recintos). Antes, correr todo
+    # sobre todas las páginas "recomendadas" producía detecciones imprecisas
+    # porque cada tipo de plano sirve para una cosa distinta.
 
     return plan
 
@@ -152,6 +163,28 @@ def get_plan(
     if plan is None or plan.project.user_id != user.id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     return plan
+
+
+@router.get("/plans/{plan_id}/recommend-pages")
+def get_recommended_pages(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Escanea localmente el texto del PDF y devuelve recomendaciones de paginas."""
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    
+    pdf_path = Path(plan.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF original no disponible")
+    
+    try:
+        return recommend_pages(pdf_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Error analizando PDF: {exc}") from exc
+
 
 
 @router.post("/plans/{plan_id}/prewarm", status_code=status.HTTP_202_ACCEPTED)
@@ -443,6 +476,67 @@ def set_page_override(
     return plan
 
 
+@router.patch("/plans/{plan_id}/page-roles", response_model=PlanRead)
+def set_page_roles(
+    plan_id: int,
+    payload: PageRolesUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Plan:
+    """Guarda el mapeo página → roles para la detección de IA y dispara el
+    pipeline en background. Cada detector corre **sólo** sobre las páginas
+    asignadas a su rol — páginas sin rol no se procesan.
+
+    Body:
+    ```json
+    { "page_roles": { "1": ["walls"], "3": ["openings", "rooms"] } }
+    ```
+    Roles válidos: "walls", "openings", "rooms". El frontend valida que las
+    páginas sean 1-indexed válidas para el `page_count` del plan.
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    # Limpieza: descartamos entradas con lista vacía y validamos rango
+    cleaned: dict[str, list[str]] = {}
+    max_page = plan.page_count or 0
+    for raw_page, roles in payload.page_roles.items():
+        try:
+            page_num = int(raw_page)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail=f"Página inválida: {raw_page!r}"
+            )
+        if max_page and (page_num < 1 or page_num > max_page):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Página {page_num} fuera de rango (1..{max_page})",
+            )
+        # Deduplicamos manteniendo orden
+        unique = list(dict.fromkeys(roles))
+        if unique:
+            cleaned[str(page_num)] = unique
+
+    plan.page_roles = cleaned or None
+    flag_modified(plan, "page_roles")
+
+    # Avanzamos wizard_step del proyecto a 3 (páginas asignadas).
+    project = plan.project
+    if project and project.wizard_step < 3:
+        project.wizard_step = 3
+
+    db.commit()
+    db.refresh(plan)
+
+    # Dispara el pipeline solo si hay al menos una página con algún rol y no se omitió la IA.
+    if cleaned and not payload.skip_ai_detection:
+        background_tasks.add_task(run_initial_detection, plan.id)
+
+    return plan
+
+
 @router.post("/plans/{plan_id}/bulk-scale-ratio", response_model=PlanRead)
 def set_bulk_scale_by_ratio(
     plan_id: int,
@@ -486,7 +580,9 @@ def delete_page(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Plan:
-    """Marca una página como eliminada, borrando sus elementos y caché de imagen."""
+    """Elimina físicamente una página del PDF original y migra todos los datos."""
+    import fitz
+    
     plan = db.get(Plan, plan_id)
     if plan is None or plan.project.user_id != user.id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
@@ -494,25 +590,78 @@ def delete_page(
     if page < 1 or (plan.page_count and page > plan.page_count):
         raise HTTPException(status_code=400, detail="Número de página inválido")
 
-    deleted = list(plan.deleted_pages or [])
-    if page not in deleted:
-        deleted.append(page)
-        plan.deleted_pages = deleted
-        flag_modified(plan, "deleted_pages")
+    pdf_path = Path(plan.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF original no encontrado")
 
-    # Borrar elementos detectados o dibujados en esta página
+    # 1. Borrar elementos detectados o dibujados en la página objetivo
     db.query(DetectedElement).filter(
         DetectedElement.plan_id == plan_id,
         DetectedElement.page == page
     ).delete(synchronize_session=False)
 
-    # Eliminar imagen rasterizada cacheada para ahorrar espacio
+    # 2. Modificar el PDF físicamente
     try:
-        pdf_path = Path(plan.pdf_path)
+        doc = fitz.open(pdf_path)
+        if doc.page_count > 1:
+            doc.delete_page(page - 1)
+            # Guardamos temporalmente y reemplazamos
+            tmp_path = pdf_path.with_suffix(".tmp.pdf")
+            doc.save(tmp_path)
+            doc.close()
+            tmp_path.replace(pdf_path)
+        else:
+            doc.close()
+            raise HTTPException(status_code=400, detail="No puedes eliminar la única página del documento")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error modificando PDF: {exc}") from exc
+
+    # 3. Migrar elementos de páginas posteriores (restar 1 al número de página)
+    elements_to_shift = db.query(DetectedElement).filter(
+        DetectedElement.plan_id == plan_id,
+        DetectedElement.page > page
+    ).all()
+    for el in elements_to_shift:
+        el.page -= 1
+
+    # 4. Actualizar diccionario de escalas
+    if plan.page_scales:
+        new_scales = {}
+        for p_str, scale_val in plan.page_scales.items():
+            p_num = int(p_str)
+            if p_num < page:
+                new_scales[str(p_num)] = scale_val
+            elif p_num > page:
+                new_scales[str(p_num - 1)] = scale_val
+        plan.page_scales = new_scales
+        flag_modified(plan, "page_scales")
+
+    # 5. Actualizar el contador total y borrar el historial de ocultas
+    plan.page_count -= 1
+    plan.deleted_pages = []
+    flag_modified(plan, "deleted_pages")
+
+    # 6. Limpieza de imágenes cacheadas
+    try:
+        # Borrar caché de la página actual
         raster_file = _page_raster_path(pdf_path, page)
         raster_file.unlink(missing_ok=True)
         enhanced_file = raster_file.parent / f"{raster_file.stem}_enhanced{raster_file.suffix}"
         enhanced_file.unlink(missing_ok=True)
+
+        # Renombrar cachés de las páginas siguientes para que coincidan con la nueva numeración
+        for p in range(page + 1, plan.page_count + 2):
+            old_raster = _page_raster_path(pdf_path, p)
+            new_raster = _page_raster_path(pdf_path, p - 1)
+            if old_raster.exists():
+                old_raster.rename(new_raster)
+            
+            old_enh = old_raster.parent / f"{old_raster.stem}_enhanced{old_raster.suffix}"
+            new_enh = new_raster.parent / f"{new_raster.stem}_enhanced{new_raster.suffix}"
+            if old_enh.exists():
+                old_enh.rename(new_enh)
     except Exception:
         pass
 
@@ -520,31 +669,6 @@ def delete_page(
     db.refresh(plan)
     return plan
 
-
-@router.post("/plans/{plan_id}/restore-page/{page}", response_model=PlanRead)
-def restore_page(
-    plan_id: int,
-    page: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> Plan:
-    """Restaura una página eliminada previamente."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-
-    if page < 1 or (plan.page_count and page > plan.page_count):
-        raise HTTPException(status_code=400, detail="Número de página inválido")
-
-    deleted = list(plan.deleted_pages or [])
-    if page in deleted:
-        deleted.remove(page)
-        plan.deleted_pages = deleted
-        flag_modified(plan, "deleted_pages")
-
-    db.commit()
-    db.refresh(plan)
-    return plan
 
 
 @router.get("/plans/{plan_id}/dimensions")

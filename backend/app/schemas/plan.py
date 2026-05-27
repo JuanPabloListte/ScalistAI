@@ -1,6 +1,10 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+PageRole = Literal["walls", "openings", "rooms"]
 
 
 class PlanRead(BaseModel):
@@ -18,7 +22,25 @@ class PlanRead(BaseModel):
     page_scales: dict[str, float] | None
     deleted_pages: list[int] | None = None
     page_overrides: dict[str, str] | None = None
+    page_roles: dict[str, list[PageRole]] | None = None
     created_at: datetime
+
+
+class PageRolesUpdate(BaseModel):
+    """Update del mapeo página → roles para detección de IA.
+
+    Las claves son números de página 1-indexed como string. Valores son listas
+    de roles ("walls", "openings", "rooms"). Una página sin entrada o con
+    lista vacía no recibe detección.
+    """
+
+    page_roles: dict[str, list[PageRole]] = Field(
+        description="Mapa de número de página (string) a lista de roles"
+    )
+    skip_ai_detection: bool | None = Field(
+        default=False,
+        description="Si es True, se evita correr la detección de IA inicial en segundo plano."
+    )
 
 
 class Point(BaseModel):
