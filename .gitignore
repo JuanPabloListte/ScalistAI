@@ -43,9 +43,15 @@ Thumbs.db
 storage/
 !storage/.gitkeep
 
-# ML weights
+# ML weights y artifacts (modelos entrenados y dataset sintetico)
 backend/ml/*.pt
 backend/ml/*.onnx
+backend/models/*.pt
+backend/models/*.onnx
+backend/models/*.history.json
+
+# Planos de prueba para desarrollo (PDFs locales del dev)
+test_plans/
 
 # Alembic local DB
 *.sqlite

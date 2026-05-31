@@ -44,10 +44,9 @@ from app.schemas.plan import (
 )
 
 from app.services.auto_detect_pipeline import get_ai_status, run_initial_detection
+from app.services.ml_detector import get_ml_detector
 from app.services.auto_scale import detect_scales
 from app.services.dimension_text import extract_dimensions
-from app.services.opening_detection import detect_opening_labels
-from app.services.wall_room_detection import detect_walls, detect_rooms
 from app.services.pdf import page_count, rasterize, recommend_pages
 from app.services.preprocess import enhance_for_display
 from app.services.prewarm import prewarm_plan_pages
@@ -151,6 +150,72 @@ def list_plans(
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     stmt = select(Plan).where(Plan.project_id == project_id).order_by(Plan.created_at.desc())
     return list(db.scalars(stmt).all())
+
+
+@router.get("/plans/training-stats")
+def get_training_stats(
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Devuelve estadísticas del corpus de variaciones sintéticas acumulado.
+
+    Útil para saber cuándo conviene re-entrenar (umbral típico: 500+ samples).
+
+    Recorre `storage/synthetic/` contando archivos `image.png` y resumiendo
+    los manifests de cada batch. No filtra por usuario — los snapshots son
+    parte del corpus global que entrena UN modelo compartido.
+    """
+    import json as _json
+
+    base = Path(settings.STORAGE_DIR) / "synthetic"
+    total_samples = 0
+    total_batches = 0
+    plans_contributing: set[int] = set()
+    projects_contributing: set[int] = set()
+    latest_snapshot: str | None = None
+
+    if base.exists():
+        for manifest_path in base.rglob("_manifest.json"):
+            total_batches += 1
+            try:
+                m = _json.loads(manifest_path.read_text())
+            except Exception:  # noqa: BLE001
+                continue
+            total_samples += int(m.get("num_variations", 0))
+            if (pid := m.get("plan_id")) is not None:
+                plans_contributing.add(pid)
+            if (proj_id := m.get("project_id")) is not None:
+                projects_contributing.add(proj_id)
+            snap = m.get("snapshot_at")
+            if snap and (latest_snapshot is None or snap > latest_snapshot):
+                latest_snapshot = snap
+
+    return {
+        "total_samples": total_samples,
+        "total_batches": total_batches,
+        "plans_contributing": len(plans_contributing),
+        "projects_contributing": len(projects_contributing),
+        "latest_snapshot_at": latest_snapshot,
+        "ready_to_train": total_samples >= 200,
+        "recommended_min_samples": 200,
+    }
+
+
+@router.get("/plans/ml-status")
+def get_ml_model_status(
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Devuelve si el modelo ML (CubiCasa5K) está cargado y disponible.
+
+    Útil para el frontend: si `available=False`, mostrar un banner "modelo
+    ML no instalado, usando detección clásica". El detalle (`model_info`)
+    sirve para debugging desde la UI de admin.
+    """
+    detector = get_ml_detector()
+    info = detector.model_info()
+    return {
+        "available": detector.is_available(),
+        **info,
+    }
 
 
 @router.get("/plans/{plan_id}", response_model=PlanRead)
@@ -700,6 +765,53 @@ def list_page_dimensions(
         ) from exc
 
 
+def _ml_page_candidates(plan: Plan, page: int, kind: str) -> list[dict]:
+    """Corre inferencia ML sobre una página y devuelve los candidatos del tipo
+    pedido (`walls`/`rooms`/`openings`/`beams`/`columns`/`roofs`).
+
+    Detección 100% ML: si el modelo no está disponible devuelve [] (el editor
+    no muestra candidatos y el usuario dibuja a mano). No persiste nada.
+    """
+    detector = get_ml_detector()
+    if not detector.is_available():
+        return []
+
+    import fitz
+    import numpy as np
+
+    pdf_path = Path(plan.pdf_path)
+    scales = plan.page_scales or {}
+    px_per_m = scales.get(str(page))
+    dpi = plan.dpi or RASTER_DPI
+
+    doc = fitz.open(pdf_path)
+    try:
+        if page - 1 < 0 or page - 1 >= doc.page_count:
+            return []
+        p_obj = doc.load_page(page - 1)
+        zoom = dpi / 72.0
+        pixmap = p_obj.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        img = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+            pixmap.height, pixmap.width, 3
+        )
+    finally:
+        doc.close()
+
+    result = detector.detect(img, px_per_m, page_index=page - 1)
+    return list(getattr(result, kind, []) or [])
+
+
+def _detect_endpoint_guard(plan: Plan | None, page: int, user: User) -> Plan:
+    """Validaciones comunes de los endpoints de detección on-demand del editor."""
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    if not Path(plan.pdf_path).exists():
+        raise HTTPException(status_code=404, detail="PDF original no disponible")
+    if plan.page_count and (page < 1 or page > plan.page_count):
+        raise HTTPException(status_code=400, detail="Página fuera de rango")
+    return plan
+
+
 @router.get("/plans/{plan_id}/detect-openings")
 def detect_openings_endpoint(
     plan_id: int,
@@ -707,26 +819,14 @@ def detect_openings_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """Devuelve candidatos de aberturas detectados por sus labels en el PDF
-    (P1, V1, PV3, PF1, etc.) para la página indicada.
+    """Devuelve candidatos de aberturas detectados por el modelo ML en la página.
 
     No crea elementos en la base de datos — solo propone. El frontend muestra
     los candidatos como markers y el usuario decide cuáles aceptar.
     """
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-    pdf_path = Path(plan.pdf_path)
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF original no disponible")
-    if plan.page_count and (page < 1 or page > plan.page_count):
-        raise HTTPException(status_code=400, detail="Página fuera de rango")
-    scales = plan.page_scales or {}
-    px_per_m = scales.get(str(page))
+    plan = _detect_endpoint_guard(db.get(Plan, plan_id), page, user)
     try:
-        return detect_opening_labels(
-            pdf_path, page - 1, plan.dpi or RASTER_DPI, px_per_m
-        )
+        return _ml_page_candidates(plan, page, "openings")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500, detail=f"Error detectando aberturas: {exc}"
@@ -740,23 +840,10 @@ def detect_walls_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """Devuelve candidatos de muros detectados por la IA en la página indicada."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-    pdf_path = Path(plan.pdf_path)
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF original no disponible")
-    if plan.page_count and (page < 1 or page > plan.page_count):
-        raise HTTPException(status_code=400, detail="Página fuera de rango")
-
-    scales = plan.page_scales or {}
-    px_per_m = scales.get(str(page))
-
+    """Devuelve candidatos de muros detectados por el modelo ML en la página."""
+    plan = _detect_endpoint_guard(db.get(Plan, plan_id), page, user)
     try:
-        return detect_walls(
-            pdf_path, page - 1, plan.dpi or RASTER_DPI, px_per_m
-        )
+        return _ml_page_candidates(plan, page, "walls")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500, detail=f"Error detectando muros: {exc}"
@@ -770,23 +857,10 @@ def detect_rooms_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """Devuelve candidatos de recintos detectados por la IA en la página indicada."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-    pdf_path = Path(plan.pdf_path)
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF original no disponible")
-    if plan.page_count and (page < 1 or page > plan.page_count):
-        raise HTTPException(status_code=400, detail="Página fuera de rango")
-
-    scales = plan.page_scales or {}
-    px_per_m = scales.get(str(page))
-
+    """Devuelve candidatos de recintos detectados por el modelo ML en la página."""
+    plan = _detect_endpoint_guard(db.get(Plan, plan_id), page, user)
     try:
-        return detect_rooms(
-            pdf_path, page - 1, plan.dpi or RASTER_DPI, px_per_m
-        )
+        return _ml_page_candidates(plan, page, "rooms")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500, detail=f"Error detectando recintos: {exc}"
@@ -937,13 +1011,73 @@ def create_openings_bulk(
     return created
 
 
+@router.post("/plans/{plan_id}/generate-synthetic")
+def generate_synthetic_dataset(
+    plan_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Genera N variaciones sintéticas de una página a partir de los elementos
+    confirmados. Usado para construir el dataset propio de fine-tuning sin
+    depender de datasets externos restrictivos.
+
+    Body:
+    ```json
+    { "page": 1, "num_variations": 50 }
+    ```
+
+    Salida persistida en `storage/synthetic/plan_<id>/page_<N>/var_<NNN>/`.
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    try:
+        page = int(payload.get("page", 1))
+        num_variations = int(payload.get("num_variations", 50))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="page y num_variations deben ser enteros",
+        )
+
+    if num_variations < 1 or num_variations > 500:
+        raise HTTPException(
+            status_code=400,
+            detail="num_variations debe estar entre 1 y 500",
+        )
+
+    from app.services.synthetic_generator import generate_synthetic_variations
+
+    try:
+        metas = generate_synthetic_variations(plan_id, page, num_variations)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando variaciones: {exc}",
+        ) from exc
+
+    return {
+        "plan_id": plan_id,
+        "page": page,
+        "variations_generated": len(metas),
+        # Devolvemos las primeras 5 como muestra; el resto está en disco.
+        "sample": metas[:5],
+    }
+
+
+
+
+
 @router.get("/plans/{plan_id}/ai-status")
 def get_ai_pipeline_status(
     plan_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Devuelve el progreso del pipeline de IA (scales, walls, rooms, openings).
+    """Devuelve el progreso del pipeline de IA: scales, walls, rooms, openings,
+    columns, beams, roofs y ml.
 
     El frontend lo polea para mostrar un banner mientras la deteccion automatica
     se ejecuta en background despues del upload del PDF.
@@ -1314,6 +1448,15 @@ def _get_materials_summary_data(plan_id: int, page: int | None, db: Session) -> 
                     elif y.applies_to == "opening_perimeter":
                         length = element.length_m or 0.0
                         qty = length * y.consumption * (1.0 + y.waste_factor)
+                elif element.type == "beam" and y.applies_to == "beam":
+                    length = element.length_m or 0.0
+                    qty = length * y.consumption * (1.0 + y.waste_factor)
+                elif element.type == "roof" and y.applies_to == "roof":
+                    area = element.area_m2 or 0.0
+                    qty = area * y.consumption * (1.0 + y.waste_factor)
+                elif element.type == "column" and y.applies_to == "column":
+                    area = element.area_m2 or 0.0
+                    qty = area * y.consumption * (1.0 + y.waste_factor)
 
                 if qty > 0.0:
                     if material.id not in summary_dict:
@@ -1664,6 +1807,71 @@ def export_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.post("/admin/train-now")
+def trigger_training(
+    epochs: int = 10,
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Dispara el re-entrenamiento (inicial o fine-tuning) del modelo ML en background."""
+    if user.role != "admin" and user.email != "admin@gmail.com":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operación permitida únicamente a administradores.",
+        )
+    from app.services.training_manager import get_training_manager
+    manager = get_training_manager()
+    res = manager.start_training(epochs=epochs)
+    if not res["success"]:
+        raise HTTPException(status_code=400, detail=res["message"])
+    return res
+
+
+@router.post("/admin/gen-procedural")
+def trigger_procedural_generation(
+    count: int = 3000,
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Genera el dataset PROCEDURAL en background (planos inventados por código).
+
+    Va SOLO al train del próximo reentrenamiento (nunca al holdout). Reusa el
+    mismo streaming de logs/progreso que el entrenamiento (GET /admin/train-status).
+    """
+    if user.role != "admin" and user.email != "admin@gmail.com":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operación permitida únicamente a administradores.",
+        )
+    if count < 100 or count > 50000:
+        raise HTTPException(status_code=400, detail="count debe estar entre 100 y 50000.")
+    from app.services.training_manager import get_training_manager
+    manager = get_training_manager()
+    res = manager.start_procedural(count=count)
+    if not res["success"]:
+        raise HTTPException(status_code=400, detail=res["message"])
+    return res
+
+
+@router.get("/admin/train-status")
+def get_training_status(
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Devuelve el estado de progreso y los logs del entrenamiento en background."""
+    if user.role != "admin" and user.email != "admin@gmail.com":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operación permitida únicamente a administradores.",
+        )
+    from app.services.training_manager import get_training_manager
+    manager = get_training_manager()
+    status_data = manager.get_status()
+    logs = manager.get_logs(limit=200)
+    return {
+        "status": status_data,
+        "logs": logs,
+    }
+
 
 
 

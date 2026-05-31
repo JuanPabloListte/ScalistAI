@@ -56,12 +56,18 @@ export default function ProjectDetailPage() {
     const wallsPages: number[] = [];
     const roomsPages: number[] = [];
     const openingsPages: number[] = [];
+    const beamsPages: number[] = [];
+    const roofsPages: number[] = [];
+    const columnsPages: number[] = [];
 
     for (const p of allPages) {
       const pRoles = roles[String(p)] ?? [];
       if (pRoles.includes("walls")) wallsPages.push(p);
       if (pRoles.includes("rooms")) roomsPages.push(p);
       if (pRoles.includes("openings")) openingsPages.push(p);
+      if (pRoles.includes("beams")) beamsPages.push(p);
+      if (pRoles.includes("roofs")) roofsPages.push(p);
+      if (pRoles.includes("columns")) columnsPages.push(p);
     }
 
     const tabs = [];
@@ -73,6 +79,15 @@ export default function ProjectDetailPage() {
     }
     if (openingsPages.length > 0) {
       tabs.push({ id: "openings", label: "Abertura", pages: openingsPages });
+    }
+    if (beamsPages.length > 0) {
+      tabs.push({ id: "beams", label: "Viga", pages: beamsPages });
+    }
+    if (roofsPages.length > 0) {
+      tabs.push({ id: "roofs", label: "Techo / Losa", pages: roofsPages });
+    }
+    if (columnsPages.length > 0) {
+      tabs.push({ id: "columns", label: "Columna", pages: columnsPages });
     }
 
     if (tabs.length === 0 && allPages.length > 0) {
@@ -150,6 +165,12 @@ export default function ProjectDetailPage() {
                       tabColors = "border-sky-500 text-sky-600 dark:border-sky-400 dark:text-sky-400 bg-sky-50/30 dark:bg-sky-950/20";
                     } else if (t.id === "openings") {
                       tabColors = "border-amber-500 text-amber-600 dark:border-amber-400 dark:text-amber-400 bg-amber-50/30 dark:bg-amber-950/20";
+                    } else if (t.id === "beams") {
+                      tabColors = "border-purple-500 text-purple-600 dark:border-purple-400 dark:text-purple-400 bg-purple-50/30 dark:bg-purple-950/20";
+                    } else if (t.id === "roofs") {
+                      tabColors = "border-teal-500 text-teal-600 dark:border-teal-400 dark:text-teal-400 bg-teal-50/30 dark:bg-teal-950/20";
+                    } else if (t.id === "columns") {
+                      tabColors = "border-pink-500 text-pink-600 dark:border-pink-400 dark:text-pink-400 bg-pink-50/30 dark:bg-pink-950/20";
                     } else {
                       tabColors = "border-brand text-brand dark:border-sky-400 dark:text-sky-400 bg-slate-50 dark:bg-slate-800/40";
                     }
@@ -173,7 +194,13 @@ export default function ProjectDetailPage() {
                               ? "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-300"
                               : t.id === "openings"
                                 ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
-                                : "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300"
+                                : t.id === "beams"
+                                  ? "bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300"
+                                  : t.id === "roofs"
+                                    ? "bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300"
+                                    : t.id === "columns"
+                                      ? "bg-pink-100 text-pink-800 dark:bg-pink-900/50 dark:text-pink-300"
+                                      : "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300"
                           : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                       }`}>
                         {t.pages.length}

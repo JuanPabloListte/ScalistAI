@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -33,6 +33,13 @@ class Project(Base):
     # building_info: dict con claves dependientes del tipo (ver schemas/project.py)
     building_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     building_info: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+    # Si True, los planos confirmados de este proyecto pueden usarse como
+    # datos de entrenamiento (vía synthetic_generator). Cliente con NDA
+    # estricto debe ponerlo en False antes de activar el proyecto.
+    allow_training_data: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

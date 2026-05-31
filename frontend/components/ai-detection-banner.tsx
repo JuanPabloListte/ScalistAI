@@ -9,6 +9,10 @@ const STAGE_LABELS: { key: keyof Omit<AiStatus, "started_at">; label: string }[]
   { key: "walls", label: "Muros" },
   { key: "rooms", label: "Recintos" },
   { key: "openings", label: "Aberturas" },
+  { key: "columns", label: "Columnas" },
+  { key: "beams", label: "Vigas" },
+  { key: "roofs", label: "Techos" },
+  { key: "ml", label: "ML" },
 ];
 
 const POLL_INTERVAL_MS = 3000;
@@ -20,7 +24,11 @@ function isPipelineIdle(s: AiStatus): boolean {
     s.scales === "pending" &&
     s.walls === "pending" &&
     s.rooms === "pending" &&
-    s.openings === "pending"
+    s.openings === "pending" &&
+    s.columns === "pending" &&
+    s.beams === "pending" &&
+    s.roofs === "pending" &&
+    s.ml === "pending"
   );
 }
 
@@ -79,8 +87,8 @@ export function AiDetectionBanner({
           La IA está procesando tu plano
         </p>
         <p className="mt-1 text-sky-800/80 dark:text-sky-300/80">
-          Detección automática de muros, recintos y aberturas en background.
-          Vas a ver los candidatos en cuanto terminen.
+          Detección automática de muros, recintos, aberturas, columnas, vigas y
+          techos en background. Vas a ver los candidatos en cuanto terminen.
         </p>
         <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
           {STAGE_LABELS.map(({ key, label }) => (

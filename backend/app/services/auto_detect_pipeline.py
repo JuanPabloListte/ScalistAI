@@ -19,13 +19,14 @@ from typing import Any, Literal
 from app.core.database import SessionLocal
 from app.models.detected_element import DetectedElement
 from app.models.plan import Plan
-from app.services.opening_detection import detect_opening_labels
+from app.services.ml_detector import get_ml_detector
 from app.services.pdf import recommend_pages
-from app.services.wall_room_detection import detect_rooms, detect_walls
 
 logger = logging.getLogger(__name__)
 
-Stage = Literal["scales", "walls", "rooms", "openings"]
+Stage = Literal[
+    "scales", "walls", "rooms", "openings", "columns", "beams", "roofs", "ml"
+]
 Status = Literal["pending", "running", "done", "failed"]
 
 _progress_lock = threading.Lock()
@@ -40,6 +41,10 @@ def _init_progress(plan_id: int) -> None:
             "walls": "pending",
             "rooms": "pending",
             "openings": "pending",
+            "columns": "pending",
+            "beams": "pending",
+            "roofs": "pending",
+            "ml": "pending",
             "started_at": time.time(),
         }
 
@@ -63,13 +68,25 @@ def get_ai_status(plan_id: int) -> dict[str, Any]:
             "walls": "pending",
             "rooms": "pending",
             "openings": "pending",
+            "columns": "pending",
+            "beams": "pending",
+            "roofs": "pending",
+            "ml": "pending",
             "started_at": None,
         }
     return dict(snapshot)
 
 
-def _create_wall_elements(db, plan_id: int, page: int, candidates: list[dict]) -> int:
-    """Crea DetectedElement(type='wall', source='ai') a partir de los candidatos."""
+def _create_wall_elements(
+    db, plan_id: int, page: int, candidates: list[dict], source: str = "ai"
+) -> int:
+    """Crea DetectedElement(type='wall') a partir de los candidatos.
+
+    `source` puede ser:
+      - "ai": detector clásico de OpenCV (default, backwards compat)
+      - "ai_ml": detector ML (CubiCasa5K)
+      - "manual": dibujado por el usuario
+    """
     created = 0
     for c in candidates:
         try:
@@ -85,7 +102,7 @@ def _create_wall_elements(db, plan_id: int, page: int, candidates: list[dict]) -
                     geometry=geometry,
                     length_m=float(length_m),
                     height_m=2.8,
-                    source="ai",
+                    source=source,
                 )
             )
             created += 1
@@ -94,7 +111,9 @@ def _create_wall_elements(db, plan_id: int, page: int, candidates: list[dict]) -
     return created
 
 
-def _create_room_elements(db, plan_id: int, page: int, candidates: list[dict]) -> int:
+def _create_room_elements(
+    db, plan_id: int, page: int, candidates: list[dict], source: str = "ai"
+) -> int:
     created = 0
     for c in candidates:
         try:
@@ -110,7 +129,7 @@ def _create_room_elements(db, plan_id: int, page: int, candidates: list[dict]) -
                     length_m=c.get("length_m"),
                     area_m2=c.get("area_m2"),
                     height_m=2.8,
-                    source="ai",
+                    source=source,
                 )
             )
             created += 1
@@ -120,7 +139,8 @@ def _create_room_elements(db, plan_id: int, page: int, candidates: list[dict]) -
 
 
 def _create_opening_elements(
-    db, plan_id: int, page: int, candidates: list[dict], px_per_m: float | None
+    db, plan_id: int, page: int, candidates: list[dict], px_per_m: float | None,
+    source: str = "ai",
 ) -> int:
     if not px_per_m:
         return 0
@@ -152,13 +172,72 @@ def _create_opening_elements(
                     },
                     length_m=width_m,
                     height_m=2.1,
-                    source="ai",
+                    source=source,
                 )
             )
             created += 1
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("skip opening candidate: %s", exc)
     return created
+
+
+def _create_structural_elements(
+    db,
+    plan_id: int,
+    page: int,
+    candidates: list[dict],
+    type_: str,
+    default_height_m: float,
+    source: str = "ai",
+) -> int:
+    """Persiste candidatos de columnas, vigas o losas como DetectedElement.
+
+    Todos siguen el mismo schema (geometry polígono + length/area/height
+    opcionales). El tipo concreto (`column`, `beam`, `roof`) y la altura
+    default por defecto los decide el caller, porque cada uno tiene
+    semántica distinta (columna = altura piso, viga = peralte, losa =
+    espesor).
+    """
+    created = 0
+    for c in candidates:
+        try:
+            geometry = c.get("geometry") or {}
+            if not geometry:
+                continue
+            db.add(
+                DetectedElement(
+                    plan_id=plan_id,
+                    page=page,
+                    type=type_,
+                    geometry=geometry,
+                    length_m=c.get("length_m"),
+                    area_m2=c.get("area_m2"),
+                    height_m=c.get("height_m") or default_height_m,
+                    source=source,
+                )
+            )
+            created += 1
+        except (TypeError, ValueError) as exc:
+            logger.warning("skip %s candidate: %s", type_, exc)
+    return created
+
+
+def _create_column_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "column", 2.8, source
+    )
+
+
+def _create_beam_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "beam", 0.40, source
+    )
+
+
+def _create_roof_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "roof", 0.20, source
+    )
 
 
 def _recommended_pages(pdf_path: Path) -> list[int]:
@@ -171,40 +250,6 @@ def _recommended_pages(pdf_path: Path) -> list[int]:
     # Si nada califica, igual procesamos la primera pagina para no dejar
     # al usuario sin candidatos.
     return pages or [1]
-
-
-def _process_stage(
-    plan_id: int,
-    stage: Stage,
-    pages: list[int],
-    pdf_path: Path,
-    dpi: int,
-    page_scales: dict,
-    detector,
-    creator,
-    pass_px_per_m: bool = False,
-) -> None:
-    _mark(plan_id, stage, "running")
-    total_created = 0
-    try:
-        with SessionLocal() as db:
-            for page in pages:
-                px_per_m = page_scales.get(str(page))
-                try:
-                    candidates = detector(pdf_path, page - 1, dpi, px_per_m)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("detect %s failed page=%s: %s", stage, page, exc)
-                    continue
-                if pass_px_per_m:
-                    total_created += creator(db, plan_id, page, candidates, px_per_m)
-                else:
-                    total_created += creator(db, plan_id, page, candidates)
-            db.commit()
-        _mark(plan_id, stage, "done")
-        logger.info("ai %s done plan=%s created=%s", stage, plan_id, total_created)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("ai %s failed plan=%s: %s", stage, plan_id, exc)
-        _mark(plan_id, stage, "failed")
 
 
 def _pages_for_role(page_roles: dict[str, list[str]], role: str) -> list[int]:
@@ -252,40 +297,166 @@ async def run_initial_detection(plan_id: int) -> None:
     def _filter(pages: list[int]) -> list[int]:
         return [p for p in pages if p not in deleted_pages]
 
-    wall_pages = _filter(_pages_for_role(page_roles, "walls"))
-    room_pages = _filter(_pages_for_role(page_roles, "rooms"))
-    opening_pages = _filter(_pages_for_role(page_roles, "openings"))
     logger.info(
-        "ai pipeline start plan=%s walls=%s rooms=%s openings=%s",
-        plan_id, wall_pages, room_pages, opening_pages,
+        "ai pipeline start (ML-only) plan=%s walls=%s rooms=%s openings=%s "
+        "columns=%s beams=%s roofs=%s",
+        plan_id,
+        _filter(_pages_for_role(page_roles, "walls")),
+        _filter(_pages_for_role(page_roles, "rooms")),
+        _filter(_pages_for_role(page_roles, "openings")),
+        _filter(_pages_for_role(page_roles, "columns")),
+        _filter(_pages_for_role(page_roles, "beams")),
+        _filter(_pages_for_role(page_roles, "roofs")),
     )
 
-    # Cada stage corre en un thread (CPU-bound). Si una etapa no tiene páginas
-    # asignadas la marcamos como "done" para que el polling del frontend no
-    # quede esperando indefinidamente.
-    if wall_pages:
-        await asyncio.to_thread(
-            _process_stage,
-            plan_id, "walls", wall_pages, pdf_path, dpi, page_scales,
-            detect_walls, _create_wall_elements, False,
-        )
-    else:
-        _mark(plan_id, "walls", "done")
+    # --- Detección 100% ML ---
+    # Una sola etapa de inferencia detecta TODOS los tipos (walls/rooms/openings/
+    # beams/columns/roofs). Los detectores clásicos de OpenCV quedaron deprecados:
+    # generaban falsos positivos (líneas que no eran muros). El ML detecta con
+    # alta precisión lo que está seguro; el resto lo dibuja el usuario a mano.
+    # Si el modelo no está disponible, no se crea nada (detección 100% manual).
+    await asyncio.to_thread(
+        _run_ml_stage,
+        plan_id, page_roles, pdf_path, dpi, page_scales, deleted_pages,
+    )
 
-    if room_pages:
-        await asyncio.to_thread(
-            _process_stage,
-            plan_id, "rooms", room_pages, pdf_path, dpi, page_scales,
-            detect_rooms, _create_room_elements, False,
-        )
-    else:
-        _mark(plan_id, "rooms", "done")
 
-    if opening_pages:
-        await asyncio.to_thread(
-            _process_stage,
-            plan_id, "openings", opening_pages, pdf_path, dpi, page_scales,
-            detect_opening_labels, _create_opening_elements, True,
+_TYPE_STAGES: list[Stage] = [
+    "walls", "rooms", "openings", "columns", "beams", "roofs",
+]
+
+
+def _run_ml_stage(
+    plan_id: int,
+    page_roles: dict[str, list[str]],
+    pdf_path: Path,
+    dpi: int,
+    page_scales: dict,
+    deleted_pages: set[int],
+) -> None:
+    """Corre el detector ML (modelo propio) sobre las páginas asignadas y crea
+    los DetectedElement con `source="ai_ml"`. Es la ÚNICA etapa de detección.
+
+    Diseño:
+      - Una sola inferencia por página: el modelo predice walls/rooms/openings/
+        beams/columns/roofs de una sola pasada.
+      - Por cada página, sólo se persisten los tipos asignados al rol de esa
+        página.
+      - Mueve el progreso por tipo (para el banner del frontend) además del
+        stage "ml".
+      - Si el modelo no está cargado, marca todo como "done" sin crear nada
+        (la detección automática queda deshabilitada; el usuario dibuja a mano).
+    """
+    # Tipos asignados en alguna página → mueven su barra de progreso; el resto
+    # se marca "done" de entrada para que el polling no quede esperando.
+    assigned_roles: set[str] = set()
+    for roles in page_roles.values():
+        assigned_roles.update(roles)
+    for st in _TYPE_STAGES:
+        _mark(plan_id, st, "running" if st in assigned_roles else "done")
+
+    ml = get_ml_detector()
+    if not ml.is_available():
+        for st in _TYPE_STAGES:
+            _mark(plan_id, st, "done")
+        _mark(plan_id, "ml", "done")
+        logger.warning(
+            "ml stage skip plan=%s: modelo no disponible — sin detección "
+            "automática (el usuario dibuja a mano)", plan_id,
         )
-    else:
-        _mark(plan_id, "openings", "done")
+        return
+
+    _mark(plan_id, "ml", "running")
+    try:
+        import fitz
+        import numpy as np
+        import cv2  # noqa: F401  # usado indirectamente al cargar la imagen
+
+        # Set de páginas únicas que tienen algún rol asignado.
+        pages_to_process: dict[int, set[str]] = {}
+        for page_str, roles in page_roles.items():
+            try:
+                p = int(page_str)
+            except (TypeError, ValueError):
+                continue
+            if p in deleted_pages:
+                continue
+            pages_to_process[p] = set(roles)
+
+        if not pages_to_process:
+            for st in _TYPE_STAGES:
+                _mark(plan_id, st, "done")
+            _mark(plan_id, "ml", "done")
+            return
+
+        total_walls = total_rooms = total_openings = 0
+        total_beams = total_columns = total_roofs = 0
+
+        with SessionLocal() as db:
+            doc = fitz.open(pdf_path)
+            try:
+                for page, roles in sorted(pages_to_process.items()):
+                    if page - 1 < 0 or page - 1 >= doc.page_count:
+                        continue
+                    px_per_m = page_scales.get(str(page))
+                    try:
+                        # Renderizar página a RGB uint8
+                        p_obj = doc.load_page(page - 1)
+                        zoom = dpi / 72.0
+                        pixmap = p_obj.get_pixmap(
+                            matrix=fitz.Matrix(zoom, zoom), alpha=False
+                        )
+                        img = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+                            pixmap.height, pixmap.width, 3
+                        )
+                        # Inferencia ML
+                        result = ml.detect(img, px_per_m, page_index=page - 1)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("ml inference failed page=%s: %s", page, exc)
+                        continue
+
+                    # Persistir candidatos por rol asignado a esta página.
+                    if "walls" in roles:
+                        total_walls += _create_wall_elements(
+                            db, plan_id, page, result.walls, source="ai_ml"
+                        )
+                    if "rooms" in roles:
+                        total_rooms += _create_room_elements(
+                            db, plan_id, page, result.rooms, source="ai_ml"
+                        )
+                    if "openings" in roles:
+                        total_openings += _create_opening_elements(
+                            db, plan_id, page, result.openings, px_per_m, source="ai_ml"
+                        )
+                    if "beams" in roles:
+                        total_beams += _create_beam_elements(
+                            db, plan_id, page, result.beams, source="ai_ml"
+                        )
+                    if "columns" in roles:
+                        total_columns += _create_column_elements(
+                            db, plan_id, page, result.columns, source="ai_ml"
+                        )
+                    if "roofs" in roles:
+                        total_roofs += _create_roof_elements(
+                            db, plan_id, page, result.roofs, source="ai_ml"
+                        )
+            finally:
+                doc.close()
+            db.commit()
+
+        logger.info(
+            "ml stage done plan=%s walls=%d rooms=%d openings=%d "
+            "beams=%d columns=%d roofs=%d",
+            plan_id, total_walls, total_rooms, total_openings,
+            total_beams, total_columns, total_roofs,
+        )
+        for st in _TYPE_STAGES:
+            if st in assigned_roles:
+                _mark(plan_id, st, "done")
+        _mark(plan_id, "ml", "done")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ml stage failed plan=%s: %s", plan_id, exc)
+        for st in _TYPE_STAGES:
+            if st in assigned_roles:
+                _mark(plan_id, st, "failed")
+        _mark(plan_id, "ml", "failed")

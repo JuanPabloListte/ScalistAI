@@ -19,7 +19,7 @@ class DetectedElement(Base):
         ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
     )
     page: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    type: Mapped[str] = mapped_column(String(32), nullable=False)  # "wall", "room", "opening"
+    type: Mapped[str] = mapped_column(String(32), nullable=False)  # "wall", "room", "opening", "column", "beam", "roof"
     geometry: Mapped[dict] = mapped_column(JSON, nullable=False)
     length_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     area_m2: Mapped[float | None] = mapped_column(Float, nullable=True)

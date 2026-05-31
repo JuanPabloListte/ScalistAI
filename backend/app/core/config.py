@@ -20,6 +20,26 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
 
+    # --- ML Detection ---
+    # Path al checkpoint del modelo entrenado por scripts/train_model.py sobre
+    # las variaciones sintéticas generadas a partir de los planos del usuario.
+    # Si el archivo no existe el detector ML queda deshabilitado y el sistema
+    # usa solo la detección clásica.
+    ML_MODEL_PATH: str = "./backend/models/muroai_seg_v1.pt"
+    # Encender / apagar el detector ML aunque el modelo esté presente.
+    ENABLE_ML_DETECTION: bool = True
+    # Device para PyTorch: "auto" detecta CUDA si está, sino CPU.
+    ML_DEVICE: str = "auto"
+    # Cuando un usuario activa un proyecto y consintió `allow_training_data`,
+    # generamos automáticamente variaciones sintéticas para el corpus de
+    # entrenamiento. Si está False, el snapshot automático queda apagado y
+    # solo se generan variaciones vía el endpoint manual.
+    AUTO_GENERATE_TRAINING_DATA: bool = True
+    # Directorio con el dataset PROCEDURAL (planos inventados por código, ver
+    # scripts/gen_procedural.py). Va SOLO al train, nunca al holdout/val. Si el
+    # directorio existe y tiene samples, el training (UI y CLI) lo incluye.
+    PROCEDURAL_DATA_DIR: str = "storage/procedural"
+
     @property
     def database_url(self) -> str:
         return (

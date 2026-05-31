@@ -15,7 +15,44 @@ export type Project = {
   country: string | null;
   building_type: BuildingType | null;
   building_info: Record<string, number> | null;
+  allow_training_data: boolean;
   created_at: string;
+};
+
+export type TrainingStats = {
+  total_samples: number;
+  total_batches: number;
+  plans_contributing: number;
+  projects_contributing: number;
+  latest_snapshot_at: string | null;
+  ready_to_train: boolean;
+  recommended_min_samples: number;
+};
+
+export type User = {
+  id: number;
+  email: string;
+  role: string;
+  created_at: string;
+};
+
+export type TrainingStatusResponse = {
+  status: {
+    status: "idle" | "running" | "success" | "failed";
+    mode?: "train" | "procedural";
+    current_epoch: number;
+    total_epochs: number;
+    progress_percent: number;
+    train_loss: number | null;
+    val_loss: number | null;
+    holdout_miou: number | null;
+    error: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    is_initial: boolean;
+    logs_count: number;
+  };
+  logs: string[];
 };
 
 export type LocationPayload = {
@@ -38,12 +75,30 @@ export type AiStatus = {
   walls: AiStage;
   rooms: AiStage;
   openings: AiStage;
+  columns: AiStage;
+  beams: AiStage;
+  roofs: AiStage;
+  ml: AiStage;
   started_at: number | null;
+};
+
+export type MlModelStatus = {
+  available: boolean;
+  enabled: boolean;
+  model_path: string;
+  model_exists: boolean;
+  model_loaded: boolean;
+  model_size_mb: number | null;
+  device: string | null;
+  model_hash: string | null;
+  active_version: number | null;
+  active_holdout_miou: number | null;
+  active_created_at: string | null;
 };
 
 export type PageOverride = "recommended" | "rejected";
 
-export type PageRole = "walls" | "openings" | "rooms";
+export type PageRole = "walls" | "openings" | "rooms" | "beams" | "roofs" | "columns";
 
 export type Plan = {
   id: number;
@@ -70,7 +125,7 @@ export type PageRecommendation = {
   override: PageOverride | null;
 };
 
-export type ElementType = "wall" | "room" | "opening";
+export type ElementType = "wall" | "room" | "opening" | "beam" | "roof" | "column";
 
 export type ElementGeometry = {
   points: number[]; // flat [x1, y1, x2, y2, ...]
@@ -227,6 +282,62 @@ export const api = {
     }),
   getAiStatus: (planId: number) =>
     request<AiStatus>(`/api/v1/plans/${planId}/ai-status`),
+  getMlStatus: () => request<MlModelStatus>(`/api/v1/plans/ml-status`),
+  getTrainingStats: () => request<TrainingStats>(`/api/v1/plans/training-stats`),
+  getMe: () => request<User>("/api/v1/auth/me"),
+  triggerTraining: (epochs: number = 10) =>
+    request<{ success: boolean; message: string; is_initial: boolean }>(
+      `/api/v1/admin/train-now?epochs=${epochs}`,
+      { method: "POST" },
+    ),
+  generateProcedural: (count: number = 3000) =>
+    request<{ success: boolean; message: string }>(
+      `/api/v1/admin/gen-procedural?count=${count}`,
+      { method: "POST" },
+    ),
+  getTrainingStatus: () =>
+    request<TrainingStatusResponse>("/api/v1/admin/train-status"),
+  setTrainingConsent: (projectId: number, allow: boolean) =>
+    request<Project>(`/api/v1/projects/${projectId}/training-consent`, {
+      method: "PATCH",
+      body: JSON.stringify({ allow_training_data: allow }),
+    }),
+  generateSynthetic: (planId: number, page: number, numVariations: number = 50) =>
+    request<{
+      plan_id: number;
+      page: number;
+      variations_generated: number;
+      sample: Array<{
+        variation_id: string;
+        rotation: number;
+        flip: string | null;
+        style_ops: string[];
+        image_size: number;
+        image_path: string;
+        mask_path: string;
+      }>;
+    }>(`/api/v1/plans/${planId}/generate-synthetic`, {
+      method: "POST",
+      body: JSON.stringify({ page, num_variations: numVariations }),
+    }),
+  regenerateAllSynthetic: () =>
+    request<{
+      projects_processed: number;
+      plans_processed: number;
+      pages_processed: number;
+      variations_generated: number;
+      details: Array<{
+        project_id: number;
+        plan_id: number;
+        page: number;
+        variations: number;
+        ok: boolean;
+        error?: string;
+      }>;
+      message?: string;
+    }>(`/api/v1/projects/regenerate-synthetic`, {
+      method: "POST",
+    }),
   deleteProject: async (id: number): Promise<void> => {
     const token = getToken();
     const res = await fetch(`${API_URL}/api/v1/projects/${id}`, {
