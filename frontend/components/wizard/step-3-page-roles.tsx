@@ -20,8 +20,26 @@ const ROLE_DEFS: { value: PageRole; label: string; description: string; color: s
   {
     value: "rooms",
     label: "Recintos",
-    description: "Plano para ambientes/lozas (ej: planta arquitectónica con nombres)",
+    description: "Plano para ambientes (ej: planta arquitectónica con nombres)",
     color: "sky",
+  },
+  {
+    value: "beams",
+    label: "Vigas",
+    description: "Plano para vigas (ej: plano de estructuras o encofrado)",
+    color: "purple",
+  },
+  {
+    value: "roofs",
+    label: "Techos / Losas",
+    description: "Plano para techos, losas y cubiertas (ej: plano de cubiertas)",
+    color: "teal",
+  },
+  {
+    value: "columns",
+    label: "Columnas",
+    description: "Plano para columnas y pilares (ej: replanteo de estructuras)",
+    color: "pink",
   },
 ];
 
@@ -40,6 +58,21 @@ const COLOR_STYLES: Record<string, { active: string; idle: string; ring: string 
     active: "bg-sky-600 text-white border-sky-600 dark:bg-sky-500 dark:border-sky-500",
     idle: "bg-white text-sky-700 border-sky-300 hover:bg-sky-50 dark:bg-slate-800 dark:text-sky-400 dark:border-sky-700 dark:hover:bg-sky-950/50",
     ring: "ring-sky-500",
+  },
+  purple: {
+    active: "bg-purple-600 text-white border-purple-600 dark:bg-purple-500 dark:border-purple-500",
+    idle: "bg-white text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-slate-800 dark:text-purple-400 dark:border-purple-700 dark:hover:bg-purple-950/50",
+    ring: "ring-purple-500",
+  },
+  teal: {
+    active: "bg-teal-600 text-white border-teal-600 dark:bg-teal-500 dark:border-teal-500",
+    idle: "bg-white text-teal-700 border-teal-300 hover:bg-teal-50 dark:bg-slate-800 dark:text-teal-400 dark:border-teal-700 dark:hover:bg-teal-950/50",
+    ring: "ring-teal-500",
+  },
+  pink: {
+    active: "bg-pink-600 text-white border-pink-600 dark:bg-pink-500 dark:border-pink-500",
+    idle: "bg-white text-pink-700 border-pink-300 hover:bg-pink-50 dark:bg-slate-800 dark:text-pink-400 dark:border-pink-700 dark:hover:bg-pink-950/50",
+    ring: "ring-pink-500",
   },
 };
 
@@ -169,13 +202,16 @@ export function Step3PageRoles({
   }, [plan?.page_count, plan?.deleted_pages]);
 
   const summary = useMemo(() => {
-    let walls = 0, openings = 0, rooms = 0;
+    let walls = 0, openings = 0, rooms = 0, beams = 0, roofs = 0, columns = 0;
     for (const roles of Object.values(pageRoles)) {
       if (roles.includes("walls")) walls++;
       if (roles.includes("openings")) openings++;
       if (roles.includes("rooms")) rooms++;
+      if (roles.includes("beams")) beams++;
+      if (roles.includes("roofs")) roofs++;
+      if (roles.includes("columns")) columns++;
     }
-    return { walls, openings, rooms };
+    return { walls, openings, rooms, beams, roofs, columns };
   }, [pageRoles]);
 
   // Modificado: comparar con el estado guardado en plan.page_roles
@@ -317,11 +353,14 @@ export function Step3PageRoles({
                       key={r.value}
                       type="button"
                       onClick={() => togglePageRole(page, r.value)}
-                      className={`rounded-full border px-2 py-0.5 text-xs font-medium transition ${
-                        active ? styles.active : styles.idle
+                      className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold transition ${
+                        active
+                          ? `${styles.active} shadow-md scale-105`
+                          : styles.idle
                       }`}
                     >
-                      {r.label}
+                      {active && <span aria-hidden>✓</span>}
+                      <span>{r.label}</span>
                     </button>
                   );
                 })}
@@ -344,6 +383,18 @@ export function Step3PageRoles({
           <span className="text-slate-400">·</span>
           <span>
             <strong>{summary.rooms}</strong> p. para recintos
+          </span>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.beams}</strong> p. para vigas
+          </span>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.roofs}</strong> p. para techos
+          </span>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.columns}</strong> p. para columnas
           </span>
         </div>
         {Object.keys(pageRoles).length > 0 && (
@@ -463,13 +514,45 @@ export function Step3PageRoles({
               <img
                 src={thumbs[zoomedPage]}
                 alt={`Página ${zoomedPage} ampliada`}
-                className="max-h-[80vh] max-w-[85vw] object-contain rounded"
+                className="max-h-[72vh] max-w-[85vw] object-contain rounded"
               />
             ) : (
               <div className="flex h-64 w-64 items-center justify-center text-sm text-slate-400">
                 Cargando…
               </div>
             )}
+
+            {/* Chips de rol — permite marcar mientras ves la página ampliada */}
+            <div className="mt-3 flex flex-col items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-slate-400">
+                Asignar rol a esta página
+              </span>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {ROLE_DEFS.map((r) => {
+                  const currentRoles = pageRoles[String(zoomedPage)] ?? [];
+                  const active = currentRoles.includes(r.value);
+                  const styles = COLOR_STYLES[r.color];
+                  return (
+                    <button
+                      key={r.value}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        togglePageRole(zoomedPage, r.value);
+                      }}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                        active
+                          ? `${styles.active} shadow-lg scale-105`
+                          : styles.idle
+                      }`}
+                    >
+                      {active && <span aria-hidden>✓</span>}
+                      <span>{r.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}

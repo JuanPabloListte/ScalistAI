@@ -1,0 +1,296 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 0.9258176353242662,
+      "val_loss": 0.8237788081169128,
+      "miou": 0.000179135528326555,
+      "iou_per_class": {
+        "background": 0.8955578268598848,
+        "wall": 0.00071654211330622,
+        "room": 0.0,
+        "opening": 0.0,
+        "beam": NaN,
+        "column": 0.0
+      }
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.434019042385949,
+      "val_loss": 1.568640112876892,
+      "miou": 0.0015230782560584591,
+      "iou_per_class": {
+        "background": 0.4631707855172872,
+        "wall": 0.0030461565121169183,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.40662128174746476,
+      "val_loss": 0.7254090522016797,
+      "miou": 0.0910975038066285,
+      "iou_per_class": {
+        "background": 0.7616713306347072,
+        "wall": 0.182195007613257,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.3324685036032288,
+      "val_loss": 0.3561433894293649,
+      "miou": 0.024347309789857757,
+      "iou_per_class": {
+        "background": 0.9378139747333321,
+        "wall": 0.04869461957971551,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.2659480982908496,
+      "val_loss": 0.5272041176046643,
+      "miou": 0.0587009621981434,
+      "iou_per_class": {
+        "background": 0.8200896768851247,
+        "wall": 0.1174019243962868,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.2302842507207835,
+      "val_loss": 0.2921155648572104,
+      "miou": 0.1025084594886892,
+      "iou_per_class": {
+        "background": 0.9489817897993844,
+        "wall": 0.2050169189773784,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.2396845759616958,
+      "val_loss": 0.40185592004231047,
+      "miou": 0.1119856774481376,
+      "iou_per_class": {
+        "background": 0.8930733862775783,
+        "wall": 0.2239713548962752,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.2031272495234454,
+      "val_loss": 0.15740823319980077,
+      "miou": 0.132981859064168,
+      "iou_per_class": {
+        "background": 0.9796788235033064,
+        "wall": 0.265963718128336,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.32988327382891264,
+      "val_loss": 0.1932258435658046,
+      "miou": 0.1262852793465727,
+      "iou_per_class": {
+        "background": 0.9746141239797903,
+        "wall": 0.2525705586931454,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.24559976326094735,
+      "val_loss": 0.6312419857297625,
+      "miou": 0.11966720320598706,
+      "iou_per_class": {
+        "background": 0.6845429567584571,
+        "wall": 0.23933440641197412,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.2644184168290209,
+      "val_loss": 0.2528460132224219,
+      "miou": 0.09140200145004833,
+      "iou_per_class": {
+        "background": 0.9140947969643873,
+        "wall": 0.18280400290009666,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.14250652188504184,
+      "val_loss": 0.2719742570604597,
+      "miou": 0.11153466147333,
+      "iou_per_class": {
+        "background": 0.9543636991089199,
+        "wall": 0.22306932294666,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.15010185015422325,
+      "val_loss": 0.18476685668740953,
+      "miou": 0.09893669197356392,
+      "iou_per_class": {
+        "background": 0.9671254767707581,
+        "wall": 0.19787338394712783,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.08434622941745652,
+      "val_loss": 0.1844902570758547,
+      "miou": 0.12153930650740247,
+      "iou_per_class": {
+        "background": 0.9697005512040417,
+        "wall": 0.24307861301480493,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.13932818574485956,
+      "val_loss": 0.18905190697738103,
+      "miou": 0.10743679359177963,
+      "iou_per_class": {
+        "background": 0.9668457872657427,
+        "wall": 0.21487358718355926,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 16,
+      "train_loss": 0.153978047547517,
+      "val_loss": 0.16368379976068223,
+      "miou": 0.12790190019917547,
+      "iou_per_class": {
+        "background": 0.9742211131272056,
+        "wall": 0.25580380039835093,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 17,
+      "train_loss": 0.10926784740553962,
+      "val_loss": 0.15642401256731578,
+      "miou": 0.10826433076940362,
+      "iou_per_class": {
+        "background": 0.9726077528127249,
+        "wall": 0.21652866153880723,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 18,
+      "train_loss": 0.10406697982991184,
+      "val_loss": 0.1394371667078563,
+      "miou": 0.11667967915628778,
+      "iou_per_class": {
+        "background": 0.976709133900518,
+        "wall": 0.23335935831257557,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 19,
+      "train_loss": 0.11584702106537642,
+      "val_loss": 0.14281760049717768,
+      "miou": 0.11242264200611626,
+      "iou_per_class": {
+        "background": 0.975594598977284,
+        "wall": 0.22484528401223253,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    },
+    {
+      "epoch": 20,
+      "train_loss": 0.07182148112742989,
+      "val_loss": 0.15156638090099608,
+      "miou": 0.11136416251345865,
+      "iou_per_class": {
+        "background": 0.973894111704135,
+        "wall": 0.2227283250269173,
+        "room": 0.0,
+        "opening": NaN,
+        "beam": NaN,
+        "column": NaN
+      }
+    }
+  ],
+  "holdout_eval": {
+    "miou": 0.2777803831520986,
+    "iou_per_class": {
+      "background": 0.9390060780142949,
+      "wall": 0.24950253726691113,
+      "room": 0.306058229037286,
+      "opening": NaN,
+      "beam": NaN,
+      "column": NaN
+    }
+  },
+  "version": 2
+}

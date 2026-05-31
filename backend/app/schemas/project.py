@@ -74,4 +74,12 @@ class ProjectRead(BaseModel):
     building_type: str | None
     building_info: dict[str, Any] | None
 
+    allow_training_data: bool = True
+
     created_at: datetime
+
+
+class TrainingConsentUpdate(BaseModel):
+    """Toggle del consentimiento de uso de datos del proyecto para training."""
+
+    allow_training_data: bool

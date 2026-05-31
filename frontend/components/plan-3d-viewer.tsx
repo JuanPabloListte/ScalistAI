@@ -53,7 +53,7 @@ export default function Plan3DViewer({ elements, scale, page, onClose }: Plan3DV
     let minY = Infinity, maxY = -Infinity;
 
     pageElements.forEach((el) => {
-      if (el.type === "wall" || el.type === "opening") {
+      if (el.type === "wall" || el.type === "opening" || el.type === "beam") {
         const pts = el.geometry.points;
         if (pts.length >= 4) {
           const x1 = pts[0] / scale;
@@ -65,7 +65,7 @@ export default function Plan3DViewer({ elements, scale, page, onClose }: Plan3DV
           minY = Math.min(minY, y1, y2);
           maxY = Math.max(maxY, y1, y2);
         }
-      } else if (el.type === "room") {
+      } else if (el.type === "room" || el.type === "roof" || el.type === "column") {
         const pts = el.geometry.points;
         for (let i = 0; i < pts.length; i += 2) {
           const x = pts[i] / scale;
@@ -90,6 +90,9 @@ export default function Plan3DViewer({ elements, scale, page, onClose }: Plan3DV
   const walls = useMemo(() => pageElements.filter((el) => el.type === "wall"), [pageElements]);
   const openings = useMemo(() => pageElements.filter((el) => el.type === "opening"), [pageElements]);
   const rooms = useMemo(() => pageElements.filter((el) => el.type === "room"), [pageElements]);
+  const columns = useMemo(() => pageElements.filter((el) => el.type === "column"), [pageElements]);
+  const roofs = useMemo(() => pageElements.filter((el) => el.type === "roof"), [pageElements]);
+  const beams = useMemo(() => pageElements.filter((el) => el.type === "beam"), [pageElements]);
 
   // Espesor estándar de muros (15 cm)
   const WALL_THICKNESS = 0.15;
@@ -273,7 +276,7 @@ export default function Plan3DViewer({ elements, scale, page, onClose }: Plan3DV
     return list;
   }, [walls, openings, scale, bounds]);
 
-  // Renderizar suelos de los cuartos (extrusi├│n plana 2D)
+  // Renderizar suelos de los cuartos (extrusión plana 2D)
   const roomFloors = useMemo(() => {
     const list: Array<{
       id: string;
@@ -308,6 +311,104 @@ export default function Plan3DViewer({ elements, scale, page, onClose }: Plan3DV
 
     return list;
   }, [rooms, scale, bounds]);
+
+  // Columnas 3D
+  const columnMeshes = useMemo(() => {
+    const list: Array<{
+      id: string;
+      shape: THREE.Shape;
+      height: number;
+    }> = [];
+    columns.forEach((col) => {
+      const pts = col.geometry.points;
+      if (pts.length < 2) return;
+      
+      const shape = new THREE.Shape();
+      if (pts.length === 2) {
+        // Columna de punto (1 clic) -> Generamos un prisma cuadrado de 30x30 cm
+        const cx = pts[0] / scale - bounds.cx;
+        const cy = pts[1] / scale - bounds.cy;
+        const r = 0.15; // 15 cm de radio -> 30 cm de lado
+        shape.moveTo(cx - r, cy - r);
+        shape.lineTo(cx + r, cy - r);
+        shape.lineTo(cx + r, cy + r);
+        shape.lineTo(cx - r, cy + r);
+      } else {
+        // Columna de polígono antiguo (fallback)
+        shape.moveTo(pts[0] / scale - bounds.cx, pts[1] / scale - bounds.cy);
+        for (let i = 2; i < pts.length; i += 2) {
+          shape.lineTo(pts[i] / scale - bounds.cx, pts[i + 1] / scale - bounds.cy);
+        }
+      }
+      shape.closePath();
+      list.push({
+        id: String(col.id),
+        shape,
+        height: col.height_m || 2.8,
+      });
+    });
+    return list;
+  }, [columns, scale, bounds]);
+
+  // Techos / Losas 3D
+  const roofMeshes = useMemo(() => {
+    const list: Array<{
+      id: string;
+      shape: THREE.Shape;
+      thickness: number;
+      elevation: number;
+    }> = [];
+    roofs.forEach((roof) => {
+      const pts = roof.geometry.points;
+      if (pts.length < 6) return;
+      const shape = new THREE.Shape();
+      shape.moveTo(pts[0] / scale - bounds.cx, pts[1] / scale - bounds.cy);
+      for (let i = 2; i < pts.length; i += 2) {
+        shape.lineTo(pts[i] / scale - bounds.cx, pts[i + 1] / scale - bounds.cy);
+      }
+      shape.closePath();
+      list.push({
+        id: String(roof.id),
+        shape,
+        thickness: 0.15,
+        elevation: 2.8,
+      });
+    });
+    return list;
+  }, [roofs, scale, bounds]);
+
+  // Vigas 3D
+  const beamMeshes = useMemo(() => {
+    const list: Array<{
+      id: string;
+      position: [number, number, number];
+      args: [number, number, number];
+      rotationY: number;
+    }> = [];
+    beams.forEach((beam) => {
+      const pts = beam.geometry.points;
+      if (pts.length < 4) return;
+      const bx1 = pts[0] / scale - bounds.cx;
+      const by1 = pts[1] / scale - bounds.cy;
+      const bx2 = pts[2] / scale - bounds.cx;
+      const by2 = pts[3] / scale - bounds.cy;
+      const dx = bx2 - bx1;
+      const dy = by2 - by1;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      if (length === 0) return;
+      const angle = Math.atan2(dy, dx);
+      const beamH = beam.height_m || 0.40;
+      const wallH = 2.8;
+      const elev = wallH - beamH / 2;
+      list.push({
+        id: String(beam.id),
+        position: [bx1 + dx / 2, elev, by1 + dy / 2],
+        args: [length, beamH, 0.15],
+        rotationY: -angle,
+      });
+    });
+    return list;
+  }, [beams, scale, bounds]);
 
   // Colores y Materiales según el modo seleccionado
   const theme = useMemo(() => {
@@ -411,6 +512,70 @@ export default function Plan3DViewer({ elements, scale, page, onClose }: Plan3DV
                   metalness={0.1}
                   transparent={styleMode === "blueprint"}
                   opacity={theme.floorOpacity}
+                />
+              </mesh>
+            ))}
+
+            {/* Columnas */}
+            {columnMeshes.map((cm) => (
+              <mesh key={cm.id} castShadow receiveShadow position={[0, 0, 0]}>
+                <extrudeGeometry
+                  args={[
+                    cm.shape,
+                    {
+                      depth: cm.height,
+                      bevelEnabled: false,
+                    },
+                  ]}
+                />
+                <meshStandardMaterial
+                  color={styleMode === "blueprint" ? "#EC4899" : "#CBD5E1"}
+                  roughness={0.5}
+                  metalness={0.1}
+                  transparent={styleMode === "blueprint"}
+                  opacity={styleMode === "blueprint" ? 0.45 : 1.0}
+                />
+              </mesh>
+            ))}
+
+            {/* Techos / Losas */}
+            {roofMeshes.map((rm) => (
+              <mesh key={rm.id} castShadow receiveShadow position={[0, 0, rm.elevation]}>
+                <extrudeGeometry
+                  args={[
+                    rm.shape,
+                    {
+                      depth: rm.thickness,
+                      bevelEnabled: false,
+                    },
+                  ]}
+                />
+                <meshStandardMaterial
+                  color={styleMode === "blueprint" ? "#0D9488" : "#E2E8F0"}
+                  roughness={0.6}
+                  metalness={0.1}
+                  transparent={styleMode === "blueprint"}
+                  opacity={styleMode === "blueprint" ? 0.35 : 1.0}
+                />
+              </mesh>
+            ))}
+
+            {/* Vigas */}
+            {beamMeshes.map((bm) => (
+              <mesh
+                key={bm.id}
+                position={[bm.position[0], bm.position[2], bm.position[1]]}
+                rotation={[Math.PI / 2, 0, bm.rotationY]}
+                castShadow
+                receiveShadow
+              >
+                <boxGeometry args={bm.args} />
+                <meshStandardMaterial
+                  color={styleMode === "blueprint" ? "#7C3AED" : "#E2E8F0"}
+                  transparent={styleMode === "blueprint"}
+                  opacity={styleMode === "blueprint" ? 0.45 : 1.0}
+                  roughness={0.5}
+                  metalness={0.1}
                 />
               </mesh>
             ))}

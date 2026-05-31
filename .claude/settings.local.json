@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-Location; npx tsc --noEmit; echo \"Exit: $LASTEXITCODE\")"
+      "PowerShell(Get-Location; npx tsc --noEmit; echo \"Exit: $LASTEXITCODE\")",
+      "Bash(docker compose *)"
     ]
   }
 }

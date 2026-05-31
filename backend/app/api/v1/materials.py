@@ -36,6 +36,14 @@ APPLIES_TO_MAP = {
     "abertura perimetro": "opening_perimeter",
     "abertura perímetro": "opening_perimeter",
     "opening_perimeter": "opening_perimeter",
+    "viga": "beam",
+    "beam": "beam",
+    "techo": "roof",
+    "losa": "roof",
+    "techo / losa": "roof",
+    "roof": "roof",
+    "columna": "column",
+    "column": "column",
 }
 
 APPLIES_TO_REVERSE_MAP = {
@@ -45,6 +53,9 @@ APPLIES_TO_REVERSE_MAP = {
     "room_perimeter": "Recinto Perímetro",
     "opening": "Abertura Área",
     "opening_perimeter": "Abertura Perímetro",
+    "beam": "Viga",
+    "roof": "Techo / Losa",
+    "column": "Columna",
 }
 
 

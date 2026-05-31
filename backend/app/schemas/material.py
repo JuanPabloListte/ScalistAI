@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 class MaterialYieldBase(BaseModel):
-    applies_to: str = Field(..., pattern="^(wall|room_floor|room_wall|room_perimeter|opening|opening_perimeter)$")
+    applies_to: str = Field(..., pattern="^(wall|room_floor|room_wall|room_perimeter|opening|opening_perimeter|beam|roof|column)$")
     consumption: float = Field(..., ge=0)
     waste_factor: float = Field(..., ge=0)
     unit_price: float = Field(0.0, ge=0)

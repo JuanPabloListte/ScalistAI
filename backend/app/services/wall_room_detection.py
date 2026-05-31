@@ -2,6 +2,16 @@ import math
 from pathlib import Path
 import fitz
 
+# Keywords para detectar etiquetas de recintos en el texto vectorial del PDF.
+# Tupla: (label_display, default_w_m, default_h_m). Las dimensiones default
+# solo se usan en el fallback legacy — el watershed real recorta el contorno
+# exacto del recinto siguiendo las paredes.
+#
+# Incluye sinónimos comunes en planos AR/LATAM:
+# - "loza/losa/lozas/losas" (planos estructurales de lozas): cada loza
+#   delimita un piso/ambiente, funcionalmente equivalente a un recinto.
+# - "amb" / "ambiente": label genérico cuando no hay nombre específico.
+# - "depto": departamento como bloque completo.
 ROOM_KEYWORDS = {
     "baño": ("Baño", 2.0, 2.0),
     "toilette": ("Toilette", 1.8, 1.8),
@@ -23,6 +33,17 @@ ROOM_KEYWORDS = {
     "balcon": ("Balcón", 3.5, 1.5),
     "terraza": ("Terraza", 4.0, 2.0),
     "patio": ("Patio", 4.0, 3.0),
+    # Lozas / losas — planos estructurales donde cada loza define el polígono
+    # de un piso o ambiente. Tratadas como recinto para training.
+    "loza": ("Loza", 4.0, 4.0),
+    "lozas": ("Loza", 4.0, 4.0),
+    "losa": ("Losa", 4.0, 4.0),
+    "losas": ("Losa", 4.0, 4.0),
+    # Genéricos
+    "ambiente": ("Ambiente", 4.0, 4.0),
+    "amb.": ("Ambiente", 4.0, 4.0),
+    "depto": ("Depto", 6.0, 5.0),
+    "departamento": ("Depto", 6.0, 5.0),
 }
 
 

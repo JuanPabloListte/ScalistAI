@@ -17,6 +17,9 @@ const APPLIES_TO_OPTIONS: { value: string; label: string }[] = [
   { value: "room_perimeter", label: "Recinto · Perímetro" },
   { value: "opening", label: "Abertura · Área" },
   { value: "opening_perimeter", label: "Abertura · Perímetro" },
+  { value: "beam", label: "Viga" },
+  { value: "roof", label: "Techo / Losa" },
+  { value: "column", label: "Columna" },
 ];
 
 const UNIT_SUGGESTIONS = ["un", "m", "m²", "m³", "kg", "l", "ml"];

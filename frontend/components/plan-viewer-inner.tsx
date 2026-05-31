@@ -31,7 +31,7 @@ type Props = {
 };
 
 type Point = { x: number; y: number };
-type Tool = "pan" | "wall" | "room" | "opening";
+type Tool = "pan" | "wall" | "room" | "opening" | "beam" | "roof" | "column";
 
 const ZOOM_STEP = 1.1;
 const MIN_SCALE = 0.02;
@@ -116,6 +116,9 @@ function applicableMaterials(type: ElementType, all: Material[]): Material[] {
       if (type === "wall") return y.applies_to === "wall";
       if (type === "room") return ["room_floor", "room_wall", "room_perimeter"].includes(y.applies_to);
       if (type === "opening") return ["opening", "opening_perimeter"].includes(y.applies_to);
+      if (type === "beam") return y.applies_to === "beam";
+      if (type === "roof") return y.applies_to === "roof";
+      if (type === "column") return y.applies_to === "column";
       return false;
     }),
   );
@@ -716,15 +719,16 @@ export default function PlanViewerInner({
 
   // Indicador: ¿estoy cerca del primer punto del polígono?
   const isClosingRoom = useMemo(() => {
-    if (tool !== "room" || activePoints.length < 3 || !mousePos) return false;
+    const isPolygonTool = tool === "room" || tool === "roof";
+    if (!isPolygonTool || activePoints.length < 3 || !mousePos) return false;
     const dx = (mousePos.x - activePoints[0].x) * scale;
     const dy = (mousePos.y - activePoints[0].y) * scale;
     return Math.hypot(dx, dy) < CLOSE_POLYGON_PX;
   }, [tool, activePoints, mousePos, scale]);
 
-  // Crear muro o abertura (2 puntos → 1 elemento)
+  // Crear muro, abertura o viga (2 puntos → 1 elemento)
   const createSegmentElement = useCallback(
-    async (pts: Point[], type: "wall" | "opening") => {
+    async (pts: Point[], type: "wall" | "opening" | "beam") => {
       if (!currentPageScale || pts.length !== 2) return;
       const lengthM = distM(pts[0], pts[1], currentPageScale);
       if (lengthM < MIN_SEGMENT_M) {
@@ -741,7 +745,7 @@ export default function PlanViewerInner({
             points: [pts[0].x, pts[0].y, pts[1].x, pts[1].y],
           },
           length_m: lengthM,
-          height_m: type === "opening" ? 2.1 : 2.8,
+          height_m: type === "opening" ? 2.1 : type === "beam" ? 0.40 : 2.8,
         });
         setElements((prev) => [...prev, el]);
       } catch (err) {
@@ -751,24 +755,21 @@ export default function PlanViewerInner({
     [planId, page, currentPageScale],
   );
 
-  // Crear recinto (>= 3 puntos → polígono cerrado)
-  const createRoomElement = useCallback(
-    async (pts: Point[]) => {
-      if (!currentPageScale || pts.length < 3) return;
-      const areaM2 = polygonAreaM2(pts, currentPageScale);
-      const perimM = polygonPerimeterM(pts, currentPageScale);
-      if (areaM2 < 0.01) {
-        setDrawError("Recinto con área insignificante");
-        setTimeout(() => setDrawError(null), 2000);
-        return;
-      }
+  // Crear columna como un punto (1 punto → 1 elemento)
+  const createPointElement = useCallback(
+    async (pt: Point, type: "column" = "column") => {
+      if (!currentPageScale) return;
+      // Default: 30x30 cm -> area = 0.09 m2, perimeter = 1.2 m
+      const areaM2 = 0.09;
+      const perimM = 1.2;
       setDrawError(null);
-      const flat = pts.flatMap((p) => [p.x, p.y]);
       try {
         const el = await api.createElement(planId, {
           page,
-          type: "room",
-          geometry: { points: flat },
+          type,
+          geometry: {
+            points: [pt.x, pt.y],
+          },
           area_m2: areaM2,
           length_m: perimM,
           height_m: 2.8,
@@ -781,8 +782,43 @@ export default function PlanViewerInner({
     [planId, page, currentPageScale],
   );
 
+  // Crear recinto o techo (>= 3 puntos → polígono cerrado)
+  const createPolygonElement = useCallback(
+    async (pts: Point[], type: "room" | "roof" = "room") => {
+      if (!currentPageScale || pts.length < 3) return;
+      const areaM2 = polygonAreaM2(pts, currentPageScale);
+      const perimM = polygonPerimeterM(pts, currentPageScale);
+      if (areaM2 < 0.01) {
+        const typeLabel = type === "room" ? "Recinto" : "Techo";
+        setDrawError(`${typeLabel} con área insignificante`);
+        setTimeout(() => setDrawError(null), 2000);
+        return;
+      }
+      setDrawError(null);
+      const flat = pts.flatMap((p) => [p.x, p.y]);
+      try {
+        const el = await api.createElement(planId, {
+          page,
+          type,
+          geometry: { points: flat },
+          area_m2: areaM2,
+          length_m: perimM,
+          height_m: type === "roof" ? 0.20 : 2.8,
+        });
+        setElements((prev) => [...prev, el]);
+      } catch (err) {
+        setDrawError(err instanceof Error ? err.message : "Error al guardar");
+      }
+    },
+    [planId, page, currentPageScale],
+  );
+
   function handleDrawClick(p: Point) {
-    if (tool === "wall" || tool === "opening") {
+    if (tool === "column") {
+      void createPointElement(p, "column");
+      return;
+    }
+    if (tool === "wall" || tool === "opening" || tool === "beam") {
       if (activePoints.length === 0) {
         setActivePoints([p]);
         return;
@@ -792,11 +828,11 @@ export default function PlanViewerInner({
       void createSegmentElement(pts, tool);
       return;
     }
-    if (tool === "room") {
+    if (tool === "room" || tool === "roof") {
       if (activePoints.length >= 3 && isClosingRoom) {
         const pts = activePoints;
         setActivePoints([]);
-        void createRoomElement(pts);
+        void createPolygonElement(pts, tool);
         return;
       }
       setActivePoints((prev) => [...prev, p]);
@@ -905,10 +941,11 @@ export default function PlanViewerInner({
 
   function onDoubleClick() {
     // Doble-click cierra polígono activo si tiene >= 3 puntos
-    if (tool === "room" && activePoints.length >= 3) {
+    const isPolygonTool = tool === "room" || tool === "roof";
+    if (isPolygonTool && activePoints.length >= 3) {
       const pts = activePoints;
       setActivePoints([]);
-      void createRoomElement(pts);
+      void createPolygonElement(pts, tool);
     }
   }
 
@@ -1486,11 +1523,12 @@ export default function PlanViewerInner({
         }
         return;
       }
-      if (e.key === "Enter" && tool === "room" && activePoints.length >= 3) {
+      const isPolygonTool = tool === "room" || tool === "roof";
+      if (e.key === "Enter" && isPolygonTool && activePoints.length >= 3) {
         e.preventDefault();
         const pts = activePoints;
         setActivePoints([]);
-        void createRoomElement(pts);
+        void createPolygonElement(pts, tool);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && activePoints.length > 0) {
@@ -1504,11 +1542,14 @@ export default function PlanViewerInner({
         if (e.key.toLowerCase() === "l") selectTool("wall");
         if (e.key.toLowerCase() === "p") selectTool("room");
         if (e.key.toLowerCase() === "o") selectTool("opening");
+        if (e.key.toLowerCase() === "v") selectTool("beam");
+        if (e.key.toLowerCase() === "t") selectTool("roof");
+        if (e.key.toLowerCase() === "c") selectTool("column");
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [calibrating, activePoints, tool, drawingDisabled, createRoomElement]);
+  }, [calibrating, activePoints, tool, drawingDisabled, createPolygonElement]);
 
   const processing = rendered !== null && rendered < totalPages;
   const detectedCount = pageScales ? Object.keys(pageScales).length : 0;
@@ -1532,6 +1573,14 @@ export default function PlanViewerInner({
     .filter((e) => e.type === "room")
     .reduce((acc, e) => acc + (e.area_m2 ?? 0), 0);
   const totalOpenings = visibleElements.filter((e) => e.type === "opening").length;
+
+  const totalBeamsM = visibleElements
+    .filter((e) => e.type === "beam")
+    .reduce((acc, e) => acc + (e.length_m ?? 0), 0);
+  const totalRoofsM2 = visibleElements
+    .filter((e) => e.type === "roof")
+    .reduce((acc, e) => acc + (e.area_m2 ?? 0), 0);
+  const totalColumns = visibleElements.filter((e) => e.type === "column").length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1586,24 +1635,42 @@ export default function PlanViewerInner({
           </p>
 
           {/* Totales */}
-          <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg border border-slate-100 bg-slate-50/50 p-2 text-center text-[11px] dark:border-slate-800 dark:bg-slate-950/40">
+          <div className="mb-3 grid grid-cols-3 gap-x-2 gap-y-2 rounded-lg border border-slate-100 bg-slate-50/50 p-2 text-center text-[10px] dark:border-slate-800 dark:bg-slate-950/40">
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
-                {totalWallM.toFixed(2)} m
+                {totalWallM.toFixed(1)} m
               </div>
-              <div className="text-slate-400">Muros</div>
+              <div className="text-[9px] text-slate-400">Muros</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
-                {totalRoomM2.toFixed(2)} m²
+                {totalRoomM2.toFixed(1)} m²
               </div>
-              <div className="text-slate-400">Recintos</div>
+              <div className="text-[9px] text-slate-400">Recintos</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalOpenings}
               </div>
-              <div className="text-slate-400">Abert.</div>
+              <div className="text-[9px] text-slate-400">Abert.</div>
+            </div>
+            <div>
+              <div className="font-semibold text-slate-700 dark:text-slate-200">
+                {totalBeamsM.toFixed(1)} m
+              </div>
+              <div className="text-[9px] text-slate-400">Vigas</div>
+            </div>
+            <div>
+              <div className="font-semibold text-slate-700 dark:text-slate-200">
+                {totalRoofsM2.toFixed(1)} m²
+              </div>
+              <div className="text-[9px] text-slate-400">Techos</div>
+            </div>
+            <div>
+              <div className="font-semibold text-slate-700 dark:text-slate-200">
+                {totalColumns}
+              </div>
+              <div className="text-[9px] text-slate-400">Cols.</div>
             </div>
           </div>
 
@@ -1863,6 +1930,9 @@ export default function PlanViewerInner({
                             backgroundColor:
                               el.type === "wall" ? "#16A34A"
                               : el.type === "room" ? "#2563EB"
+                              : el.type === "beam" ? "#7C3AED"
+                              : el.type === "roof" ? "#0D9488"
+                              : el.type === "column" ? "#F43F5E"
                               : "#D97706",
                           }}
                         />
@@ -1874,6 +1944,9 @@ export default function PlanViewerInner({
                             {el.type === "wall" && `${el.length_m?.toFixed(2)} m · alt ${(el.height_m ?? 2.8).toFixed(2)} m`}
                             {el.type === "room" && `${el.area_m2?.toFixed(2)} m² · perím ${el.length_m?.toFixed(2)} m`}
                             {el.type === "opening" && `${el.length_m?.toFixed(2)} m ancho · alt ${(el.height_m ?? 2.1).toFixed(2)} m`}
+                            {el.type === "beam" && `${el.length_m?.toFixed(2)} m · alt ${(el.height_m ?? 0.40).toFixed(2)} m`}
+                            {el.type === "roof" && `${el.area_m2?.toFixed(2)} m²`}
+                            {el.type === "column" && `${el.area_m2?.toFixed(2)} m² · alt ${(el.height_m ?? 2.8).toFixed(2)} m`}
                           </p>
                         </div>
                         <ChevronIcon open={editing} />
@@ -2246,6 +2319,229 @@ export default function PlanViewerInner({
                         );
                       })}
 
+                    {/* Techos */}
+                    {visibleElements
+                      .filter((el) => el.type === "roof")
+                      .map((el) => {
+                        const pts = chunkPoints(el.geometry.points);
+                        const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        
+                        const fillColor = sel ? "rgba(20, 184, 166, 0.45)" : hovered ? "rgba(20, 184, 166, 0.35)" : "rgba(20, 184, 166, 0.25)";
+                        const strokeColor = sel ? "#0D9488" : hovered ? "#14B8A6" : "#2DD4BF";
+                        
+                        const centroid = calculatePolygonCentroid(pts);
+                        const labelText = (el.geometry.label || "Techo").toUpperCase();
+                        const areaText = el.area_m2 ? `${el.area_m2.toFixed(1)} m²` : "";
+                        const pillText = areaText ? `${labelText} · ${areaText}` : labelText;
+                        const pillW = pillText.length * 6.6 + 22;
+
+                        return (
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {sel && (
+                              <polygon
+                                points={ptsStr}
+                                fill="rgba(13, 148, 136, 0.1)"
+                                className="pointer-events-none"
+                              />
+                            )}
+                            <polygon
+                              points={ptsStr}
+                              fill={fillColor}
+                              stroke={strokeColor}
+                              strokeWidth={(sel || hovered ? 3 : 2) / scale}
+                              strokeLinejoin="round"
+                              filter={sel || hovered ? "url(#shadow-glow)" : "none"}
+                              className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                              }}
+                            />
+                            <g
+                              transform={`translate(${centroid.x}, ${centroid.y}) scale(${1 / scale})`}
+                              className="pointer-events-none transition-all duration-200"
+                            >
+                              <rect
+                                x={-pillW / 2 - 1}
+                                y={-13}
+                                width={pillW + 2}
+                                height={26}
+                                rx={13}
+                                fill="#FFFFFF"
+                                opacity={0.35}
+                              />
+                              <rect
+                                x={-pillW / 2}
+                                y={-12}
+                                width={pillW}
+                                height={24}
+                                rx={12}
+                                fill={sel ? "#0F766E" : "#115E59"}
+                                opacity={sel || hovered ? 0.96 : 0.82}
+                                filter="url(#shadow-glow-sm)"
+                              />
+                              <text
+                                x={0}
+                                y={4}
+                                fill="#FFFFFF"
+                                fontSize={10.5}
+                                fontWeight="700"
+                                textAnchor="middle"
+                                style={{ letterSpacing: "0.04em" }}
+                                className="font-sans"
+                              >
+                                {pillText}
+                              </text>
+                            </g>
+                          </g>
+                        );
+                      })}
+
+                    {/* Columnas */}
+                    {visibleElements
+                      .filter((el) => el.type === "column")
+                      .map((el) => {
+                        const isPointCol = el.geometry.points.length === 2;
+                        let cx = 0;
+                        let cy = 0;
+                        let r = 10;
+                        let ptsStr = "";
+                        let centroid = { x: 0, y: 0 };
+
+                        if (isPointCol) {
+                          cx = el.geometry.points[0];
+                          cy = el.geometry.points[1];
+                          r = 0.15 * (currentPageScale || 60);
+                          centroid = { x: cx, y: cy };
+                        } else {
+                          const pts = chunkPoints(el.geometry.points);
+                          ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                          centroid = calculatePolygonCentroid(pts);
+                        }
+
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        
+                        const fillColor = sel ? "rgba(244, 63, 94, 0.45)" : hovered ? "rgba(244, 63, 94, 0.35)" : "rgba(244, 63, 94, 0.25)";
+                        const strokeColor = sel ? "#E11D48" : hovered ? "#F43F5E" : "#FB7185";
+                        
+                        const labelText = (el.geometry.label || "Columna").toUpperCase();
+                        const areaText = el.area_m2 ? `${el.area_m2.toFixed(1)} m²` : "";
+                        const pillText = areaText ? `${labelText} · ${areaText}` : labelText;
+                        const pillW = pillText.length * 6.6 + 22;
+
+                        return (
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {isPointCol ? (
+                              <>
+                                {sel && (
+                                  <circle
+                                    cx={cx}
+                                    cy={cy}
+                                    r={r + 3}
+                                    fill="rgba(225, 29, 72, 0.1)"
+                                    className="pointer-events-none"
+                                  />
+                                )}
+                                <circle
+                                  cx={cx}
+                                  cy={cy}
+                                  r={r}
+                                  fill={fillColor}
+                                  stroke={strokeColor}
+                                  strokeWidth={(sel || hovered ? 3 : 2) / scale}
+                                  filter={sel || hovered ? "url(#shadow-glow)" : "none"}
+                                  className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
+                                  onMouseEnter={() => {
+                                    if (!draggingVertex) setHoveredId(el.id);
+                                  }}
+                                  onMouseLeave={() => {
+                                    if (!draggingVertex) setHoveredId(null);
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                                  }}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                {sel && (
+                                  <polygon
+                                    points={ptsStr}
+                                    fill="rgba(225, 29, 72, 0.1)"
+                                    className="pointer-events-none"
+                                  />
+                                )}
+                                <polygon
+                                  points={ptsStr}
+                                  fill={fillColor}
+                                  stroke={strokeColor}
+                                  strokeWidth={(sel || hovered ? 3 : 2) / scale}
+                                  strokeLinejoin="round"
+                                  filter={sel || hovered ? "url(#shadow-glow)" : "none"}
+                                  className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
+                                  onMouseEnter={() => {
+                                    if (!draggingVertex) setHoveredId(el.id);
+                                  }}
+                                  onMouseLeave={() => {
+                                    if (!draggingVertex) setHoveredId(null);
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                                  }}
+                                />
+                              </>
+                            )}
+                            <g
+                              transform={`translate(${centroid.x}, ${centroid.y}) scale(${1 / scale})`}
+                              className="pointer-events-none transition-all duration-200"
+                            >
+                              <rect
+                                x={-pillW / 2 - 1}
+                                y={-13}
+                                width={pillW + 2}
+                                height={26}
+                                rx={13}
+                                fill="#FFFFFF"
+                                opacity={0.35}
+                              />
+                              <rect
+                                x={-pillW / 2}
+                                y={-12}
+                                width={pillW}
+                                height={24}
+                                rx={12}
+                                fill={sel ? "#BE123C" : "#9F1239"}
+                                opacity={sel || hovered ? 0.96 : 0.82}
+                                filter="url(#shadow-glow-sm)"
+                              />
+                              <text
+                                x={0}
+                                y={4}
+                                fill="#FFFFFF"
+                                fontSize={10.5}
+                                fontWeight="700"
+                                textAnchor="middle"
+                                style={{ letterSpacing: "0.04em" }}
+                                className="font-sans"
+                              >
+                                {pillText}
+                              </text>
+                            </g>
+                          </g>
+                        );
+                      })}
+
                     {/* Candidatos Recintos */}
                     {!hideAiElements && roomCandidates.map((c) => {
                       const pts = chunkPoints(c.geometry.points);
@@ -2321,6 +2617,64 @@ export default function PlanViewerInner({
                               y2={y2}
                               stroke={hovered ? "#334155" : "#1E293B"}
                               strokeWidth={(hovered ? 10 : 8) / scale}
+                              strokeLinecap="round"
+                              opacity={1}
+                              className="pointer-events-none transition-colors duration-200"
+                            />
+                          </g>
+                        );
+                      })}
+
+                    {/* Vigas */}
+                    {visibleElements
+                      .filter((el) => el.type === "beam")
+                      .map((el) => {
+                        const [x1, y1, x2, y2] = el.geometry.points;
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        const baseW = 8 / scale;
+                        const hoverW = 9.5 / scale;
+                        const w = hovered ? hoverW : baseW;
+                        return (
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {sel && (
+                              <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                stroke="#3B82F6"
+                                strokeWidth={(8 / scale) + (12 / scale)}
+                                strokeLinecap="round"
+                                opacity={0.35}
+                              />
+                            )}
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke="transparent"
+                              strokeWidth={34 / scale}
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                              }}
+                            />
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke={hovered ? "#6D28D9" : "#7C3AED"}
+                              strokeWidth={w}
                               strokeLinecap="round"
                               opacity={1}
                               className="pointer-events-none transition-colors duration-200"
@@ -2759,8 +3113,8 @@ export default function PlanViewerInner({
                       );
                     })}
 
-                    {/* Preview de dibujo en curso — segmento (wall/opening) */}
-                    {(tool === "wall" || tool === "opening") &&
+                    {/* Preview de dibujo en curso — segmento (wall/opening/beam) */}
+                    {(tool === "wall" || tool === "opening" || tool === "beam") &&
                       activePoints.length === 1 &&
                       mousePos && (
                         <line
@@ -2768,7 +3122,7 @@ export default function PlanViewerInner({
                           y1={activePoints[0].y}
                           x2={mousePos.x}
                           y2={mousePos.y}
-                          stroke={tool === "wall" ? "#16A34A" : "#D97706"}
+                          stroke={tool === "wall" ? "#16A34A" : tool === "beam" ? "#7C3AED" : "#D97706"}
                           strokeWidth={6 / scale}
                           strokeLinecap="round"
                           strokeDasharray={`${6 / scale} ${4 / scale}`}
@@ -2776,15 +3130,21 @@ export default function PlanViewerInner({
                         />
                       )}
 
-                    {/* Preview polígono (room) */}
-                    {tool === "room" && activePoints.length > 0 && (() => {
+                     {/* Preview polígono (room/roof) */}
+                    {(tool === "room" || tool === "roof") && activePoints.length > 0 && (() => {
                       const pts = mousePos ? [...activePoints, mousePos] : activePoints;
                       const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                      const fillColor =
+                        tool === "room" ? "rgba(37, 99, 235, 0.15)"
+                        : "rgba(13, 148, 136, 0.15)";
+                      const strokeColor =
+                        tool === "room" ? "#2563EB"
+                        : "#0D9488";
                       return (
                         <polygon
                           points={ptsStr}
-                          fill="rgba(34, 197, 94, 0.15)"
-                          stroke="#22c55e"
+                          fill={fillColor}
+                          stroke={strokeColor}
                           strokeWidth={2 / scale}
                           strokeDasharray={`${6 / scale} ${4 / scale}`}
                         />
@@ -2797,8 +3157,11 @@ export default function PlanViewerInner({
                       const color =
                         isFirstClosing ? "#fbbf24"
                         : tool === "wall" ? "#16A34A"
+                        : tool === "beam" ? "#7C3AED"
                         : tool === "opening" ? "#D97706"
-                        : "#22c55e";
+                        : tool === "room" ? "#2563EB"
+                        : tool === "roof" ? "#0D9488"
+                        : "#F43F5E";
                       return (
                         <circle
                           key={i}
@@ -3008,6 +3371,33 @@ export default function PlanViewerInner({
                     ariaLabel="Dibujar abertura"
                   >
                     <OpeningIcon />
+                  </ToolbarToolButton>
+                  <ToolbarToolButton
+                    active={tool === "beam"}
+                    onClick={() => selectTool("beam")}
+                    disabled={drawingDisabled}
+                    title="Viga (V)"
+                    ariaLabel="Dibujar viga"
+                  >
+                    <BeamIcon />
+                  </ToolbarToolButton>
+                  <ToolbarToolButton
+                    active={tool === "roof"}
+                    onClick={() => selectTool("roof")}
+                    disabled={drawingDisabled}
+                    title="Techo (T)"
+                    ariaLabel="Dibujar techo"
+                  >
+                    <RoofIcon />
+                  </ToolbarToolButton>
+                  <ToolbarToolButton
+                    active={tool === "column"}
+                    onClick={() => selectTool("column")}
+                    disabled={drawingDisabled}
+                    title="Columna (C)"
+                    ariaLabel="Dibujar columna"
+                  >
+                    <ColumnIcon />
                   </ToolbarToolButton>
                 </div>
               </div>
@@ -3527,7 +3917,11 @@ export default function PlanViewerInner({
 function labelFor(type: ElementType, n: number): string {
   if (type === "wall") return `Muro ${n}`;
   if (type === "room") return `Recinto ${n}`;
-  return `Abertura ${n}`;
+  if (type === "opening") return `Abertura ${n}`;
+  if (type === "beam") return `Viga ${n}`;
+  if (type === "roof") return `Techo ${n}`;
+  if (type === "column") return `Columna ${n}`;
+  return `Elemento ${n}`;
 }
 
 function PageOverrideToggle({
@@ -3748,6 +4142,35 @@ function OpeningIcon() {
       <path d="M12 21V3" />
       <path d="M21 21V11a4 4 0 0 0-4-4h-2" />
       <path d="M16 12h.01" />
+    </svg>
+  );
+}
+
+function BeamIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 6h16" strokeDasharray="2 2" />
+      <path d="M4 18h16" strokeDasharray="2 2" />
+      <rect x="6" y="8" width="12" height="8" rx="1" />
+    </svg>
+  );
+}
+
+function RoofIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m2 16 10-10 10 10" />
+      <path d="M12 6v14" />
+      <path d="M3 20h18" />
+    </svg>
+  );
+}
+
+function ColumnIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="3" width="6" height="18" rx="0.5" />
+      <rect x="13" y="3" width="6" height="18" rx="0.5" />
     </svg>
   );
 }
