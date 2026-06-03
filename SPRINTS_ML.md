@@ -1,7 +1,7 @@
 # Sprints — Integración ML (CubiCasa5K)
 
 Roadmap de la integración de un modelo de segmentación visual entrenado sobre
-**CubiCasa5K** al pipeline de detección de MuroAI. Reemplaza/complementa la
+**CubiCasa5K** al pipeline de detección de ScalistAI. Reemplaza/complementa la
 detección clásica con OpenCV.
 
 ## Objetivo
@@ -203,9 +203,9 @@ detección clásica con OpenCV.
    - Loss: `CrossEntropyLoss` con pesos por clase para compensar desbalance de background.
    - Optimizer Adam + Cosine LR schedule.
    - Métrica de validación: mIoU (excluyendo background) + IoU por clase.
-   - Guarda el mejor checkpoint a `backend/models/muroai_seg_v1.pt`.
+   - Guarda el mejor checkpoint a `backend/models/scalistai_seg_v1.pt`.
    - Persiste historial completo en `.history.json` para análisis posterior.
-2. ✅ Default `settings.ML_MODEL_PATH` cambiado a `./backend/models/muroai_seg_v1.pt`.
+2. ✅ Default `settings.ML_MODEL_PATH` cambiado a `./backend/models/scalistai_seg_v1.pt`.
 3. ✅ `.gitignore` actualizado para excluir `backend/models/*.pt`, `*.history.json` y `test_plans/`.
 
 **Uso**:
@@ -219,7 +219,7 @@ python -m scripts.train_model --epochs 30 --batch-size 8
 1. Usuario sube planos → wizard asigna roles → IA clásica genera candidatos.
 2. Usuario confirma/edita candidatos en el editor.
 3. `POST /plans/<id>/generate-synthetic` → variaciones sintéticas en `storage/synthetic/`.
-4. `python -m scripts.train_model` → modelo entrenado en `backend/models/muroai_seg_v1.pt`.
+4. `python -m scripts.train_model` → modelo entrenado en `backend/models/scalistai_seg_v1.pt`.
 5. Próximo upload + `/page-roles` → la etapa ML del pipeline ahora corre con el modelo entrenado, devolviendo elementos con `source="ai_ml"` además de los clásicos.
 
 **Pendiente para siguiente sprint**:
@@ -324,7 +324,7 @@ python -m scripts.train_model --epochs 30
   - `synthetic_generator.py` con 12 combos geométricos + 6 augmentations de estilo.
   - Endpoint `POST /plans/{id}/generate-synthetic`.
   - `api.generateSynthetic()` en el frontend.
-- **Próximo paso**: Sprint 4' — pipeline de training inicial que use estas variaciones para producir el primer `cubicasa5k.pt` (mal nombre — renombrar a `muroai_seg_v1.pt`).
+- **Próximo paso**: Sprint 4' — pipeline de training inicial que use estas variaciones para producir el primer `cubicasa5k.pt` (mal nombre — renombrar a `scalistai_seg_v1.pt`).
 
 ### 2026-05-27 — Sprint 4' y Sprint 4 cerrados
 

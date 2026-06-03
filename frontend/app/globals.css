@@ -2,15 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    /* Light: gris muy claro, no blanco puro, da reposo visual */
+    --background: 220 14% 96%; /* ≈ slate-100 */
+    --foreground: 220 26% 14%; /* ≈ slate-800 */
+    --card: 0 0% 100%;
+    --card-foreground: 220 26% 14%;
+    --border: 220 13% 91%; /* ≈ slate-200 */
+    --ring: 200 95% 45%;    /* brand */
+    --muted: 220 14% 90%;
+    --muted-foreground: 215 16% 47%; /* ≈ slate-500 */
+  }
+
+  .dark {
+    /* Dark: oscuro pero NO negro puro. Aproximadamente slate-900 */
+    --background: 220 26% 14%;          /* slate-800-ish, fondo de la app */
+    --foreground: 210 20% 92%;          /* texto principal */
+    --card: 218 23% 18%;                /* tarjetas: un punto más claras */
+    --card-foreground: 210 20% 92%;
+    --border: 217 19% 27%;              /* slate-700 visible pero discreto */
+    --ring: 200 90% 55%;                /* brand */
+    --muted: 218 20% 22%;
+    --muted-foreground: 218 11% 65%;    /* texto secundario */
+  }
+}
+
 html,
 body {
   height: 100%;
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased transition-colors;
+  @apply bg-background text-foreground antialiased transition-colors duration-300;
+  /* Sin gradients. Fondo plano según la variable --background. */
 }
 
-.dark body {
-  @apply bg-slate-900 text-slate-100;
+@layer utilities {
+  /* Card neutral: usar en lugar de los glass-* viejos. Sin blur ni
+     gradients, con borde sutil y sombra muy leve. */
+  .surface {
+    @apply bg-card text-card-foreground border border-border rounded-xl;
+  }
+  .surface-soft {
+    @apply bg-card text-card-foreground border border-border/70 rounded-lg;
+  }
+
+  /* Compatibilidad con clases viejas (`.glass`, `.glass-panel`, `.premium-card`)
+     para no romper componentes mientras barremos. Se mapean a la nueva
+     superficie plana y se sacan progresivamente. */
+  .glass,
+  .glass-panel,
+  .premium-card {
+    @apply surface;
+  }
+}
+
+/* Scrollbar discreta — fina, mismo tono que los bordes para no llamar la atención. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300/70 rounded-full;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  @apply bg-slate-600/60;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}
+
+/* Selección de texto en línea con el brand, sutil. */
+::selection {
+  background: rgba(14, 165, 233, 0.22);
+  color: inherit;
 }

@@ -42,7 +42,7 @@ export function ProfileMenu() {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
     document.documentElement.classList.toggle("dark", next === "dark");
-    window.localStorage.setItem("muroai_theme", next);
+    window.localStorage.setItem("scalistai_theme", next);
   }
 
   function handleLogout() {
@@ -53,8 +53,7 @@ export function ProfileMenu() {
 
   function handleEditProfile() {
     setOpen(false);
-    // Placeholder: route a /profile cuando exista
-    alert("Editar perfil — próximamente");
+    router.push("/profile");
   }
 
   return (
@@ -66,8 +65,8 @@ export function ProfileMenu() {
         title="Perfil"
         className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold transition ${
           open
-            ? "border-brand bg-brand text-white dark:border-sky-400 dark:bg-sky-500 dark:text-slate-950"
-            : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            ? "border-brand-600 bg-brand-600 text-white dark:border-brand-400 dark:bg-brand-500"
+            : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
         }`}
       >
         <UserIcon />
@@ -87,7 +86,7 @@ export function ProfileMenu() {
               aria-label="Alternar tema"
               className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                 mounted && theme === "dark"
-                  ? "bg-sky-500"
+                  ? "bg-brand-500"
                   : "bg-slate-300 dark:bg-slate-700"
               }`}
             >

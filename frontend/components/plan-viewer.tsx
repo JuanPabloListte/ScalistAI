@@ -22,6 +22,7 @@ export function PlanViewer(props: {
   planDpi?: number | null;
   calRequest?: { page: number; ts: number } | null;
   allowedPages?: number[] | null;
+  activeCategory?: string | null;
   onPlanUpdated?: (plan: Plan) => void;
   height?: number;
 }) {

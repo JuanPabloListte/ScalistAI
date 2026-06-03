@@ -4,9 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    POSTGRES_USER: str = "muroai"
-    POSTGRES_PASSWORD: str = "muroai_dev"
-    POSTGRES_DB: str = "muroai"
+    POSTGRES_USER: str = "scalistai"
+    POSTGRES_PASSWORD: str = "scalistai_dev"
+    POSTGRES_DB: str = "scalistai"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # las variaciones sintéticas generadas a partir de los planos del usuario.
     # Si el archivo no existe el detector ML queda deshabilitado y el sistema
     # usa solo la detección clásica.
-    ML_MODEL_PATH: str = "./backend/models/muroai_seg_v1.pt"
+    ML_MODEL_PATH: str = "./backend/models/scalistai_seg_v1.pt"
     # Encender / apagar el detector ML aunque el modelo esté presente.
     ENABLE_ML_DETECTION: bool = True
     # Device para PyTorch: "auto" detecta CUDA si está, sino CPU.

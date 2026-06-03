@@ -1,7 +1,7 @@
 [project]
-name = "muroai-backend"
+name = "scalistai-backend"
 version = "0.1.0"
-description = "MuroAI backend - FastAPI"
+description = "ScalistAI backend - FastAPI"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

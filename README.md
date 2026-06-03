@@ -1,4 +1,4 @@
-# MuroAI
+# ScalistAI
 
 Aplicación web para automatizar el cómputo métrico y presupuesto de materiales en la fase de preconstrucción y preventa inmobiliaria. El usuario sube planos en PDF, calibra la escala (auto o manual), dibuja muros, recintos y aberturas sobre el plano, asigna materiales con sus fórmulas de rendimiento, y obtiene un presupuesto exportable a Excel y PDF.
 
@@ -27,7 +27,7 @@ Aplicación web para automatizar el cómputo métrico y presupuesto de materiale
 ## 1. Estructura de carpetas (monorepo)
 
 ```
-MuroAI/
+ScalistAI/
 ├── frontend/                  Next.js 14 (App Router) + Tailwind
 │   ├── app/
 │   │   ├── login/ register/ projects/ projects/[id]/ materials/

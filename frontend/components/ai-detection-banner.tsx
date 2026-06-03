@@ -80,17 +80,16 @@ export function AiDetectionBanner({
   }
 
   return (
-    <div className="mb-4 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 dark:border-sky-800 dark:bg-sky-950/40">
-      <div className="mt-0.5 h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+    <div className="mb-4 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50/70 px-4 py-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+      <div className="mt-0.5 h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-sky-500 border-t-transparent dark:border-sky-400 dark:border-t-transparent" />
       <div className="flex-1 text-sm">
         <p className="font-semibold text-sky-900 dark:text-sky-200">
           La IA está procesando tu plano
         </p>
-        <p className="mt-1 text-sky-800/80 dark:text-sky-300/80">
-          Detección automática de muros, recintos, aberturas, columnas, vigas y
-          techos en background. Vas a ver los candidatos en cuanto terminen.
+        <p className="mt-0.5 text-xs text-sky-800/80 dark:text-sky-300/80">
+          Detección automática en background. Vas a ver los candidatos en cuanto terminen.
         </p>
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
           {STAGE_LABELS.map(({ key, label }) => (
             <li key={key} className="flex items-center gap-1">
               <StageIcon stage={status[key]} />
@@ -102,10 +101,13 @@ export function AiDetectionBanner({
       <button
         type="button"
         onClick={() => setDismissed(true)}
-        className="text-sky-700 hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-100"
         aria-label="Ocultar"
+        className="rounded p-1 text-sky-700 transition hover:bg-sky-100 hover:text-sky-900 dark:text-sky-300 dark:hover:bg-sky-900/50 dark:hover:text-sky-100"
       >
-        ✕
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
       </button>
     </div>
   );

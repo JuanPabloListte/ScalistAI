@@ -34,6 +34,7 @@ def create_project(
     user: User = Depends(get_current_user),
 ) -> Project:
     project = Project(
+        organization_id=user.organization_id,
         user_id=user.id,
         name=payload.name,
         description=payload.description,
@@ -49,7 +50,7 @@ def list_projects(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[Project]:
-    stmt = select(Project).where(Project.user_id == user.id).order_by(Project.created_at.desc())
+    stmt = select(Project).where(Project.organization_id == user.organization_id).order_by(Project.created_at.desc())
     return list(db.scalars(stmt).all())
 
 
@@ -60,7 +61,7 @@ def get_project(
     user: User = Depends(get_current_user),
 ) -> Project:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return project
 
@@ -73,7 +74,7 @@ def update_project(
     user: User = Depends(get_current_user),
 ) -> Project:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     if payload.name is not None:
         project.name = payload.name
@@ -93,7 +94,7 @@ def update_project_location(
     user: User = Depends(get_current_user),
 ) -> Project:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     project.address = payload.address
@@ -116,7 +117,7 @@ def update_project_building_info(
     user: User = Depends(get_current_user),
 ) -> Project:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     project.building_type = payload.building_type
@@ -137,7 +138,7 @@ def activate_project(
 ) -> Project:
     """Cierra el wizard: valida que esten todos los datos y activa el proyecto."""
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     if not project.name:
@@ -249,7 +250,7 @@ def regenerate_synthetic_for_user(
     projects = list(
         db.execute(
             select(Project)
-            .where(Project.user_id == user.id, Project.allow_training_data == True)  # noqa: E712
+            .where(Project.organization_id == user.organization_id, Project.allow_training_data == True)  # noqa: E712
         )
         .scalars()
         .all()
@@ -344,7 +345,7 @@ def set_training_consent(
     generadas — para eso usar el endpoint de purge (Sprint 6).
     """
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     project.allow_training_data = payload.allow_training_data
     db.commit()
@@ -359,7 +360,7 @@ def delete_project(
     user: User = Depends(get_current_user),
 ) -> None:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     # IDs de los planes ANTES de la cascada — los necesitamos para limpiar sus

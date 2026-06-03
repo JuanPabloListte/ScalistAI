@@ -17,7 +17,18 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> User:
     existing = db.scalar(select(User).where(User.email == payload.email))
     if existing:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
-    user = User(email=payload.email, password_hash=hash_password(payload.password))
+    from app.models.organization import Organization
+    
+    org = Organization(name=f"Organización de {payload.email}")
+    db.add(org)
+    db.flush()
+    
+    user = User(
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        organization_id=org.id,
+        org_role="admin"
+    )
     db.add(user)
     db.commit()
     db.refresh(user)

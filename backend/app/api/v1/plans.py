@@ -20,19 +20,19 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models import DetectedElement, Plan, Project, User, Material
+from app.models import DetectedElement, Plan, Project, User, Material, Assembly
 from app.schemas.detected_element import (
     DetectedElementCreate,
     DetectedElementRead,
     DetectedElementUpdate,
 )
+from app.schemas.assembly import (
+    AssemblyAssignRequest,
+    AssemblyBulkAssignRequest,
+    AssemblyBulkRemoveRequest,
+)
 from app.schemas.material import (
-    MaterialAssignRequest,
-    MaterialRead,
     MaterialSummaryItem,
-    MaterialPriceUpdateRequest,
-    MaterialBulkAssignRequest,
-    MaterialBulkRemoveRequest,
 )
 
 from app.schemas.plan import (
@@ -78,7 +78,7 @@ async def upload_plan(
     user: User = Depends(get_current_user),
 ) -> Plan:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     if file.content_type != "application/pdf":
@@ -146,7 +146,7 @@ def list_plans(
     user: User = Depends(get_current_user),
 ) -> list[Plan]:
     project = db.get(Project, project_id)
-    if project is None or project.user_id != user.id:
+    if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     stmt = select(Plan).where(Plan.project_id == project_id).order_by(Plan.created_at.desc())
     return list(db.scalars(stmt).all())
@@ -225,7 +225,7 @@ def get_plan(
     user: User = Depends(get_current_user),
 ) -> Plan:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     return plan
 
@@ -238,7 +238,7 @@ def get_recommended_pages(
 ) -> list[dict]:
     """Escanea localmente el texto del PDF y devuelve recomendaciones de paginas."""
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     
     pdf_path = Path(plan.pdf_path)
@@ -266,7 +266,7 @@ def start_prewarm(
     upload disparara el background automáticamente.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     pdf_path = Path(plan.pdf_path)
@@ -294,7 +294,7 @@ def calibrate_scale(
 ) -> Plan:
     """Calibra la escala de UNA página manualmente y la guarda en page_scales[page]."""
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     if plan.page_count and payload.page > plan.page_count:
@@ -332,7 +332,7 @@ def set_scale_direct(
     saber cuántas referencias había ni dónde estaban.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     if plan.page_count and payload.page > plan.page_count:
         raise HTTPException(status_code=400, detail="Página fuera de rango")
@@ -354,7 +354,7 @@ def set_scale_by_ratio(
 ) -> Plan:
     """Setea la escala de una página dando directamente el denominador (1:N)."""
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     if plan.page_count and payload.page > plan.page_count:
         raise HTTPException(status_code=400, detail="Página fuera de rango")
@@ -379,7 +379,7 @@ def clear_page_scale(
 ) -> Plan:
     """Borra la escala de una página puntual."""
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     scales = dict(plan.page_scales or {})
     scales.pop(str(page), None)
@@ -401,7 +401,7 @@ def auto_detect_scale(
     precedencia y no se sobreescriben.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -429,7 +429,7 @@ def preview_auto_detect_scale(
     Retorna un diccionario {pagina: denominador} (ej: {"1": 100, "2": 50}).
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -464,7 +464,7 @@ def recommend_plan_pages(
     "rejected" la descarta sin importar el score.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -510,7 +510,7 @@ def set_page_override(
     decision del algoritmo.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     try:
@@ -561,7 +561,7 @@ def set_page_roles(
     páginas sean 1-indexed válidas para el `page_count` del plan.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     # Limpieza: descartamos entradas con lista vacía y validamos rango
@@ -611,7 +611,7 @@ def set_bulk_scale_by_ratio(
 ) -> Plan:
     """Setea la escala de varias páginas a la vez dando sus denominadores (1:N)."""
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     dpi = plan.dpi or RASTER_DPI
@@ -649,7 +649,7 @@ def delete_page(
     import fitz
     
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     if page < 1 or (plan.page_count and page > plan.page_count):
@@ -750,7 +750,7 @@ def list_page_dimensions(
     cercana al segmento que el usuario marca y pre-llena el modal con su valor.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -803,7 +803,7 @@ def _ml_page_candidates(plan: Plan, page: int, kind: str) -> list[dict]:
 
 def _detect_endpoint_guard(plan: Plan | None, page: int, user: User) -> Plan:
     """Validaciones comunes de los endpoints de detección on-demand del editor."""
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     if not Path(plan.pdf_path).exists():
         raise HTTPException(status_code=404, detail="PDF original no disponible")
@@ -881,7 +881,7 @@ def create_elements_bulk(
 ) -> list[DetectedElement]:
     """Crea N elementos (muros, recintos o aberturas) a partir de candidatos aceptados."""
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     created: list[DetectedElement] = []
@@ -943,7 +943,7 @@ def create_openings_bulk(
     rotar/ajustar arrastrando los vértices.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     scales = plan.page_scales or {}
@@ -1030,7 +1030,7 @@ def generate_synthetic_dataset(
     Salida persistida en `storage/synthetic/plan_<id>/page_<N>/var_<NNN>/`.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     try:
@@ -1083,7 +1083,7 @@ def get_ai_pipeline_status(
     se ejecuta en background despues del upload del PDF.
     """
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     return get_ai_status(plan_id)
 
@@ -1095,7 +1095,7 @@ def get_render_status(
     user: User = Depends(get_current_user),
 ) -> dict[str, int]:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     total = plan.page_count or 0
     pdf_path = Path(plan.pdf_path)
@@ -1113,7 +1113,7 @@ def get_plan_raster(
     user: User = Depends(get_current_user),
 ) -> FileResponse:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     pdf_path = Path(plan.pdf_path)
@@ -1170,7 +1170,7 @@ def create_element(
     user: User = Depends(get_current_user),
 ) -> DetectedElement:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     element = DetectedElement(
@@ -1197,7 +1197,7 @@ def list_elements(
     user: User = Depends(get_current_user),
 ) -> list[DetectedElement]:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     stmt = select(DetectedElement).where(DetectedElement.plan_id == plan_id)
@@ -1216,7 +1216,7 @@ def bulk_delete_elements(
     user: User = Depends(get_current_user),
 ) -> None:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     if not payload:
@@ -1238,7 +1238,7 @@ def update_element(
     user: User = Depends(get_current_user),
 ) -> DetectedElement:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     element = db.get(DetectedElement, element_id)
@@ -1262,7 +1262,7 @@ def delete_element(
     user: User = Depends(get_current_user),
 ) -> None:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     element = db.get(DetectedElement, element_id)
@@ -1274,189 +1274,123 @@ def delete_element(
 
 
 
-@router.post(
-    "/plans/{plan_id}/elements/bulk/materials",
-    response_model=list[DetectedElementRead],
-)
-def bulk_assign_material(
-    plan_id: int,
-    payload: MaterialBulkAssignRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> list[DetectedElement]:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-
-    material = db.get(Material, payload.material_id)
-    if material is None:
-        raise HTTPException(status_code=404, detail="Material no encontrado")
-
-    updated_elements = []
-    for el_id in payload.element_ids:
-        element = db.get(DetectedElement, el_id)
-        if element is None or element.plan_id != plan_id:
-            continue
-        if material not in element.materials:
-            element.materials.append(material)
-            updated_elements.append(element)
-
-    if updated_elements:
-        db.commit()
-        for element in updated_elements:
-            db.refresh(element)
-
-    return updated_elements
-
-
-@router.post(
-    "/plans/{plan_id}/elements/bulk/materials/remove",
-    response_model=list[DetectedElementRead],
-)
-def bulk_remove_material(
-    plan_id: int,
-    payload: MaterialBulkRemoveRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> list[DetectedElement]:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-
-    material = db.get(Material, payload.material_id)
-    if material is None:
-        raise HTTPException(status_code=404, detail="Material no encontrado")
-
-    updated_elements = []
-    for el_id in payload.element_ids:
-        element = db.get(DetectedElement, el_id)
-        if element is None or element.plan_id != plan_id:
-            continue
-        if material in element.materials:
-            element.materials.remove(material)
-            updated_elements.append(element)
-
-    if updated_elements:
-        db.commit()
-        for element in updated_elements:
-            db.refresh(element)
-
-    return updated_elements
 
 
 
-@router.post(
-    "/plans/{plan_id}/elements/{element_id}/materials",
-    response_model=DetectedElementRead,
-)
-def assign_material(
-    plan_id: int,
-    element_id: int,
-    payload: MaterialAssignRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> DetectedElement:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
 
-    element = db.get(DetectedElement, element_id)
-    if element is None or element.plan_id != plan_id:
-        raise HTTPException(status_code=404, detail="Elemento no encontrado")
+def _opening_overlaps_wall(
+    opening: DetectedElement, wall: DetectedElement, scale_px_per_m: float
+) -> bool:
+    """Decide si una abertura cae sobre un muro proyectando el centro de la
+    abertura sobre el segmento del muro.
 
-    material = db.get(Material, payload.material_id)
-    if material is None:
-        raise HTTPException(status_code=404, detail="Material no encontrado")
+    Devuelve True si:
+      - la proyección cae dentro del segmento (t ∈ [0, 1]), y
+      - la distancia perpendicular es ≤ 0.5 m (tolerancia para muros gruesos
+        o pequeños desfasajes de dibujo).
 
-    if material not in element.materials:
-        element.materials.append(material)
-        db.commit()
-        db.refresh(element)
-
-    return element
-
-
-@router.delete(
-    "/plans/{plan_id}/elements/{element_id}/materials/{material_id}",
-    response_model=DetectedElementRead,
-)
-def remove_material(
-    plan_id: int,
-    element_id: int,
-    material_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> DetectedElement:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-
-    element = db.get(DetectedElement, element_id)
-    if element is None or element.plan_id != plan_id:
-        raise HTTPException(status_code=404, detail="Elemento no encontrado")
-
-    material = db.get(Material, material_id)
-    if material is None:
-        raise HTTPException(status_code=404, detail="Material no encontrado")
-
-    if material in element.materials:
-        element.materials.remove(material)
-        db.commit()
-        db.refresh(element)
-
-    return element
+    Funciona indistintamente con muros completos (manual) y muros ya partidos
+    por el detector clásico: en este último caso la proyección del centro de
+    la abertura cae *fuera* del segmento (t<0 o t>1), así que no hay
+    doble-descuento.
+    """
+    o_pts = opening.geometry.get("points") if opening.geometry else None
+    w_pts = wall.geometry.get("points") if wall.geometry else None
+    if not o_pts or len(o_pts) < 4 or not w_pts or len(w_pts) < 4:
+        return False
+    ox = (float(o_pts[0]) + float(o_pts[2])) / 2.0
+    oy = (float(o_pts[1]) + float(o_pts[3])) / 2.0
+    x1, y1, x2, y2 = float(w_pts[0]), float(w_pts[1]), float(w_pts[2]), float(w_pts[3])
+    dx = x2 - x1
+    dy = y2 - y1
+    l2 = dx * dx + dy * dy
+    if l2 <= 0:
+        return False
+    t = ((ox - x1) * dx + (oy - y1) * dy) / l2
+    if t < 0.0 or t > 1.0:
+        return False
+    proj_x = x1 + t * dx
+    proj_y = y1 + t * dy
+    dist_px = math.hypot(ox - proj_x, oy - proj_y)
+    max_dist_px = 0.5 * scale_px_per_m  # 0.5 m de tolerancia perpendicular
+    return dist_px <= max_dist_px
 
 
-
+# Subtipos de abertura que también restan al PERÍMETRO del muro (zócalo, etc).
+# Las ventanas solo restan al área. Debe matchear `OPENING_SUBTYPES` del front
+# (plan-viewer-inner.tsx).
+_OPENING_SUBTYPES_SUBTRACT_PERIMETER = {"door", "sliding-door"}
 
 
 def _get_materials_summary_data(plan_id: int, page: int | None, db: Session) -> list[dict]:
+    plan = db.get(Plan, plan_id)
+    page_scales: dict[str, float] = (plan.page_scales or {}) if plan else {}
+
     stmt = select(DetectedElement).where(DetectedElement.plan_id == plan_id)
     if page is not None:
         stmt = stmt.where(DetectedElement.page == page)
-    elements = db.scalars(stmt).all()
+    elements = list(db.scalars(stmt).all())
+
+    # Pre-agrupo aberturas por página para iterar O(W·O_page) en lugar de O(W·O_total).
+    openings_by_page: dict[int, list[DetectedElement]] = {}
+    for el in elements:
+        if el.type == "opening":
+            openings_by_page.setdefault(el.page, []).append(el)
 
     summary_dict = {}
 
     for element in elements:
-        for material in element.materials:
-            for y in material.yields:
+        for assembly in element.assemblies:
+            for am in assembly.assembly_materials:
+                material = am.material
                 qty = 0.0
-                if y.applies_to == "wall" and element.type == "wall":
+                if assembly.applies_to == "wall" and element.type == "wall":
                     length = element.length_m or 0.0
                     height = element.height_m or 2.8
                     area = length * height
-                    qty = area * y.consumption * (1.0 + y.waste_factor)
+                    # Restar aberturas sobre este muro: el área (length × height)
+                    # del muro queda descontada por (width × height) de cada
+                    # abertura que cae sobre el segmento.
+                    scale_px_per_m = page_scales.get(str(element.page))
+                    if scale_px_per_m and scale_px_per_m > 0:
+                        for op in openings_by_page.get(element.page, []):
+                            if _opening_overlaps_wall(op, element, scale_px_per_m):
+                                op_w = op.length_m or 0.0
+                                op_h = op.height_m or 2.1
+                                area -= op_w * op_h
+                        if area < 0.0:
+                            area = 0.0
+                    qty = area * am.consumption * (1.0 + am.waste_factor)
                 elif element.type == "room":
-                    if y.applies_to == "room_floor":
+                    if assembly.applies_to == "room_floor":
                         area = element.area_m2 or 0.0
-                        qty = area * y.consumption * (1.0 + y.waste_factor)
-                    elif y.applies_to == "room_wall":
+                        qty = area * am.consumption * (1.0 + am.waste_factor)
+                    elif assembly.applies_to == "room_wall":
                         perimeter = element.length_m or 0.0
                         height = element.height_m or 2.8
                         area = perimeter * height
-                        qty = area * y.consumption * (1.0 + y.waste_factor)
-                    elif y.applies_to == "room_perimeter":
+                        qty = area * am.consumption * (1.0 + am.waste_factor)
+                    elif assembly.applies_to == "room_perimeter":
                         perimeter = element.length_m or 0.0
-                        qty = perimeter * y.consumption * (1.0 + y.waste_factor)
+                        qty = perimeter * am.consumption * (1.0 + am.waste_factor)
                 elif element.type == "opening":
-                    if y.applies_to == "opening":
+                    if assembly.applies_to == "opening":
                         length = element.length_m or 0.0
                         height = element.height_m or 2.1
                         area = length * height
-                        qty = area * y.consumption * (1.0 + y.waste_factor)
-                    elif y.applies_to == "opening_perimeter":
+                        qty = area * am.consumption * (1.0 + am.waste_factor)
+                    elif assembly.applies_to == "opening_perimeter":
                         length = element.length_m or 0.0
-                        qty = length * y.consumption * (1.0 + y.waste_factor)
-                elif element.type == "beam" and y.applies_to == "beam":
+                        qty = length * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "beam" and assembly.applies_to == "beam":
                     length = element.length_m or 0.0
-                    qty = length * y.consumption * (1.0 + y.waste_factor)
-                elif element.type == "roof" and y.applies_to == "roof":
+                    qty = length * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "roof" and assembly.applies_to == "roof":
                     area = element.area_m2 or 0.0
-                    qty = area * y.consumption * (1.0 + y.waste_factor)
-                elif element.type == "column" and y.applies_to == "column":
+                    qty = area * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "column" and assembly.applies_to == "column":
                     area = element.area_m2 or 0.0
-                    qty = area * y.consumption * (1.0 + y.waste_factor)
+                    qty = area * am.consumption * (1.0 + am.waste_factor)
 
                 if qty > 0.0:
                     if material.id not in summary_dict:
@@ -1464,7 +1398,7 @@ def _get_materials_summary_data(plan_id: int, page: int | None, db: Session) -> 
                             "material": material,
                             "quantity": 0.0,
                             "unit": material.unit,
-                            "unit_price": y.unit_price,
+                            "unit_price": material.unit_price,
                         }
                     summary_dict[material.id]["quantity"] += qty
 
@@ -1496,7 +1430,7 @@ def get_materials_summary(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     return _get_materials_summary_data(plan_id, page, db)
@@ -1510,7 +1444,7 @@ def export_xlsx(
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     summary_items = _get_materials_summary_data(plan_id, page, db)
@@ -1646,7 +1580,7 @@ def export_pdf(
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.user_id != user.id:
+    if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     summary_items = _get_materials_summary_data(plan_id, page, db)

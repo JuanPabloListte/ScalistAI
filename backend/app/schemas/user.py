@@ -14,6 +14,7 @@ class UserRead(BaseModel):
     id: int
     email: EmailStr
     role: str
+    is_superadmin: bool
     created_at: datetime
 
 

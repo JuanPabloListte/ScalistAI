@@ -11,7 +11,7 @@ from app.models.project import Project
 from app.models.plan import Plan
 from app.models.detected_element import DetectedElement
 
-database_url = "postgresql+psycopg://muroai:muroai_dev@postgres:5432/muroai"
+database_url = "postgresql+psycopg://scalistai:scalistai_dev@postgres:5432/scalistai"
 engine = create_engine(database_url)
 
 with Session(engine) as session:

@@ -430,7 +430,13 @@ def _postprocess(
         elif name == "room":
             _emit_rooms(result, mask, px_per_m, page_index)
         elif name == "opening":
-            _emit_openings(result, mask, px_per_m, page_index)
+            _emit_openings(result, mask, px_per_m, page_index, subtype="door")
+        elif name == "door":
+            _emit_openings(result, mask, px_per_m, page_index, subtype="door")
+        elif name == "window":
+            _emit_openings(result, mask, px_per_m, page_index, subtype="window")
+        elif name == "sliding_door":
+            _emit_openings(result, mask, px_per_m, page_index, subtype="sliding-door")
         elif name == "beam":
             _emit_beams(result, mask, px_per_m, page_index)
         elif name == "column":
@@ -550,7 +556,7 @@ def _emit_roofs(result: MLDetectionResult, mask, px_per_m: float, page_index: in
         })
 
 
-def _emit_openings(result: MLDetectionResult, mask, px_per_m: float, page_index: int) -> None:
+def _emit_openings(result: MLDetectionResult, mask, px_per_m: float, page_index: int, subtype: str = "door") -> None:
     import cv2
 
     n_labels, _labels, stats, centroids = cv2.connectedComponentsWithStats(
@@ -577,11 +583,11 @@ def _emit_openings(result: MLDetectionResult, mask, px_per_m: float, page_index:
             "default_width_m": round(length_m, 2),
             "orientation": "h" if w >= h else "v",
             "label": f"Abertura ML {idx}",
-            "subtype": "door",
+            "subtype": subtype,
             "geometry": {
                 "points": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
                 "label": f"Abertura ML {idx}",
-                "subtype": "door",
+                "subtype": subtype,
             },
             "length_m": round(length_m, 2),
             "area_m2": None,
