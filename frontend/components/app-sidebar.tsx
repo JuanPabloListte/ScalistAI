@@ -23,7 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/materials",
-    label: "Materiales",
+    label: "Cómputos / Sistemas",
     matchPrefix: "/materials",
     icon: <PackageIcon />,
   },
@@ -39,30 +39,45 @@ export function AppSidebar() {
       .catch((err) => console.error("Error fetching sidebar profile:", err));
   }, []);
 
-  const isAdmin = user?.role === "admin" || user?.email === "admin@gmail.com";
-  
+  const isSuperadmin = user?.is_superadmin === true;
+  const isOrgAdmin = user?.role === "admin" || isSuperadmin;
+
   const items = [...NAV_ITEMS];
-  if (isAdmin) {
+  if (isOrgAdmin) {
+    items.push({
+      href: "/team",
+      label: "Mi equipo",
+      matchPrefix: "/team",
+      icon: <UsersIcon />,
+    });
+  }
+  if (isSuperadmin) {
+    items.push({
+      href: "/admin/organizations",
+      label: "Organizaciones",
+      matchPrefix: "/admin/organizations",
+      icon: <BuildingIcon />,
+    });
     items.push({
       href: "/admin/model",
-      label: "Model",
+      label: "Modelo ML",
       matchPrefix: "/admin/model",
       icon: <BrainIcon />,
     });
   }
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 flex w-16 flex-col items-center justify-between border-r border-slate-200 bg-white py-4 dark:border-slate-800 dark:bg-slate-950">
+    <aside className="fixed inset-y-0 left-0 z-40 flex w-16 flex-col items-center justify-between border-r border-slate-200 bg-white py-4 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-col items-center gap-6">
         <Link
           href="/projects"
-          aria-label="MuroAI · Inicio"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand text-lg font-bold text-white shadow-sm transition hover:bg-brand-dark dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400"
+          aria-label="ScalistAI · Inicio"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-lg font-bold text-white transition hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-400"
         >
           M
         </Link>
 
-        <nav className="flex flex-col items-center gap-2">
+        <nav className="flex flex-col items-center gap-1">
           {items.map((item) => {
             const active = pathname.startsWith(item.matchPrefix);
             return (
@@ -73,7 +88,7 @@ export function AppSidebar() {
                 title={item.label}
                 className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
                   active
-                    ? "bg-brand/10 text-brand dark:bg-sky-500/15 dark:text-sky-400"
+                    ? "bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300"
                     : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                 }`}
               >
@@ -124,6 +139,55 @@ function PackageIcon() {
       <path d="M21 8 12 13 3 8" />
       <path d="M3 8v8l9 5 9-5V8" />
       <path d="m12 13 0 8" />
+    </svg>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function BuildingIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+      <path d="M9 22v-4h6v4" />
+      <path d="M8 6h.01" />
+      <path d="M16 6h.01" />
+      <path d="M12 6h.01" />
+      <path d="M12 10h.01" />
+      <path d="M12 14h.01" />
+      <path d="M16 10h.01" />
+      <path d="M16 14h.01" />
+      <path d="M8 10h.01" />
+      <path d="M8 14h.01" />
     </svg>
   );
 }

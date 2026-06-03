@@ -31,7 +31,7 @@ import numpy as np
 # ----------------------------------------------------------------------
 # Constantes (sincronizadas con app/services/ml_detector.py)
 # ----------------------------------------------------------------------
-CLASS_NAMES = ["background", "wall", "room", "opening", "beam", "column"]
+CLASS_NAMES = ["background", "wall", "room", "door", "window", "sliding_door", "beam", "column", "roof"]
 NUM_CLASSES = len(CLASS_NAMES)
 INPUT_SIZE = 512
 
@@ -40,10 +40,7 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 # Pesos por clase para CrossEntropy. Vigas y columnas pesan más porque
 # son raras y de pocos pixeles. El orden DEBE matchear CLASS_NAMES.
-# Nota: `roof` se sacó porque solo 1 elemento confirmado en todo el sistema
-# → IoU siempre nan, sumarlo dañaba el balance del training. Volverá cuando
-# haya >= 30 roofs confirmados (ver SPRINTS_ML.md).
-CLASS_WEIGHTS = [0.1, 1.0, 1.0, 1.5, 1.5, 1.8]
+CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0]
 
 # Paths convencionales
 MODELS_DIR = Path("backend/models")
@@ -57,7 +54,7 @@ HOLDOUT_FILE = MODELS_DIR / "holdout.json"
 def discover_samples(root: Path) -> list[tuple[Path, Path]]:
     """Devuelve lista de pares (image.png, mask.png) bajo el root."""
     pairs: list[tuple[Path, Path]] = []
-    for img_path in sorted(root.rglob("var_*/image.png")):
+    for img_path in sorted(root.rglob("**/image.png")):
         mask_path = img_path.parent / "mask.png"
         if mask_path.exists():
             pairs.append((img_path, mask_path))
@@ -356,8 +353,8 @@ def initialize_or_load_holdout(all_pairs: list[tuple[Path, Path]], frac: float =
 
     # Si hay pocos grupos (páginas), hacer split por grupos causaría que clases enteras
     # queden completamente fuera del train o del holdout (ej: si hay sólo 1 o 2 páginas de vigas/columnas).
-    # Para datasets pequeños (<= 12 páginas), hacemos split por variación dentro de cada página.
-    if len(groups) <= 12:
+    # Para datasets pequeños (<= 30 páginas), hacemos split por variación dentro de cada página.
+    if len(groups) <= 30:
         print(f"[holdout] Detectados pocos grupos ({len(groups)} páginas). Realizando split por variación para asegurar representación de todas las clases.")
         holdout_pairs = []
         train_pairs = []

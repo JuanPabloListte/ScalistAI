@@ -59,3 +59,6 @@ test_plans/
 
 # Logs
 *.log
+
+ResPlan.zip
+backend/models/

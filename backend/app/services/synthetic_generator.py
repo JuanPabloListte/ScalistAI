@@ -7,8 +7,9 @@ aberturas) y genera N variaciones aplicando transformaciones geométricas
 Cada variación se persiste como:
     storage/synthetic/plan_<id>/page_<N>/var_<NNN>/
         image.png    # Lo que el modelo ve
-        mask.png     # uint8 single-channel: 0=fondo 1=muro 2=recinto 3=abertura
-                     #                       4=viga 5=columna 6=losa
+        mask.png     # uint8 single-channel: 0=fondo 1=muro 2=recinto
+                     #                       3=puerta 4=ventana 5=puerta-ventana
+                     #                       6=viga 7=columna 8=losa
         meta.json    # Transformaciones aplicadas, conteo de elementos, etc.
 
 Las máscaras tienen ground truth perfecto porque las generamos nosotros — no
@@ -44,14 +45,16 @@ TARGET_SIZE = 512  # entrada estándar del U-Net
 MASK_BG = 0
 MASK_WALL = 1
 MASK_ROOM = 2
-MASK_OPENING = 3
-MASK_BEAM = 4
-MASK_COLUMN = 5
-MASK_ROOF = 6
+MASK_DOOR = 3
+MASK_WINDOW = 4
+MASK_SLIDING_DOOR = 5
+MASK_BEAM = 6
+MASK_COLUMN = 7
+MASK_ROOF = 8
 
 # Espesores de trazo al "rasterizar" la geometría en la máscara
 DEFAULT_WALL_THICK_PX = 4
-DEFAULT_OPENING_THICK_PX = 5
+DEFAULT_OPENING_THICK_PX = 10
 # Vigas dibujadas como línea — equivalente visual a un muro pero notoriamente
 # más ancho. Subimos a 18 px (vs 4 px de muro) porque con 10 px el modelo
 # confundía vigas con muros: ambos eran "líneas finas" y CrossEntropy las
@@ -401,7 +404,14 @@ def _build_mask_from_elements(
         if len(pts_flat) < 4:
             continue
         x1, y1, x2, y2 = (int(round(v)) for v in pts_flat[:4])
-        cv2.line(mask, (x1, y1), (x2, y2), MASK_OPENING, open_t)
+        subtype = (el.geometry.get("subtype") or "door").lower()
+        if "sliding" in subtype or "puerta ventana" in subtype or "puertaventana" in subtype:
+            mask_val = MASK_SLIDING_DOOR
+        elif "window" in subtype or "ventana" in subtype:
+            mask_val = MASK_WINDOW
+        else:
+            mask_val = MASK_DOOR
+        cv2.line(mask, (x1, y1), (x2, y2), mask_val, open_t)
 
     return mask
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
-from app.schemas.material import MaterialRead
+from app.schemas.assembly import AssemblyRead
 
 
 class DetectedElementBase(BaseModel):
@@ -10,7 +10,7 @@ class DetectedElementBase(BaseModel):
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)
     height_m: float | None = Field(2.8, ge=0)
-    source: str = Field("manual", pattern="^(manual|ai)$")
+    source: str = Field("manual", pattern="^(manual|ai|ai_ml)$")
 
 
 class DetectedElementCreate(DetectedElementBase):
@@ -22,7 +22,7 @@ class DetectedElementUpdate(BaseModel):
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)
     height_m: float | None = Field(None, ge=0)
-    source: str | None = Field(None, pattern="^(manual|ai)$")
+    source: str | None = Field(None, pattern="^(manual|ai|ai_ml)$")
 
 
 class DetectedElementRead(DetectedElementBase):
@@ -32,5 +32,5 @@ class DetectedElementRead(DetectedElementBase):
     plan_id: int
     created_at: datetime
     updated_at: datetime
-    materials: list[MaterialRead] = []
+    assemblies: list[AssemblyRead] = []
 

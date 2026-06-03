@@ -33,6 +33,7 @@ export type User = {
   id: number;
   email: string;
   role: string;
+  is_superadmin: boolean;
   created_at: string;
 };
 
@@ -147,7 +148,23 @@ export type Material = {
   name: string;
   category: string;
   unit: string;
-  yields: MaterialYield[];
+  unit_price: number;
+};
+
+export type AssemblyMaterial = {
+  id: number;
+  assembly_id: number;
+  material: Material;
+  consumption: number;
+  waste_factor: number;
+};
+
+export type Assembly = {
+  id: number;
+  name: string;
+  applies_to: string;
+  daily_yield: number | null;
+  assembly_materials: AssemblyMaterial[];
 };
 
 export type DetectedElement = {
@@ -162,7 +179,7 @@ export type DetectedElement = {
   source: "manual" | "ai";
   created_at: string;
   updated_at: string;
-  materials: Material[];
+  assemblies: Assembly[];
 };
 
 export type ElementCreatePayload = {
@@ -182,25 +199,27 @@ export type ElementUpdatePayload = {
   height_m?: number | null;
 };
 
-export type MaterialYieldInput = {
-  applies_to: string; // wall | room_floor | room_wall | room_perimeter | opening | opening_perimeter
+export type AssemblyMaterialInput = {
+  material_id: number;
   consumption: number;
   waste_factor: number;
-  unit_price: number;
 };
 
-export type MaterialCreatePayload = {
+export type AssemblyCreatePayload = {
   name: string;
-  category: string;
-  unit: string;
-  yields: MaterialYieldInput[];
+  applies_to: string;
+  daily_yield: number | null;
+  materials: {
+    material_id: number;
+    consumption: number;
+    waste_factor: number;
+  }[];
 };
 
-export type MaterialUpdatePayload = {
+export type AssemblyUpdatePayload = {
   name?: string;
-  category?: string;
-  unit?: string;
-  yields?: MaterialYieldInput[];
+  applies_to?: string;
+  assembly_materials?: AssemblyMaterialInput[];
 };
 
 export type MaterialSummaryItem = {
@@ -211,9 +230,61 @@ export type MaterialSummaryItem = {
   subtotal: number;
 };
 
+// ---- Admin / Team ----
+
+export type OrgUser = {
+  id: number;
+  email: string;
+  role: string;
+  is_superadmin: boolean;
+  created_at: string;
+};
+
+export type Organization = {
+  id: number;
+  name: string;
+  subscription_status: string;
+  stripe_customer_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrganizationListItem = Organization & {
+  user_count: number;
+  project_count: number;
+};
+
+export type OrganizationDetail = Organization & {
+  users: OrgUser[];
+};
+
+export type OrganizationCreatePayload = {
+  name: string;
+  subscription_status?: string;
+  admin_email?: string;
+  admin_password?: string;
+};
+
+export type OrganizationUpdatePayload = {
+  name?: string;
+  subscription_status?: string;
+};
+
+export type AdminUserCreatePayload = {
+  email: string;
+  password: string;
+  role: "admin" | "member";
+};
+
+export type AdminUserUpdatePayload = {
+  email?: string;
+  password?: string;
+  role?: "admin" | "member";
+};
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("muroai_token");
+  return window.localStorage.getItem("scalistai_token");
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -247,11 +318,11 @@ export const api = {
     });
     if (!res.ok) throw new Error("Credenciales inválidas");
     const data = (await res.json()) as { access_token: string };
-    window.localStorage.setItem("muroai_token", data.access_token);
+    window.localStorage.setItem("scalistai_token", data.access_token);
     return data;
   },
 
-  logout: () => window.localStorage.removeItem("muroai_token"),
+  logout: () => window.localStorage.removeItem("scalistai_token"),
 
   listProjects: () => request<Project[]>("/api/v1/projects"),
   createProject: (name: string, description?: string | null) =>
@@ -284,7 +355,17 @@ export const api = {
     request<AiStatus>(`/api/v1/plans/${planId}/ai-status`),
   getMlStatus: () => request<MlModelStatus>(`/api/v1/plans/ml-status`),
   getTrainingStats: () => request<TrainingStats>(`/api/v1/plans/training-stats`),
-  getMe: () => request<User>("/api/v1/auth/me"),
+  async getMe(): Promise<User> {
+    return request<User>("/api/v1/auth/me");
+  },
+
+  async updateProfile(payload: { email?: string; password?: string }): Promise<User> {
+    return request<User>("/api/v1/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
   triggerTraining: (epochs: number = 10) =>
     request<{ success: boolean; message: string; is_initial: boolean }>(
       `/api/v1/admin/train-now?epochs=${epochs}`,
@@ -352,13 +433,22 @@ export const api = {
   listPlans: (projectId: number) =>
     request<Plan[]>(`/api/v1/projects/${projectId}/plans`),
 
-  uploadPlan: (projectId: number, file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return request<Plan>(`/api/v1/projects/${projectId}/plans`, {
-      method: "POST",
-      body: form,
-    });
+  uploadPlan: (projectId: number, file: File, isPdf: boolean = false) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return request<Plan>(
+      `/api/v1/plans/${projectId}/${isPdf ? "pdf" : "image"}`,
+      { method: "POST", body: formData },
+    );
+  },
+  
+  uploadDxf: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return request<{ success: boolean; project_id: number; plan_id: number; elements_imported: number }>(
+      "/api/v1/integrations/dxf/upload",
+      { method: "POST", body: formData },
+    );
   },
 
   getRenderStatus: (planId: number) =>
@@ -505,48 +595,74 @@ export const api = {
     }
   },
 
-  // ----- Asignación elemento ↔ material -----
-  assignMaterial: (planId: number, elementId: number, materialId: number) =>
+  // ----- Assemblies (Sistemas Constructivos) -----
+  listAssemblies: () => request<Assembly[]>("/api/v1/assemblies/"),
+
+  createAssembly: (payload: AssemblyCreatePayload) =>
+    request<Assembly>("/api/v1/assemblies/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateAssembly: (id: number, payload: AssemblyUpdatePayload) =>
+    request<Assembly>(`/api/v1/assemblies/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteAssembly: async (id: number): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/assemblies/${id}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`No se pudo eliminar el sistema constructivo (HTTP ${res.status})`);
+    }
+  },
+
+  // ----- Asignación elemento ↔ assembly -----
+  assignAssembly: (planId: number, elementId: number, assemblyId: number) =>
     request<DetectedElement>(
-      `/api/v1/plans/${planId}/elements/${elementId}/materials`,
+      `/api/v1/plans/${planId}/elements/${elementId}/assemblies`,
       {
         method: "POST",
-        body: JSON.stringify({ material_id: materialId }),
+        body: JSON.stringify({ assembly_id: assemblyId }),
       },
     ),
 
-  removeMaterial: async (
+  removeAssembly: async (
     planId: number,
     elementId: number,
-    materialId: number,
+    assemblyId: number,
   ): Promise<DetectedElement> => {
     const token = getToken();
     const res = await fetch(
-      `${API_URL}/api/v1/plans/${planId}/elements/${elementId}/materials/${materialId}`,
+      `${API_URL}/api/v1/plans/${planId}/elements/${elementId}/assemblies/${assemblyId}`,
       {
         method: "DELETE",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       },
     );
-    if (!res.ok) throw new Error(`No se pudo quitar el material (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(`No se pudo quitar el sistema constructivo (HTTP ${res.status})`);
     return res.json() as Promise<DetectedElement>;
   },
 
-  bulkAssignMaterial: (planId: number, elementIds: number[], materialId: number) =>
+  bulkAssignAssembly: (planId: number, elementIds: number[], assemblyId: number) =>
     request<DetectedElement[]>(
-      `/api/v1/plans/${planId}/elements/bulk/materials`,
+      `/api/v1/plans/${planId}/elements/bulk/assemblies`,
       {
         method: "POST",
-        body: JSON.stringify({ element_ids: elementIds, material_id: materialId }),
+        body: JSON.stringify({ element_ids: elementIds, assembly_id: assemblyId }),
       },
     ),
 
-  bulkRemoveMaterial: (planId: number, elementIds: number[], materialId: number) =>
+  bulkRemoveAssembly: (planId: number, elementIds: number[], assemblyId: number) =>
     request<DetectedElement[]>(
-      `/api/v1/plans/${planId}/elements/bulk/materials/remove`,
+      `/api/v1/plans/${planId}/elements/bulk/assemblies/remove`,
       {
         method: "POST",
-        body: JSON.stringify({ element_ids: elementIds, material_id: materialId }),
+        body: JSON.stringify({ element_ids: elementIds, assembly_id: assemblyId }),
       },
     ),
 
@@ -610,5 +726,67 @@ export const api = {
     });
     if (!res.ok) throw new Error(`No se pudo exportar (HTTP ${res.status})`);
     return res.blob();
+  },
+
+  // ---- Admin (superadmin) ----
+  listOrganizations: () => request<OrganizationListItem[]>(`/api/v1/admin/organizations`),
+  getOrganization: (id: number) =>
+    request<OrganizationDetail>(`/api/v1/admin/organizations/${id}`),
+  createOrganization: (payload: OrganizationCreatePayload) =>
+    request<OrganizationDetail>(`/api/v1/admin/organizations`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateOrganization: (id: number, payload: OrganizationUpdatePayload) =>
+    request<OrganizationDetail>(`/api/v1/admin/organizations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteOrganization: async (id: number): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/admin/organizations/${id}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  },
+  createOrgUser: (orgId: number, payload: AdminUserCreatePayload) =>
+    request<OrgUser>(`/api/v1/admin/organizations/${orgId}/users`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateOrgUser: (userId: number, payload: AdminUserUpdatePayload) =>
+    request<OrgUser>(`/api/v1/admin/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteOrgUser: async (userId: number): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/admin/users/${userId}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  },
+
+  // ---- Team (org admin / member) ----
+  listTeam: () => request<OrgUser[]>(`/api/v1/team/users`),
+  createTeamUser: (payload: AdminUserCreatePayload) =>
+    request<OrgUser>(`/api/v1/team/users`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateTeamUser: (userId: number, payload: AdminUserUpdatePayload) =>
+    request<OrgUser>(`/api/v1/team/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteTeamUser: async (userId: number): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/team/users/${userId}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
   },
 };

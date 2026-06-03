@@ -61,43 +61,74 @@ export default function ProjectsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-brand dark:text-sky-400">Proyectos</h1>
+    <main className="mx-auto max-w-7xl px-6 py-10">
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Proyectos</h1>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+            {loading
+              ? " "
+              : projects.length === 0
+                ? "Empezá tu primer proyecto"
+                : `${projects.length} proyecto${projects.length === 1 ? "" : "s"} en total`}
+          </p>
+        </div>
+        <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 self-start rounded-md border border-slate-300 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
+          <input
+            type="file"
+            accept=".dxf"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setLoading(true);
+              try {
+                const res = await api.uploadDxf(file);
+                if (res.success) {
+                  router.push(`/projects/${res.project_id}`);
+                }
+              } catch (err: any) {
+                setError("Error importando DXF: " + err.message);
+                setLoading(false);
+              }
+            }}
+          />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          Importar DXF
+        </label>
       </header>
-
-      <div className="mb-8 flex justify-end">
-        <Link
-          href="/projects/new"
-          className="rounded-md bg-brand px-5 py-2 font-semibold text-white hover:bg-brand-dark"
-        >
-          + Nuevo proyecto
-        </Link>
-      </div>
 
       {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {loading ? (
-        <p className="text-slate-500 dark:text-slate-400">Cargando...</p>
+        <ProjectsLoadingSkeleton />
       ) : projects.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-slate-300 px-6 py-12 text-center text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          <p className="mb-3">Todavía no tenés proyectos.</p>
-          <Link
-            href="/projects/new"
-            className="font-medium text-brand hover:underline dark:text-sky-400"
-          >
-            Creá el primero →
-          </Link>
-        </div>
+        <Link
+          href="/projects/new"
+          className="group block rounded-xl border-2 border-dashed border-slate-300 bg-white px-6 py-16 text-center transition hover:border-brand-400 hover:bg-brand-50/30 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-brand-500/60 dark:hover:bg-brand-500/5"
+        >
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition group-hover:bg-brand-100 group-hover:text-brand-600 dark:bg-slate-800 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          </div>
+          <p className="mb-1 text-base font-semibold text-slate-700 group-hover:text-brand-700 dark:text-slate-200 dark:group-hover:text-brand-300">
+            Crear primer proyecto
+          </p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Subí un plano y empezá a cuantificar tus materiales.
+          </p>
+        </Link>
       ) : (
-        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <li className="group relative flex flex-col rounded-xl border-2 border-dashed border-slate-300 bg-transparent p-4 transition hover:border-brand hover:bg-slate-50 dark:border-slate-700 dark:hover:border-sky-400 dark:hover:bg-slate-800/50">
-            <Link href="/projects/new" className="flex h-full min-h-[140px] flex-col items-center justify-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition group-hover:bg-brand/10 group-hover:text-brand dark:bg-slate-800 dark:text-slate-400 dark:group-hover:bg-sky-400/10 dark:group-hover:text-sky-400">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <li className="min-h-[180px]">
+            <Link
+              href="/projects/new"
+              className="group flex h-full min-h-[180px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-white p-5 text-center transition hover:border-brand-400 hover:bg-brand-50/30 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-brand-500/60 dark:hover:bg-brand-500/5"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition group-hover:bg-brand-100 group-hover:text-brand-600 dark:bg-slate-800 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
               </div>
-              <span className="font-semibold text-slate-500 transition group-hover:text-brand dark:text-slate-400 dark:group-hover:text-sky-400">
-                Crear nuevo proyecto
+              <span className="text-sm font-semibold text-slate-600 group-hover:text-brand-700 dark:text-slate-300 dark:group-hover:text-brand-300">
+                Nuevo proyecto
               </span>
             </Link>
           </li>
@@ -111,9 +142,9 @@ export default function ProjectsPage() {
             return (
               <li
                 key={p.id}
-                className="group relative flex flex-col rounded-xl bg-white p-4 shadow transition hover:shadow-md dark:bg-slate-800 dark:shadow-slate-950/50"
+                className="group relative flex flex-col rounded-xl border border-slate-200 bg-white p-5 transition hover:border-brand-300 hover:shadow-surface-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-500/40"
               >
-                <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                <div className="absolute right-2 top-2 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
                   <IconButton
                     label="Editar proyecto"
                     onClick={() => setEditing(p)}
@@ -131,16 +162,16 @@ export default function ProjectsPage() {
 
                 <Link href={href} className="flex flex-1 flex-col">
                   <div className="flex flex-wrap items-center gap-2 pr-16">
-                    <h2 className="font-semibold text-brand dark:text-sky-400">{p.name}</h2>
+                    <h2 className="text-base font-semibold tracking-tight text-slate-900 transition-colors group-hover:text-brand-700 dark:text-slate-100 dark:group-hover:text-brand-300">{p.name}</h2>
                     {isDraft && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
-                        Borrador · paso {p.wizard_step}/5
+                      <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        Borrador · {p.wizard_step}/5
                       </span>
                     )}
                   </div>
 
                   {p.description && (
-                    <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">
+                    <p className="mt-1.5 line-clamp-2 text-sm text-slate-500 dark:text-slate-400">
                       {p.description}
                     </p>
                   )}
@@ -178,16 +209,19 @@ export default function ProjectsPage() {
                     )}
                   </div>
 
-                  <p className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                  <p className="mt-4 border-t border-slate-100 pt-2.5 text-[11px] text-slate-400 dark:border-slate-800 dark:text-slate-500">
                     {new Date(p.created_at).toLocaleDateString()}
-                    {isDraft ? " · Continuar wizard →" : " · Abrir editor →"}
+                    <span className="text-slate-300 dark:text-slate-600"> · </span>
+                    <span className="font-medium text-slate-500 group-hover:text-brand-600 dark:text-slate-400 dark:group-hover:text-brand-400">
+                      {isDraft ? "Continuar wizard →" : "Abrir editor →"}
+                    </span>
                   </p>
                 </Link>
 
                 {!isDraft && (
                   <Link
                     href={`/projects/new?id=${p.id}&edit=1`}
-                    className="mt-2 inline-block text-xs font-medium text-brand hover:underline dark:text-sky-400"
+                    className="mt-1.5 inline-block text-[11px] font-medium text-slate-500 hover:text-brand-600 hover:underline dark:text-slate-400 dark:hover:text-brand-400"
                   >
                     Editar datos del proyecto
                   </Link>
@@ -214,6 +248,27 @@ export default function ProjectsPage() {
         />
       )}
     </main>
+  );
+}
+
+/** Skeleton de cards mientras cargan los proyectos. Tres filas placeholders
+ *  con la misma altura y proporciones que las cards reales, así no salta
+ *  el layout cuando vuelven los datos. */
+function ProjectsLoadingSkeleton() {
+  return (
+    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <li
+          key={i}
+          className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
+        >
+          <div className="h-4 w-2/3 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+          <div className="h-3 w-full rounded bg-slate-200/70 dark:bg-slate-800/70 animate-pulse" />
+          <div className="h-3 w-5/6 rounded bg-slate-200/70 dark:bg-slate-800/70 animate-pulse" />
+          <div className="mt-auto h-3 w-1/3 rounded bg-slate-200/50 dark:bg-slate-800/50 animate-pulse" />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -290,7 +345,7 @@ function EditProjectModal({
             maxLength={255}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
           />
         </label>
 
@@ -307,18 +362,19 @@ function EditProjectModal({
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
+
         <div className="mt-2 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={saving || !name.trim()}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-50 dark:bg-brand-500 dark:hover:bg-brand-400"
           >
             {saving ? "Guardando..." : "Guardar cambios"}
           </button>
@@ -368,7 +424,7 @@ function DeleteProjectModal({
             type="button"
             onClick={onCancel}
             disabled={deleting}
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Cancelar
           </button>
@@ -376,7 +432,7 @@ function DeleteProjectModal({
             type="button"
             onClick={handleDelete}
             disabled={deleting}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
           >
             {deleting ? "Eliminando..." : "Eliminar"}
           </button>
@@ -395,11 +451,11 @@ function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+        className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-surface-lg dark:border-slate-700 dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         {children}

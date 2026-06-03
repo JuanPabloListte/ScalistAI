@@ -1,4 +1,4 @@
-"""Training inicial del detector de segmentación de MuroAI.
+"""Training inicial del detector de segmentación de ScalistAI.
 
 Lee las variaciones sintéticas de `storage/synthetic/**/var_*/` y entrena
 desde scratch (con backbone ResNet34 pre-entrenado en ImageNet) un U-Net
@@ -12,8 +12,8 @@ Para GPU:
     python -m scripts.train_model --device cuda --epochs 50
 
 Salida:
-- `backend/models/muroai_seg_v1.pt`         — checkpoint del mejor modelo según mIoU val
-- `backend/models/muroai_seg_v1.history.json` — log epoch a epoch
+- `backend/models/scalistai_seg_v1.pt`         — checkpoint del mejor modelo según mIoU val
+- `backend/models/scalistai_seg_v1.history.json` — log epoch a epoch
 - `backend/models/active.json`               — pointer al modelo activo
 - `backend/models/holdout.json`              — lista fija de samples reservados para evaluar futuras versiones
 
@@ -60,6 +60,13 @@ def train(args) -> int:
     # OJO: el holdout/val se carvan SOLO de --data-dir (planos reales). Los
     # samples procedurales (--extra-data-dir) van únicamente al train.
     train_pairs, holdout_pairs = C.initialize_or_load_holdout(pairs, frac=0.1, seed=42)
+
+    # Shuffle train_pairs using a fixed seed to ensure validation split is representative 
+    # of all pages and contains all classes.
+    import random
+    rng = random.Random(42)
+    rng.shuffle(train_pairs)
+
     # Del resto, 20% para validación durante training (rotativo, no congelado).
     val_size = max(1, len(train_pairs) // 5)
     train_pairs_only = train_pairs[val_size:]
@@ -121,7 +128,7 @@ def train(args) -> int:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     version = args.version or C.next_version()
-    out_path = C.MODELS_DIR / f"muroai_seg_v{version}.pt"
+    out_path = C.MODELS_DIR / f"scalistai_seg_v{version}.pt"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     best_iou = 0.0
@@ -217,7 +224,7 @@ def train(args) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Training inicial del modelo de segmentación de MuroAI.",
+        description="Training inicial del modelo de segmentación de ScalistAI.",
     )
     parser.add_argument("--data-dir", default="storage/synthetic")
     parser.add_argument("--extra-data-dir", default=None,

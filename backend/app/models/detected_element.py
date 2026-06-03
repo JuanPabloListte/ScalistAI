@@ -8,7 +8,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.plan import Plan
-    from app.models.material import Material
+    from app.models.material import Assembly
 
 
 class DetectedElement(Base):
@@ -33,7 +33,7 @@ class DetectedElement(Base):
     )
 
     plan: Mapped["Plan"] = relationship(back_populates="detected_elements")
-    materials: Mapped[list["Material"]] = relationship(
-        secondary="element_materials", back_populates="elements"
+    assemblies: Mapped[list["Assembly"]] = relationship(
+        secondary="element_assemblies", back_populates="elements"
     )
 

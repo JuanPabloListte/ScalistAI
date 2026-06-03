@@ -116,12 +116,18 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <main className="mx-auto max-w-screen-2xl px-6 py-10">
+    <main className="mx-auto max-w-screen-2xl px-6 py-8">
       <header className="mb-6">
-        <a href="/projects" className="text-sm text-brand hover:underline dark:text-sky-400">
-          ← Volver
+        <a
+          href="/projects"
+          className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-400"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Volver a proyectos
         </a>
-        <h1 className="mt-2 text-3xl font-bold text-brand dark:text-sky-400">{project.name}</h1>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+          {project.name}
+        </h1>
       </header>
 
       {activePlanId !== null && (
@@ -132,77 +138,70 @@ export default function ProjectDetailPage() {
 
       {activePlan ? (
         <section className="mb-8">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">{activePlan.original_filename}</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{activePlan.original_filename}</h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 {activePlan.dpi} DPI · {activePlan.page_count ?? "?"} página
                 {activePlan.page_count === 1 ? "" : "s"}
               </p>
             </div>
-            <button
-              onClick={() => setScalesModalOpen(true)}
-              className="rounded border border-brand px-3 py-1 text-sm font-medium text-brand hover:bg-brand hover:text-white dark:border-sky-400 dark:text-sky-400 dark:hover:bg-sky-400 dark:hover:text-slate-900"
-            >
-              Tabla de escalas
-              {activePlan.page_scales &&
-                Object.keys(activePlan.page_scales).length > 0 &&
-                ` (${Object.keys(activePlan.page_scales).length})`}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setScalesModalOpen(true)}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand-400 hover:text-brand-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-brand-500/60 dark:hover:text-brand-300"
+              >
+                Tabla de escalas
+                {activePlan.page_scales &&
+                  Object.keys(activePlan.page_scales).length > 0 &&
+                  ` · ${Object.keys(activePlan.page_scales).length}`}
+              </button>
+              <a
+                href={`/projects/${project.id}/gantt`}
+                className="flex items-center gap-1.5 rounded-md border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></svg>
+                Ver Cronograma (Gantt)
+              </a>
+            </div>
           </div>
 
-          {/* Sistema de Pestañas con diseño Premium */}
+          {/* Pestañas: borde inferior coloreado por categoría, sin fondo tinted
+              para no ensuciar la jerarquía visual. El color del borde sigue
+              la convención del wizard (muros=emerald, recintos=sky, etc). */}
           {availableTabs.length > 1 && (
-            <div className="mb-6 border-b border-slate-200 dark:border-slate-700">
-              <div className="flex gap-2" role="tablist">
+            <div className="mb-5 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex flex-wrap gap-x-1 gap-y-0 -mb-px" role="tablist">
                 {availableTabs.map((t) => {
                   const isActive = t.id === activeTabId;
-                  let tabColors = "";
-                  if (isActive) {
-                    if (t.id === "walls") {
-                      tabColors = "border-emerald-500 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/20";
-                    } else if (t.id === "rooms") {
-                      tabColors = "border-sky-500 text-sky-600 dark:border-sky-400 dark:text-sky-400 bg-sky-50/30 dark:bg-sky-950/20";
-                    } else if (t.id === "openings") {
-                      tabColors = "border-amber-500 text-amber-600 dark:border-amber-400 dark:text-amber-400 bg-amber-50/30 dark:bg-amber-950/20";
-                    } else if (t.id === "beams") {
-                      tabColors = "border-purple-500 text-purple-600 dark:border-purple-400 dark:text-purple-400 bg-purple-50/30 dark:bg-purple-950/20";
-                    } else if (t.id === "roofs") {
-                      tabColors = "border-teal-500 text-teal-600 dark:border-teal-400 dark:text-teal-400 bg-teal-50/30 dark:bg-teal-950/20";
-                    } else if (t.id === "columns") {
-                      tabColors = "border-pink-500 text-pink-600 dark:border-pink-400 dark:text-pink-400 bg-pink-50/30 dark:bg-pink-950/20";
-                    } else {
-                      tabColors = "border-brand text-brand dark:border-sky-400 dark:text-sky-400 bg-slate-50 dark:bg-slate-800/40";
-                    }
-                  } else {
-                    tabColors = "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600";
-                  }
+                  const activeColor: Record<string, string> = {
+                    walls: "border-emerald-500 text-emerald-700 dark:border-emerald-400 dark:text-emerald-300",
+                    rooms: "border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300",
+                    openings: "border-amber-500 text-amber-700 dark:border-amber-400 dark:text-amber-300",
+                    beams: "border-purple-500 text-purple-700 dark:border-purple-400 dark:text-purple-300",
+                    roofs: "border-teal-500 text-teal-700 dark:border-teal-400 dark:text-teal-300",
+                    columns: "border-pink-500 text-pink-700 dark:border-pink-400 dark:text-pink-300",
+                    all: "border-brand-500 text-brand-700 dark:border-brand-400 dark:text-brand-300",
+                  };
+                  const tabClass = isActive
+                    ? activeColor[t.id] ?? activeColor.all
+                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:border-slate-700";
                   return (
                     <button
                       key={t.id}
                       role="tab"
                       aria-selected={isActive}
                       onClick={() => setActiveTabId(t.id)}
-                      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition ${tabColors}`}
+                      className={`flex items-center gap-1.5 border-b-2 px-3.5 py-2.5 text-sm font-medium transition ${tabClass}`}
                     >
-                      {t.label}
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        isActive
-                          ? t.id === "walls"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300"
-                            : t.id === "rooms"
-                              ? "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-300"
-                              : t.id === "openings"
-                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
-                                : t.id === "beams"
-                                  ? "bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300"
-                                  : t.id === "roofs"
-                                    ? "bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300"
-                                    : t.id === "columns"
-                                      ? "bg-pink-100 text-pink-800 dark:bg-pink-900/50 dark:text-pink-300"
-                                      : "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300"
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                      }`}>
+                      <span>{t.label}</span>
+                      <span
+                        className={`rounded-md px-1.5 py-0 text-[10px] font-semibold ${
+                          isActive
+                            ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            : "bg-slate-100 text-slate-500 dark:bg-slate-800/70 dark:text-slate-400"
+                        }`}
+                      >
                         {t.pages.length}
                       </span>
                     </button>
@@ -221,6 +220,7 @@ export default function ProjectDetailPage() {
             planDpi={activePlan.dpi}
             calRequest={calRequest}
             allowedPages={allowedPages}
+            activeCategory={activeTabId}
             onPlanUpdated={(updated) =>
               setPlans((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
             }

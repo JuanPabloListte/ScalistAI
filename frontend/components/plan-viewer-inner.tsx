@@ -12,7 +12,7 @@ import {
   type DetectedElement,
   type ElementGeometry,
   type ElementType,
-  type Material,
+  type Assembly,
   type MaterialSummaryItem,
   type Plan,
 } from "@/lib/api";
@@ -26,12 +26,37 @@ type Props = {
   planDpi?: number | null;
   calRequest?: { page: number; ts: number } | null;
   allowedPages?: number[] | null;
+  /** Tab activa del proyecto (walls/rooms/openings/beams/roofs/columns/all).
+   *  Filtra el dibujo en el canvas y la lista de elementos del sidebar al
+   *  tipo correspondiente, sin afectar los contadores globales (que siguen
+   *  mostrando totales por tipo para contexto). */
+  activeCategory?: string | null;
   onPlanUpdated?: (plan: Plan) => void;
   height?: number;
 };
 
 type Point = { x: number; y: number };
 type Tool = "pan" | "wall" | "room" | "opening" | "beam" | "roof" | "column";
+
+// Subtipos de abertura. El valor se persiste en `geometry.subtype`.
+// `defaultW_m` / `defaultH_m` son los valores físicos típicos en obra; se
+// usan al crear y como fallback en el cómputo si el usuario no editó el alto.
+// Cuando una abertura cae sobre un muro:
+//   - `subtractsPerimeter=true`  → resta `width` al largo del muro (zócalo)
+//   - `subtractsPerimeter=false` → solo resta `width × height` al m² del muro
+type OpeningSubtype = {
+  value: "door" | "window" | "sliding-door";
+  label: string;
+  defaultW_m: number;
+  defaultH_m: number;
+  subtractsPerimeter: boolean;
+};
+const OPENING_SUBTYPES: OpeningSubtype[] = [
+  { value: "door",         label: "Puerta",         defaultW_m: 0.9, defaultH_m: 2.1, subtractsPerimeter: true  },
+  { value: "window",       label: "Ventana",        defaultW_m: 1.2, defaultH_m: 1.2, subtractsPerimeter: false },
+  { value: "sliding-door", label: "Puerta ventana", defaultW_m: 1.8, defaultH_m: 2.1, subtractsPerimeter: true  },
+];
+const DEFAULT_OPENING_SUBTYPE: OpeningSubtype["value"] = "door";
 
 const ZOOM_STEP = 1.1;
 const MIN_SCALE = 0.02;
@@ -109,19 +134,18 @@ function geometricLengthM(el: DetectedElement, pxPerM: number | null): number | 
   return Math.hypot(x2 - x1, y2 - y1) / pxPerM;
 }
 
-// Materiales aplicables a un tipo de elemento (al menos un yield compatible).
-function applicableMaterials(type: ElementType, all: Material[]): Material[] {
-  return all.filter((mat) =>
-    mat.yields.some((y) => {
-      if (type === "wall") return y.applies_to === "wall";
-      if (type === "room") return ["room_floor", "room_wall", "room_perimeter"].includes(y.applies_to);
-      if (type === "opening") return ["opening", "opening_perimeter"].includes(y.applies_to);
-      if (type === "beam") return y.applies_to === "beam";
-      if (type === "roof") return y.applies_to === "roof";
-      if (type === "column") return y.applies_to === "column";
-      return false;
-    }),
-  );
+// Conjuntos aplicables a un tipo de elemento.
+function applicableAssemblies(type: ElementType, all: Assembly[]): Assembly[] {
+  return all.filter((a) => {
+    const applies = a.applies_to;
+    if (type === "wall") return applies === "wall";
+    if (type === "room") return ["room_floor", "room_wall", "room_perimeter"].includes(applies);
+    if (type === "opening") return ["opening", "opening_perimeter"].includes(applies);
+    if (type === "beam") return applies === "beam";
+    if (type === "roof") return applies === "roof";
+    if (type === "column") return applies === "column";
+    return false;
+  });
 }
 
 export default function PlanViewerInner({
@@ -133,11 +157,13 @@ export default function PlanViewerInner({
   planDpi: _planDpi = 150,
   calRequest = null,
   allowedPages = null,
+  activeCategory = null,
   onPlanUpdated,
   height = 640,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const hasMovedDuringDrag = useRef(false);
 
   const [page, setPage] = useState(() => {
     if (allowedPages && allowedPages.length > 0) {
@@ -170,6 +196,11 @@ export default function PlanViewerInner({
   const [activePoints, setActivePoints] = useState<Point[]>([]);
   const [mousePos, setMousePos] = useState<Point | null>(null);
   const [drawError, setDrawError] = useState<string | null>(null);
+  // Subtipo seleccionado para la próxima abertura que se dibuje. Persiste entre
+  // dibujos de la sesión; el usuario lo cambia desde el dropdown que aparece
+  // cuando `tool === "opening"`.
+  const [openingSubtype, setOpeningSubtype] = useState<OpeningSubtype["value"]>(DEFAULT_OPENING_SUBTYPE);
+  const [showOpeningMenu, setShowOpeningMenu] = useState(false);
 
   // Elementos persistidos
   const [elements, setElements] = useState<DetectedElement[]>([]);
@@ -190,6 +221,29 @@ export default function PlanViewerInner({
     return elements;
   }, [elements, hideAiElements]);
 
+  // Elementos visibles SÓLO en la página actual (para el lienzo 2D y contadores)
+  const pageVisibleElements = useMemo(() => {
+    return visibleElements.filter((e) => e.page === page);
+  }, [visibleElements, page]);
+
+  // displayElements = pageVisibleElements filtrados por la tab activa del proyecto.
+  // Si el usuario está parado en "Muros", solo se renderizan/listan walls aunque
+  // la página también tenga rooms/openings/etc. Los contadores agregados siguen
+  // usando `pageVisibleElements` para mostrar el panorama completo de la página.
+  const displayElements = useMemo(() => {
+    const tabToType: Record<string, ElementType> = {
+      walls: "wall",
+      rooms: "room",
+      openings: "opening",
+      beams: "beam",
+      roofs: "roof",
+      columns: "column",
+    };
+    const target = activeCategory ? tabToType[activeCategory] : null;
+    if (!target) return pageVisibleElements; // "all" o sin tab → no filtra
+    return pageVisibleElements.filter((e) => e.type === target);
+  }, [pageVisibleElements, activeCategory]);
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: number[]; label: string } | null>(null);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
@@ -199,7 +253,7 @@ export default function PlanViewerInner({
   const [bulkAssignMaterialId, setBulkAssignMaterialId] = useState<number | null>(null);
 
   // Catálogo de materiales y cómputo
-  const [materialsList, setMaterialsList] = useState<Material[]>([]);
+  const [assembliesList, setAssembliesList] = useState<Assembly[]>([]);
   const [summary, setSummary] = useState<MaterialSummaryItem[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -575,12 +629,12 @@ export default function PlanViewerInner({
     };
   }, [planId, page, deletedPages]);
 
-  // Cargar elementos al cambiar plan/página
+  // Cargar elementos (todos los del plan para el visor 3D)
   useEffect(() => {
     let cancelled = false;
     setElementsLoading(true);
     api
-      .listElements(planId, page)
+      .listElements(planId)
       .then((data) => {
         if (!cancelled) setElements(data);
       })
@@ -593,18 +647,19 @@ export default function PlanViewerInner({
     return () => {
       cancelled = true;
     };
-  }, [planId, page]);
+  }, [planId]);
 
   // Catálogo de materiales (una vez por montaje)
   useEffect(() => {
     let cancelled = false;
     api
-      .listMaterials()
+      .listAssemblies()
       .then((data) => {
-        if (!cancelled) setMaterialsList(data);
+        if (!cancelled) setAssembliesList(data);
       })
-      .catch(() => {
-        if (!cancelled) setMaterialsList([]);
+      .catch((err) => {
+        if (!cancelled) setAssembliesList([]);
+        console.error("Error loading assemblies:", err);
       });
     return () => {
       cancelled = true;
@@ -614,7 +669,7 @@ export default function PlanViewerInner({
   // Cómputo agregado: recargar cuando cambia plan, página, o cualquier cosa
   // que pueda alterar las cantidades (asignación, edición de length/area/height).
   const summaryDeps = elements
-    .map((e) => `${e.id}:${e.length_m}:${e.area_m2}:${e.height_m}:${e.materials.map((m) => m.id).join(",")}`)
+    .map((e) => `${e.id}:${e.length_m}:${e.area_m2}:${e.height_m}:${e.assemblies.map((a) => a.id).join(",")}`)
     .join("|");
   useEffect(() => {
     if (draggingVertex) return;
@@ -737,22 +792,31 @@ export default function PlanViewerInner({
         return;
       }
       setDrawError(null);
+      // Para aberturas: el subtipo activo decide alto default y se persiste
+      // en geometry.subtype. El usuario lo puede editar después en el sidebar.
+      const subtype = type === "opening"
+        ? OPENING_SUBTYPES.find((s) => s.value === openingSubtype) ?? OPENING_SUBTYPES[0]
+        : null;
+      const defaultHeight = type === "opening"
+        ? subtype!.defaultH_m
+        : type === "beam" ? 0.40 : 2.8;
       try {
         const el = await api.createElement(planId, {
           page,
           type,
           geometry: {
             points: [pts[0].x, pts[0].y, pts[1].x, pts[1].y],
+            ...(subtype ? { subtype: subtype.value } : {}),
           },
           length_m: lengthM,
-          height_m: type === "opening" ? 2.1 : type === "beam" ? 0.40 : 2.8,
+          height_m: defaultHeight,
         });
         setElements((prev) => [...prev, el]);
       } catch (err) {
         setDrawError(err instanceof Error ? err.message : "Error al guardar");
       }
     },
-    [planId, page, currentPageScale],
+    [planId, page, currentPageScale, openingSubtype],
   );
 
   // Crear columna como un punto (1 punto → 1 elemento)
@@ -863,6 +927,7 @@ export default function PlanViewerInner({
 
     // Pan
     setDragging(true);
+    hasMovedDuringDrag.current = false;
     dragStart.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
   }
 
@@ -898,6 +963,9 @@ export default function PlanViewerInner({
     if (dragging && dragStart.current) {
       const dx = e.clientX - dragStart.current.x;
       const dy = e.clientY - dragStart.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        hasMovedDuringDrag.current = true;
+      }
       setPos({ x: dragStart.current.px + dx, y: dragStart.current.py + dy });
       return;
     }
@@ -1361,7 +1429,7 @@ export default function PlanViewerInner({
   };
 
   function selectAll() {
-    setSelectedIds(new Set(visibleElements.map((e) => e.id)));
+    setSelectedIds(new Set(displayElements.map((e) => e.id)));
   }
 
   function clearSelection() {
@@ -1430,30 +1498,30 @@ export default function PlanViewerInner({
     }
   }
 
-  async function assignMaterialToElement(elementId: number, materialId: number) {
+  async function assignAssemblyToElement(elementId: number, assemblyId: number) {
     try {
-      const updated = await api.assignMaterial(planId, elementId, materialId);
+      const updated = await api.assignAssembly(planId, elementId, assemblyId);
       setElements((prev) => prev.map((e) => (e.id === elementId ? updated : e)));
     } catch (err) {
-      setDrawError(err instanceof Error ? err.message : "Error al asignar material");
+      setDrawError(err instanceof Error ? err.message : "Error al asignar sistema constructivo");
     }
   }
 
-  async function removeMaterialFromElement(elementId: number, materialId: number) {
+  async function removeAssemblyFromElement(elementId: number, assemblyId: number) {
     try {
-      const updated = await api.removeMaterial(planId, elementId, materialId);
+      const updated = await api.removeAssembly(planId, elementId, assemblyId);
       setElements((prev) => prev.map((e) => (e.id === elementId ? updated : e)));
     } catch (err) {
-      setDrawError(err instanceof Error ? err.message : "Error al quitar material");
+      setDrawError(err instanceof Error ? err.message : "Error al quitar sistema constructivo");
     }
   }
 
-  async function applyBulkAssign(materialId: number) {
+  async function applyBulkAssignAssembly(assemblyId: number) {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     setBulkBusy(true);
     try {
-      const updated = await api.bulkAssignMaterial(planId, ids, materialId);
+      const updated = await api.bulkAssignAssembly(planId, ids, assemblyId);
       setElements((prev) => prev.map((el) => updated.find((u) => u.id === el.id) ?? el));
       setBulkAssignOpen(false);
     } catch (err) {
@@ -1484,13 +1552,19 @@ export default function PlanViewerInner({
 
   async function updateElementInline(
     id: number,
-    patch: { label?: string; height_m?: number; length_m?: number },
+    patch: { label?: string; height_m?: number; length_m?: number; subtype?: string },
   ) {
     const el = elements.find((e) => e.id === id);
     if (!el) return;
     const apiPatch: { geometry?: ElementGeometry; height_m?: number; length_m?: number } = {};
-    if (patch.label !== undefined) {
-      apiPatch.geometry = { ...el.geometry, label: patch.label };
+    // Label y subtype viven dentro de `geometry`; los merge-amos en el mismo
+    // objeto si vienen los dos en el mismo patch para no perder uno.
+    if (patch.label !== undefined || patch.subtype !== undefined) {
+      apiPatch.geometry = {
+        ...el.geometry,
+        ...(patch.label !== undefined ? { label: patch.label } : {}),
+        ...(patch.subtype !== undefined ? { subtype: patch.subtype } : {}),
+      };
     }
     if (patch.height_m !== undefined) {
       apiPatch.height_m = patch.height_m;
@@ -1565,22 +1639,22 @@ export default function PlanViewerInner({
             ? "grab"
             : "default";
 
-  // Totales de la página actual (sidebar izquierdo)
-  const totalWallM = visibleElements
+  // === Contadores del sidebar para la PÁGINA ACTUAL ===
+  const totalWallM = pageVisibleElements
     .filter((e) => e.type === "wall")
-    .reduce((acc, e) => acc + (e.length_m ?? 0), 0);
-  const totalRoomM2 = visibleElements
+    .reduce((acc, w) => acc + (w.length_m || 0), 0);
+  const totalRoomM2 = pageVisibleElements
     .filter((e) => e.type === "room")
-    .reduce((acc, e) => acc + (e.area_m2 ?? 0), 0);
-  const totalOpenings = visibleElements.filter((e) => e.type === "opening").length;
+    .reduce((acc, r) => acc + (r.area_m2 || 0), 0);
+  const totalOpenings = pageVisibleElements.filter((e) => e.type === "opening").length;
 
-  const totalBeamsM = visibleElements
+  const totalBeamsM = pageVisibleElements
     .filter((e) => e.type === "beam")
-    .reduce((acc, e) => acc + (e.length_m ?? 0), 0);
-  const totalRoofsM2 = visibleElements
+    .reduce((acc, b) => acc + (b.length_m || 0), 0);
+  const totalRoofsM2 = pageVisibleElements
     .filter((e) => e.type === "roof")
-    .reduce((acc, e) => acc + (e.area_m2 ?? 0), 0);
-  const totalColumns = visibleElements.filter((e) => e.type === "column").length;
+    .reduce((acc, r) => acc + (r.area_m2 || 0), 0);
+  const totalColumns = pageVisibleElements.filter((e) => e.type === "column").length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1612,15 +1686,15 @@ export default function PlanViewerInner({
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
               Elementos
             </h3>
-            {visibleElements.length > 0 && (
+            {displayElements.length > 0 && (
               <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 select-none">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size === visibleElements.length && visibleElements.length > 0}
+                  checked={selectedIds.size === displayElements.length && displayElements.length > 0}
                   ref={(el) => {
                     if (el) {
                       el.indeterminate =
-                        selectedIds.size > 0 && selectedIds.size < visibleElements.length;
+                        selectedIds.size > 0 && selectedIds.size < displayElements.length;
                     }
                   }}
                   onChange={(e) => (e.target.checked ? selectAll() : clearSelection())}
@@ -1631,7 +1705,7 @@ export default function PlanViewerInner({
             )}
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Página {page} · {visibleElements.length} dibujado{visibleElements.length === 1 ? "" : "s"}
+            Página {page} · {displayElements.length} dibujado{displayElements.length === 1 ? "" : "s"}
           </p>
 
           {/* Totales */}
@@ -1881,7 +1955,7 @@ export default function PlanViewerInner({
 
           {elementsLoading ? (
             <p className="py-4 text-center text-xs text-slate-400">Cargando elementos...</p>
-          ) : visibleElements.length === 0 ? (
+          ) : displayElements.length === 0 ? (
             <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
               <div>
                 <p className="font-medium">Sin elementos en esta página</p>
@@ -1892,7 +1966,7 @@ export default function PlanViewerInner({
             </div>
           ) : (
             <ul className="max-h-[480px] flex-1 space-y-1.5 overflow-y-auto pr-1">
-              {visibleElements.map((el, idx) => {
+              {displayElements.map((el, idx) => {
                 const selected = selectedIds.has(el.id);
                 const editing = editingId === el.id;
                 const hovered = hoveredId === el.id;
@@ -1937,9 +2011,18 @@ export default function PlanViewerInner({
                           }}
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
-                            {el.geometry.label ?? labelFor(el.type, idx + 1)}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
+                              {el.geometry.label ?? labelFor(el.type, idx + 1)}
+                            </p>
+                            {el.type === "opening" && (
+                              <span className="shrink-0 rounded-sm bg-amber-100 px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                {OPENING_SUBTYPES.find(
+                                  (s) => s.value === (el.geometry.subtype ?? DEFAULT_OPENING_SUBTYPE),
+                                )?.label ?? "Puerta"}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] text-slate-400">
                             {el.type === "wall" && `${el.length_m?.toFixed(2)} m · alt ${(el.height_m ?? 2.8).toFixed(2)} m`}
                             {el.type === "room" && `${el.area_m2?.toFixed(2)} m² · perím ${el.length_m?.toFixed(2)} m`}
@@ -1970,11 +2053,11 @@ export default function PlanViewerInner({
                           onSave={(patch) => updateElementInline(el.id, patch)}
                           onAutoAdjust={autoAdjustRoomToWalls}
                         />
-                        <ElementMaterialsBlock
+                        <ElementAssembliesBlock
                           element={el}
-                          materialsList={materialsList}
-                          onAssign={(materialId) => assignMaterialToElement(el.id, materialId)}
-                          onRemove={(materialId) => removeMaterialFromElement(el.id, materialId)}
+                          assembliesList={assembliesList}
+                          onAssign={(assemblyId) => assignAssemblyToElement(el.id, assemblyId)}
+                          onRemove={(assemblyId) => removeAssemblyFromElement(el.id, assemblyId)}
                         />
                       </>
                     )}
@@ -2136,6 +2219,7 @@ export default function PlanViewerInner({
                         : "Más clics para agregar vértices · Enter o doble-clic para cerrar."
                 )}
               </span>
+
               <span className="text-sky-600 dark:text-sky-300">
                 Esc cancela · Ctrl+Z deshace
               </span>
@@ -2158,6 +2242,11 @@ export default function PlanViewerInner({
               onMouseLeave={show3D ? undefined : onMouseLeave}
               onDoubleClick={show3D ? undefined : onDoubleClick}
               onContextMenu={(e) => e.preventDefault()}
+              onClick={show3D ? undefined : (e) => {
+                if (!hasMovedDuringDrag.current) {
+                  setSelectedIds(new Set());
+                }
+              }}
               className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-950"
               style={{ height, cursor: show3D ? "default" : cursor }}
             >
@@ -2167,6 +2256,7 @@ export default function PlanViewerInner({
                   scale={currentPageScale ?? 100}
                   page={page}
                   onClose={() => setShow3D(false)}
+                  onUpdateElement={updateElementInline}
                 />
               ) : (
                 <>
@@ -2220,17 +2310,17 @@ export default function PlanViewerInner({
                       </feMerge>
                     </filter>
                     <style>{`
-                      @keyframes muroai-pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
-                      @keyframes muroai-dash { to { stroke-dashoffset: -24; } }
-                      .muroai-pulse { animation: muroai-pulse 1.6s ease-in-out infinite; }
-                      .muroai-dash { animation: muroai-dash 1.4s linear infinite; }
+                      @keyframes scalistai-pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+                      @keyframes scalistai-dash { to { stroke-dashoffset: -24; } }
+                      .scalistai-pulse { animation: scalistai-pulse 1.6s ease-in-out infinite; }
+                      .scalistai-dash { animation: scalistai-dash 1.4s linear infinite; }
                     `}</style>
                   </defs>
                   <g
                     transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
                   >
                     {/* Recintos (atrás) */}
-                    {visibleElements
+                    {displayElements
                       .filter((el) => el.type === "room")
                       .map((el) => {
                         const pts = chunkPoints(el.geometry.points);
@@ -2320,7 +2410,7 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Techos */}
-                    {visibleElements
+                    {displayElements
                       .filter((el) => el.type === "roof")
                       .map((el) => {
                         const pts = chunkPoints(el.geometry.points);
@@ -2406,7 +2496,7 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Columnas */}
-                    {visibleElements
+                    {displayElements
                       .filter((el) => el.type === "column")
                       .map((el) => {
                         const isPointCol = el.geometry.points.length === 2;
@@ -2567,7 +2657,7 @@ export default function PlanViewerInner({
                     })}
 
                     {/* Muros */}
-                    {visibleElements
+                    {displayElements
                       .filter((el) => el.type === "wall")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
@@ -2626,7 +2716,7 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Vigas */}
-                    {visibleElements
+                    {displayElements
                       .filter((el) => el.type === "beam")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
@@ -2722,7 +2812,7 @@ export default function PlanViewerInner({
                     })}
 
                     {/* Aberturas — símbolos arquitectónicos según subtipo */}
-                    {visibleElements
+                    {displayElements
                       .filter((el) => el.type === "opening")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
@@ -3038,14 +3128,14 @@ export default function PlanViewerInner({
                                 x2={x2 + nx * off} y2={y2 + ny * off}
                                 stroke={color} strokeWidth={sw} strokeLinecap="round"
                                 strokeDasharray={`${6 / scale} ${4 / scale}`}
-                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                                className={selected ? "scalistai-dash" : "scalistai-dash scalistai-pulse"}
                               />
                               <line
                                 x1={x1 - nx * off} y1={y1 - ny * off}
                                 x2={x2 - nx * off} y2={y2 - ny * off}
                                 stroke={color} strokeWidth={sw} strokeLinecap="round"
                                 strokeDasharray={`${6 / scale} ${4 / scale}`}
-                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                                className={selected ? "scalistai-dash" : "scalistai-dash scalistai-pulse"}
                               />
                             </g>
                           ) : isSliding ? (
@@ -3055,14 +3145,14 @@ export default function PlanViewerInner({
                                 x2={(x1 + x2) / 2 + nx * off * 0.6} y2={(y1 + y2) / 2 + ny * off * 0.6}
                                 stroke={color} strokeWidth={sw * 1.3} strokeLinecap="round"
                                 strokeDasharray={`${6 / scale} ${4 / scale}`}
-                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                                className={selected ? "scalistai-dash" : "scalistai-dash scalistai-pulse"}
                               />
                               <line
                                 x1={(x1 + x2) / 2 - nx * off * 0.6} y1={(y1 + y2) / 2 - ny * off * 0.6}
                                 x2={x2 - nx * off * 0.6} y2={y2 - ny * off * 0.6}
                                 stroke={color} strokeWidth={sw * 1.3} strokeLinecap="round"
                                 strokeDasharray={`${6 / scale} ${4 / scale}`}
-                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                                className={selected ? "scalistai-dash" : "scalistai-dash scalistai-pulse"}
                               />
                             </g>
                           ) : (
@@ -3074,13 +3164,13 @@ export default function PlanViewerInner({
                                 strokeWidth={sw * 0.55}
                                 opacity={0.6}
                                 strokeDasharray={`${4 / scale} ${3 / scale}`}
-                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                                className={selected ? "scalistai-dash" : "scalistai-dash scalistai-pulse"}
                               />
                               <line
                                 x1={x1} y1={y1} x2={swingX} y2={swingY}
                                 stroke={color} strokeWidth={sw * 1.3} strokeLinecap="round"
                                 strokeDasharray={`${6 / scale} ${4 / scale}`}
-                                className={selected ? "muroai-dash" : "muroai-dash muroai-pulse"}
+                                className={selected ? "scalistai-dash" : "scalistai-dash scalistai-pulse"}
                               />
                             </g>
                           )}
@@ -3211,18 +3301,18 @@ export default function PlanViewerInner({
                           return (
                             <>
                               <g
-                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                className="pointer-events-auto cursor-move select-none"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 0)}
                               >
                                 <circle cx={x1} cy={y1} r={22 / scale} fill="transparent" />
-                                <circle cx={x1} cy={y1} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                                <circle cx={x1} cy={y1} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} className="transition-colors hover:fill-[#2563EB]" />
                               </g>
                               <g
-                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                className="pointer-events-auto cursor-move select-none"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 2)}
                               >
                                 <circle cx={x2} cy={y2} r={22 / scale} fill="transparent" />
-                                <circle cx={x2} cy={y2} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                                <circle cx={x2} cy={y2} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} className="transition-colors hover:fill-[#2563EB]" />
                               </g>
                             </>
                           );
@@ -3234,18 +3324,18 @@ export default function PlanViewerInner({
                           return (
                             <>
                               <g
-                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                className="pointer-events-auto cursor-move select-none"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 0)}
                               >
                                 <circle cx={x1} cy={y1} r={22 / scale} fill="transparent" />
-                                <circle cx={x1} cy={y1} r={6 / scale} fill="#ea580c" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                                <circle cx={x1} cy={y1} r={6 / scale} fill="#ea580c" stroke="#ffffff" strokeWidth={1.5 / scale} className="transition-colors hover:fill-[#c2410c]" />
                               </g>
                               <g
-                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                className="pointer-events-auto cursor-move select-none"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, 2)}
                               >
                                 <circle cx={x2} cy={y2} r={22 / scale} fill="transparent" />
-                                <circle cx={x2} cy={y2} r={6 / scale} fill="#ea580c" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                                <circle cx={x2} cy={y2} r={6 / scale} fill="#ea580c" stroke="#ffffff" strokeWidth={1.5 / scale} className="transition-colors hover:fill-[#c2410c]" />
                               </g>
                             </>
                           );
@@ -3263,13 +3353,13 @@ export default function PlanViewerInner({
                             handles.push(
                               <g
                                 key={`vertex-${i}`}
-                                className="pointer-events-auto cursor-move hover:scale-125 transition-transform"
+                                className="pointer-events-auto cursor-move select-none"
                                 onMouseDown={(e) => startDragVertex(e, selectedElement.id, pointIndex)}
                                 onDoubleClick={(e) => deleteVertex(e, selectedElement.id, pointIndex)}
                               >
                                 <title>Doble clic para eliminar vertice</title>
                                 <circle cx={x} cy={y} r={22 / scale} fill="transparent" />
-                                <circle cx={x} cy={y} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} />
+                                <circle cx={x} cy={y} r={6 / scale} fill="#3B82F6" stroke="#ffffff" strokeWidth={1.5 / scale} className="transition-colors hover:fill-[#2563EB]" />
                               </g>
                             );
                           }
@@ -3288,8 +3378,7 @@ export default function PlanViewerInner({
                             handles.push(
                               <g
                                 key={`midpoint-${i}`}
-                                className="pointer-events-auto cursor-pointer hover:opacity-100 hover:scale-125 transition-all"
-                                opacity={0.6}
+                                className="pointer-events-auto cursor-pointer opacity-60 hover:opacity-100 transition-opacity"
                                 onMouseDown={(e) => startDragMidpoint(e, selectedElement.id, edgeIndex, mx, my)}
                               >
                                 <title>Arrastra para crear un nuevo vertice</title>
@@ -3313,7 +3402,7 @@ export default function PlanViewerInner({
             {/* Barra flotante inferior-derecha */}
             {!calibrating && !show3D && (
               <div className="pointer-events-none absolute bottom-3 right-3">
-                <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+                <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-surface dark:border-slate-700 dark:bg-slate-900">
                   <ToolbarIconButton onClick={resetView} title="Centrar (F)" ariaLabel="Centrar vista">
                     <CenterIcon />
                   </ToolbarIconButton>
@@ -3363,15 +3452,45 @@ export default function PlanViewerInner({
                   >
                     <RoomIcon />
                   </ToolbarToolButton>
-                  <ToolbarToolButton
-                    active={tool === "opening"}
-                    onClick={() => selectTool("opening")}
-                    disabled={drawingDisabled}
-                    title="Abertura (O)"
-                    ariaLabel="Dibujar abertura"
-                  >
-                    <OpeningIcon />
-                  </ToolbarToolButton>
+                  <div className="relative flex">
+                    <ToolbarToolButton
+                      active={tool === "opening"}
+                      onClick={() => selectTool("opening")}
+                      disabled={drawingDisabled}
+                      title={`Abertura (O) - ${OPENING_SUBTYPES.find(s => s.value === openingSubtype)?.label ?? "Puerta"}`}
+                      ariaLabel="Dibujar abertura"
+                    >
+                      <OpeningIcon />
+                    </ToolbarToolButton>
+                    <button
+                      type="button"
+                      disabled={drawingDisabled}
+                      onClick={() => setShowOpeningMenu((p) => !p)}
+                      className={`flex w-4 items-center justify-center rounded-r-md transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 ${tool === "opening" ? "text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30" : "text-slate-500 dark:text-slate-400"}`}
+                      title="Elegir tipo de abertura"
+                    >
+                      <ChevronIcon open={showOpeningMenu} />
+                    </button>
+                    {showOpeningMenu && (
+                      <div className="absolute top-[110%] left-1/2 mt-1 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 z-50">
+                        <div className="px-2 py-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Tipo de Abertura</div>
+                        {OPENING_SUBTYPES.map((s) => (
+                          <button
+                            key={s.value}
+                            type="button"
+                            onClick={() => {
+                              setOpeningSubtype(s.value);
+                              setShowOpeningMenu(false);
+                              if (tool !== "opening") selectTool("opening");
+                            }}
+                            className={`flex w-full items-center rounded-sm px-2 py-1.5 text-xs font-medium transition ${openingSubtype === s.value ? "bg-sky-50 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <ToolbarToolButton
                     active={tool === "beam"}
                     onClick={() => selectTool("beam")}
@@ -3633,12 +3752,12 @@ export default function PlanViewerInner({
         </div>
       )}
 
-      {/* Modal bulk-assign material */}
+      {/* Modal bulk-assign assembly */}
       {bulkAssignOpen && (() => {
         const selectedElements = elements.filter((e) => selectedIds.has(e.id));
         const selectedTypes = Array.from(new Set(selectedElements.map((e) => e.type)));
-        const bulkApplicable = materialsList.filter((mat) =>
-          selectedTypes.every((t) => applicableMaterials(t, [mat]).length > 0),
+        const bulkApplicable = assembliesList.filter((a) =>
+          selectedTypes.every((t) => applicableAssemblies(t, [a]).length > 0),
         );
         return (
           <div
@@ -3648,47 +3767,48 @@ export default function PlanViewerInner({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (bulkAssignMaterialId != null) applyBulkAssign(bulkAssignMaterialId);
+                if (bulkAssignMaterialId != null) applyBulkAssignAssembly(bulkAssignMaterialId);
               }}
               onClick={(e) => e.stopPropagation()}
               className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
             >
               <div>
                 <h3 className="text-lg font-semibold">
-                  Asignar material a {selectedIds.size} elemento{selectedIds.size === 1 ? "" : "s"}
+                  Asignar sistema a {selectedIds.size} elemento{selectedIds.size === 1 ? "" : "s"}
                 </h3>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Tipos seleccionados: {selectedTypes.map((t) => labelFor(t, 0).split(" ")[0]).join(", ")}
                 </p>
               </div>
 
-              {materialsList.length === 0 ? (
+              {assembliesList.length === 0 ? (
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  El catálogo está vacío.{" "}
+                  No hay sistemas constructivos.{" "}
                   <a href="/materials" className="font-medium text-brand hover:underline dark:text-sky-400">
-                    Crear materiales →
+                    Crear sistema →
                   </a>
                 </p>
               ) : bulkApplicable.length === 0 ? (
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Ningún material del catálogo aplica a la mezcla de tipos seleccionada.
+                  Ningún sistema aplica a la mezcla de tipos seleccionada.
                   Probá seleccionar elementos de un solo tipo.
                 </p>
               ) : (
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium">Material</span>
+                  <span className="font-medium">Sistema Constructivo</span>
                   <select
                     autoFocus
+                    required
                     value={bulkAssignMaterialId ?? ""}
-                    onChange={(e) =>
-                      setBulkAssignMaterialId(e.target.value ? parseInt(e.target.value, 10) : null)
-                    }
-                    className="rounded-md border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
+                    onChange={(e) => setBulkAssignMaterialId(parseInt(e.target.value, 10))}
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-white"
                   >
-                    <option value="">Seleccioná un material</option>
-                    {bulkApplicable.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} ({m.category} · {m.unit})
+                    <option value="" disabled>
+                      Seleccionar sistema...
+                    </option>
+                    {bulkApplicable.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
                       </option>
                     ))}
                   </select>
@@ -4196,49 +4316,48 @@ function TrashIcon() {
   );
 }
 
-function ElementMaterialsBlock({
+function ElementAssembliesBlock({
   element,
-  materialsList,
+  assembliesList,
   onAssign,
   onRemove,
 }: {
   element: DetectedElement;
-  materialsList: Material[];
-  onAssign: (materialId: number) => void;
-  onRemove: (materialId: number) => void;
+  assembliesList: Assembly[];
+  onAssign: (assemblyId: number) => void;
+  onRemove: (assemblyId: number) => void;
 }) {
-  const assignedIds = new Set(element.materials.map((m) => m.id));
-  const available = applicableMaterials(element.type, materialsList).filter(
-    (m) => !assignedIds.has(m.id),
+  const assignedIds = new Set(element.assemblies.map((a) => a.id));
+  const available = applicableAssemblies(element.type, assembliesList).filter(
+    (a) => !assignedIds.has(a.id),
   );
 
   return (
     <div className="space-y-1.5 border-t border-slate-200 px-2 pb-2.5 pt-2 dark:border-slate-800">
       <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-slate-400">
-        <span>Materiales</span>
-        {element.materials.length > 0 && (
-          <span className="text-slate-300">{element.materials.length}</span>
+        <span>Sistemas Constructivos</span>
+        {element.assemblies.length > 0 && (
+          <span className="text-slate-300">{element.assemblies.length}</span>
         )}
       </div>
 
-      {element.materials.length > 0 && (
+      {element.assemblies.length > 0 && (
         <div className="space-y-1">
-          {element.materials.map((m) => (
+          {element.assemblies.map((a) => (
             <div
-              key={m.id}
+              key={a.id}
               className="flex items-center justify-between gap-2 rounded bg-slate-100/60 px-1.5 py-1 text-[11px] dark:bg-slate-800/40"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-slate-700 dark:text-slate-200" title={m.name}>
-                  {m.name}
+                <p className="truncate font-medium text-slate-700 dark:text-slate-200" title={a.name}>
+                  {a.name}
                 </p>
-                <p className="text-[9px] text-slate-400">{m.unit}</p>
               </div>
               <button
                 type="button"
-                onClick={() => onRemove(m.id)}
-                title="Quitar material"
-                aria-label={`Quitar material ${m.name}`}
+                onClick={() => onRemove(a.id)}
+                title="Quitar sistema"
+                aria-label={`Quitar sistema ${a.name}`}
                 className="rounded p-0.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -4260,20 +4379,20 @@ function ElementMaterialsBlock({
           }}
           className="w-full rounded border border-dashed border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-600 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:focus:border-sky-400"
         >
-          <option value="">+ Asignar material</option>
-          {available.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name} ({m.category} · {m.unit})
+          <option value="">+ Asignar sistema</option>
+          {available.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
             </option>
           ))}
         </select>
-      ) : materialsList.length === 0 ? (
+      ) : assembliesList.length === 0 ? (
         <p className="text-[10px] italic text-slate-400">
-          No hay materiales en el catálogo. <a href="/materials" className="text-brand hover:underline dark:text-sky-400">Crear catálogo</a>
+          No hay sistemas en el catálogo. <a href="/materials" className="text-brand hover:underline dark:text-sky-400">Crear catálogo</a>
         </p>
       ) : (
         <p className="text-[10px] italic text-slate-400">
-          Todos los materiales aplicables ya están asignados.
+          Todos los sistemas aplicables ya están asignados.
         </p>
       )}
     </div>
@@ -4308,7 +4427,7 @@ function InlineEditForm({
   element: DetectedElement;
   defaultLabel: string;
   pageScale: number | null;
-  onSave: (patch: { label?: string; height_m?: number; length_m?: number }) => void;
+  onSave: (patch: { label?: string; height_m?: number; length_m?: number; subtype?: string }) => void;
   onAutoAdjust?: (roomId: number) => void;
 }) {
   const defaultHeight = element.type === "opening" ? 2.1 : 2.8;
@@ -4317,6 +4436,10 @@ function InlineEditForm({
   const [lengthStr, setLengthStr] = useState(
     element.length_m != null ? element.length_m.toFixed(3) : "",
   );
+  const currentSubtype =
+    element.type === "opening"
+      ? (element.geometry.subtype ?? DEFAULT_OPENING_SUBTYPE)
+      : null;
 
   // Re-sync inputs cuando el elemento cambia (post-save o cambio de pestaña)
   useEffect(() => {
@@ -4391,6 +4514,24 @@ function InlineEditForm({
           className="w-36 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-sky-400"
         />
       </label>
+
+      {element.type === "opening" && (
+        <label className="flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-slate-500 dark:text-slate-400">Tipo</span>
+          <select
+            value={currentSubtype ?? DEFAULT_OPENING_SUBTYPE}
+            onChange={(e) => {
+              const v = e.target.value as OpeningSubtype["value"];
+              if (v !== currentSubtype) onSave({ subtype: v });
+            }}
+            className="w-36 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 focus:border-brand focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-sky-400"
+          >
+            {OPENING_SUBTYPES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {canEditLength && (
         <label className="flex items-center justify-between gap-2 text-[11px]">

@@ -9,12 +9,14 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.plan import Plan
     from app.models.user import User
+    from app.models.organization import Organization
 
 
 class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -46,4 +48,5 @@ class Project(Base):
     )
 
     owner: Mapped["User"] = relationship(back_populates="projects")
+    organization: Mapped["Organization"] = relationship(back_populates="projects")
     plans: Mapped[list["Plan"]] = relationship(back_populates="project", cascade="all, delete-orphan")

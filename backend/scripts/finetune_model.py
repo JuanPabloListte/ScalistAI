@@ -15,7 +15,7 @@ Flags útiles:
     --force-promote               promover aunque baje la métrica (NO usar en prod)
 
 Compara mIoU del modelo nuevo vs activo en el holdout fijo de `holdout.json`.
-Si mejora → guarda como `muroai_seg_v<N+1>.pt` y actualiza `active.json`.
+Si mejora → guarda como `scalistai_seg_v<N+1>.pt` y actualiza `active.json`.
 Si no → mantiene el anterior y deja el nuevo en disco como referencia para
 diagnóstico.
 """
@@ -248,7 +248,7 @@ def finetune(args) -> int:
 
     # 7. Persistir el best checkpoint (no el final).
     new_version = active.version + 1
-    new_path = C.MODELS_DIR / f"muroai_seg_v{new_version}.pt"
+    new_path = C.MODELS_DIR / f"scalistai_seg_v{new_version}.pt"
     new_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(best_state, new_path)
     print(f"[checkpoint] guardado best (epoch {best_epoch}, mIoU {best_miou:.4f})")
