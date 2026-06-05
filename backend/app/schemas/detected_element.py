@@ -5,7 +5,7 @@ from app.schemas.assembly import AssemblyRead
 
 class DetectedElementBase(BaseModel):
     page: int = Field(default=1, ge=1)
-    type: str = Field(..., pattern="^(wall|room|opening|beam|roof|column)$")
+    type: str = Field(..., pattern="^(wall|room|opening|beam|roof|column|riostra|cloaca|electricidad)$")
     geometry: dict = Field(..., description="Coordenadas y geometría en píxeles de la página")
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)

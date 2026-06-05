@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+import io
+import openpyxl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -108,3 +110,62 @@ def delete_material(
         raise HTTPException(status_code=404, detail="Material no encontrado")
     db.delete(material)
     db.commit()
+
+from pydantic import BaseModel
+
+class MaterialImportItem(BaseModel):
+    name: str
+    category: str = "General"
+    unit: str = "un"
+    unit_price: float = 0.0
+
+@router.post("/import-json", response_model=dict)
+def import_materials_json(
+    items: list[MaterialImportItem],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    imported_count = 0
+    updated_count = 0
+    
+    if not items:
+        return {"imported": 0, "updated": 0}
+        
+    # Pre-cargar todos los materiales existentes de la organización
+    stmt = select(Material).where(Material.organization_id == user.organization_id)
+    existing_materials = {m.name: m for m in db.scalars(stmt).all()}
+    
+    for item in items:
+        name = item.name.strip()
+        if not name:
+            continue
+            
+        category = item.category.strip() if item.category else "General"
+        unit = item.unit.strip() if item.unit else "un"
+        unit_price = item.unit_price if item.unit_price is not None else 0.0
+            
+        if name in existing_materials:
+            # Upsert
+            mat = existing_materials[name]
+            mat.category = category
+            mat.unit = unit
+            mat.unit_price = unit_price
+            updated_count += 1
+        else:
+            # Crear
+            mat = Material(
+                organization_id=user.organization_id,
+                name=name,
+                category=category,
+                unit=unit,
+                unit_price=unit_price
+            )
+            db.add(mat)
+            existing_materials[name] = mat # Por si hay duplicados en la misma peticion
+            imported_count += 1
+            
+    db.commit()
+    
+    return {"imported": imported_count, "updated": updated_count}
+
+

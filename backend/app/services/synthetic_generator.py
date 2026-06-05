@@ -51,6 +51,9 @@ MASK_SLIDING_DOOR = 5
 MASK_BEAM = 6
 MASK_COLUMN = 7
 MASK_ROOF = 8
+MASK_RIOSTRA = 9
+MASK_CLOACA = 10
+MASK_ELECTRICIDAD = 11
 
 # Espesores de trazo al "rasterizar" la geometría en la máscara
 DEFAULT_WALL_THICK_PX = 4
@@ -67,6 +70,9 @@ DEFAULT_BEAM_THICK_PX = 18
 # (~400/sample vs 3000-7000 de viga) y el modelo no las aprendía: column
 # IoU se quedaba en 0.08 mientras beam llegaba a 0.53.
 DEFAULT_COLUMN_RADIUS_PX = 14
+DEFAULT_RIOSTRA_THICK_PX = 18
+DEFAULT_CLOACA_THICK_PX = 6
+DEFAULT_ELECTRICIDAD_THICK_PX = 4
 
 # Límites de seguridad
 MIN_VARIATIONS = 1
@@ -331,6 +337,9 @@ def _build_mask_from_elements(
     open_t = max(DEFAULT_OPENING_THICK_PX, int(round(DEFAULT_OPENING_THICK_PX * thick_mult)))
     beam_t = max(DEFAULT_BEAM_THICK_PX, int(round(DEFAULT_BEAM_THICK_PX * thick_mult)))
     col_r = max(DEFAULT_COLUMN_RADIUS_PX, int(round(DEFAULT_COLUMN_RADIUS_PX * thick_mult)))
+    riostra_t = max(DEFAULT_RIOSTRA_THICK_PX, int(round(DEFAULT_RIOSTRA_THICK_PX * thick_mult)))
+    cloaca_t = max(DEFAULT_CLOACA_THICK_PX, int(round(DEFAULT_CLOACA_THICK_PX * thick_mult)))
+    elec_t = max(DEFAULT_ELECTRICIDAD_THICK_PX, int(round(DEFAULT_ELECTRICIDAD_THICK_PX * thick_mult)))
 
     # 0) Losas / techos (fill) — al fondo porque cubren toda la planta.
     for el in elements:
@@ -413,6 +422,24 @@ def _build_mask_from_elements(
             mask_val = MASK_DOOR
         cv2.line(mask, (x1, y1), (x2, y2), mask_val, open_t)
 
+    # 6) Instalaciones y Cimientos
+    for el in elements:
+        if el.type == "riostra":
+            pts_flat = el.geometry.get("points") or []
+            if len(pts_flat) >= 4:
+                x1, y1, x2, y2 = (int(round(v)) for v in pts_flat[:4])
+                cv2.line(mask, (x1, y1), (x2, y2), MASK_RIOSTRA, riostra_t)
+        elif el.type == "cloaca":
+            pts_flat = el.geometry.get("points") or []
+            if len(pts_flat) >= 4:
+                x1, y1, x2, y2 = (int(round(v)) for v in pts_flat[:4])
+                cv2.line(mask, (x1, y1), (x2, y2), MASK_CLOACA, cloaca_t)
+        elif el.type == "electricidad":
+            pts_flat = el.geometry.get("points") or []
+            if len(pts_flat) >= 4:
+                x1, y1, x2, y2 = (int(round(v)) for v in pts_flat[:4])
+                cv2.line(mask, (x1, y1), (x2, y2), MASK_ELECTRICIDAD, elec_t)
+
     return mask
 
 
@@ -468,7 +495,7 @@ def _rotate(img, angle: int):
 
 
 def _count_elements_by_type(elements: list[DetectedElement]) -> dict[str, int]:
-    counts = {"wall": 0, "room": 0, "opening": 0, "beam": 0, "column": 0, "roof": 0}
+    counts = {"wall": 0, "room": 0, "opening": 0, "beam": 0, "column": 0, "roof": 0, "riostra": 0, "cloaca": 0, "electricidad": 0}
     for el in elements:
         if el.type in counts:
             counts[el.type] += 1

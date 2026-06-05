@@ -41,6 +41,24 @@ const ROLE_DEFS: { value: PageRole; label: string; description: string; color: s
     description: "Plano para columnas y pilares (ej: replanteo de estructuras)",
     color: "pink",
   },
+  {
+    value: "riostras",
+    label: "Riostras",
+    description: "Plano para vigas riostras y encadenados (ej: replanteo de fundaciones)",
+    color: "orange",
+  },
+  {
+    value: "cloacas",
+    label: "Cloacas",
+    description: "Plano para instalación sanitaria (ej: desagües cloacales)",
+    color: "green",
+  },
+  {
+    value: "electricidad",
+    label: "Electricidad",
+    description: "Plano para instalación eléctrica (ej: iluminación y tomas)",
+    color: "yellow",
+  },
 ];
 
 const COLOR_STYLES: Record<string, { active: string; idle: string; ring: string }> = {
@@ -73,6 +91,21 @@ const COLOR_STYLES: Record<string, { active: string; idle: string; ring: string 
     active: "bg-pink-600 text-white border-pink-600 dark:bg-pink-500 dark:border-pink-500",
     idle: "bg-white text-pink-700 border-pink-300 hover:bg-pink-50 dark:bg-slate-800 dark:text-pink-400 dark:border-pink-700 dark:hover:bg-pink-950/50",
     ring: "ring-pink-500",
+  },
+  orange: {
+    active: "bg-orange-600 text-white border-orange-600 dark:bg-orange-500 dark:border-orange-500",
+    idle: "bg-white text-orange-700 border-orange-300 hover:bg-orange-50 dark:bg-slate-800 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/50",
+    ring: "ring-orange-500",
+  },
+  green: {
+    active: "bg-green-600 text-white border-green-600 dark:bg-green-500 dark:border-green-500",
+    idle: "bg-white text-green-700 border-green-300 hover:bg-green-50 dark:bg-slate-800 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-950/50",
+    ring: "ring-green-500",
+  },
+  yellow: {
+    active: "bg-yellow-600 text-white border-yellow-600 dark:bg-yellow-500 dark:border-yellow-500",
+    idle: "bg-white text-yellow-700 border-yellow-300 hover:bg-yellow-50 dark:bg-slate-800 dark:text-yellow-400 dark:border-yellow-700 dark:hover:bg-yellow-950/50",
+    ring: "ring-yellow-500",
   },
 };
 
@@ -203,6 +236,7 @@ export function Step3PageRoles({
 
   const summary = useMemo(() => {
     let walls = 0, openings = 0, rooms = 0, beams = 0, roofs = 0, columns = 0;
+    let riostras = 0, cloacas = 0, electricidad = 0;
     for (const roles of Object.values(pageRoles)) {
       if (roles.includes("walls")) walls++;
       if (roles.includes("openings")) openings++;
@@ -210,8 +244,11 @@ export function Step3PageRoles({
       if (roles.includes("beams")) beams++;
       if (roles.includes("roofs")) roofs++;
       if (roles.includes("columns")) columns++;
+      if (roles.includes("riostras")) riostras++;
+      if (roles.includes("cloacas")) cloacas++;
+      if (roles.includes("electricidad")) electricidad++;
     }
-    return { walls, openings, rooms, beams, roofs, columns };
+    return { walls, openings, rooms, beams, roofs, columns, riostras, cloacas, electricidad };
   }, [pageRoles]);
 
   // Modificado: comparar con el estado guardado en plan.page_roles
@@ -280,30 +317,46 @@ export function Step3PageRoles({
       <div>
         <h2 className="text-lg font-semibold">Asignar páginas a detectores</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Marcá qué páginas usar para cada tipo de detección. Cada plano profesional
-          suele estar dividido: un plano para muros, otro para aberturas, otro para
-          recintos. Asignando explícitamente, la IA evita procesar páginas que no
-          corresponden y los resultados son mucho más precisos.
+          Marcá qué páginas usar para cada tipo de detección. La IA evita procesar páginas
+          que no corresponden y los resultados son mucho más precisos.
         </p>
       </div>
 
-      {/* Leyenda de roles */}
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
-        {ROLE_DEFS.map((r) => {
-          const styles = COLOR_STYLES[r.color];
-          return (
-            <div
-              key={r.value}
-              className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${styles.idle}`}
-            >
-              <span className="font-semibold">{r.label}</span>
-              <span className="opacity-75">{r.description}</span>
-            </div>
-          );
-        })}
-      </div>
+      {/* Layout: sidebar izquierdo + grilla de páginas */}
+      <div className="flex gap-5 items-start">
 
-      {/* Grilla de miniaturas */}
+        {/* Sidebar: leyenda de roles */}
+        <div className="w-52 shrink-0">
+          <div className="sticky top-4 flex flex-col gap-1.5">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+              Tipos de detección
+            </p>
+            {ROLE_DEFS.map((r) => {
+              const styles = COLOR_STYLES[r.color];
+              const borderColor = styles.active.split(" ")[0].replace("bg-", "border-");
+              const dotColor = styles.active.split(" ")[0];
+              return (
+                <div
+                  key={r.value}
+                  className={`flex flex-col gap-0.5 rounded-lg border-y border-r border-l-4 bg-white px-3 py-2 dark:bg-slate-900 ${borderColor}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <div className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      {r.label}
+                    </span>
+                  </div>
+                  <p className="text-[10px] leading-snug text-slate-500 dark:text-slate-400 pl-3.5">
+                    {r.description}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Grilla de páginas */}
+        <div className="flex-1 min-w-0">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {activePages.map((page) => {
           const roles = pageRoles[String(page)] ?? [];
@@ -369,6 +422,8 @@ export function Step3PageRoles({
           );
         })}
       </div>
+        </div>{/* end flex-1 pages column */}
+      </div>{/* end flex sidebar+pages row */}
 
       {/* Resumen */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
@@ -395,6 +450,18 @@ export function Step3PageRoles({
           <span className="text-slate-400">·</span>
           <span>
             <strong>{summary.columns}</strong> p. para columnas
+          </span>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.riostras}</strong> p. para riostras
+          </span>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.cloacas}</strong> p. para cloacas
+          </span>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.electricidad}</strong> p. para electricidad
           </span>
         </div>
         {Object.keys(pageRoles).length > 0 && (

@@ -10,7 +10,7 @@ export function Step2Plan({
   onBack,
 }: {
   project: Project;
-  onUploaded: () => void;
+  onUploaded: (plan?: Plan) => void;
   onBack: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
@@ -38,8 +38,8 @@ export function Step2Plan({
     setUploading(true);
     setError(null);
     try {
-      await api.uploadPlan(project.id, file);
-      onUploaded();
+      const plan = await api.uploadPlan(project.id, file);
+      onUploaded(plan);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
       setUploading(false);
@@ -53,8 +53,9 @@ export function Step2Plan({
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Subir plano del proyecto</h2>
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        Subí un PDF del plano. Mientras avanzás con los pasos siguientes, la IA
-        detecta muros, recintos y aberturas en background.
+        Subí el plano en PDF o DXF. Si es PDF, la IA detecta muros, recintos y
+        aberturas en background mientras avanzás con los pasos siguientes. Si es
+        DXF, importamos los elementos directamente desde sus capas.
       </p>
 
       {hasPlan && (
@@ -74,7 +75,7 @@ export function Step2Plan({
       >
         <input
           type="file"
-          accept="application/pdf"
+          accept="application/pdf,.pdf,.dxf"
           onChange={handleUpload}
           disabled={uploading}
           className="hidden"
@@ -82,13 +83,13 @@ export function Step2Plan({
         <UploadIcon />
         <span className="font-medium">
           {uploading
-            ? "Procesando PDF (rasterizando + IA en background)..."
+            ? "Procesando plano..."
             : hasPlan
-              ? "Subir otro PDF"
-              : "Hacé clic para elegir un PDF"}
+              ? "Subir otro plano"
+              : "Hacé clic para elegir un PDF o DXF"}
         </span>
         <span className="text-xs text-slate-500 dark:text-slate-400">
-          Máximo 50 MB · solo archivos .pdf
+          Máximo 50 MB · archivos .pdf o .dxf
         </span>
       </label>
 
@@ -105,7 +106,7 @@ export function Step2Plan({
         </button>
         <button
           type="button"
-          onClick={onUploaded}
+          onClick={() => onUploaded(existingPlans?.[0])}
           disabled={uploading || !hasPlan}
           className="rounded-md bg-brand px-5 py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
           title={hasPlan ? "" : "Subí al menos un plano para continuar"}

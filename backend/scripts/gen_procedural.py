@@ -52,7 +52,7 @@ def main() -> int:
     out_root.mkdir(parents=True, exist_ok=True)
 
     ts = dt.datetime.now(dt.UTC).strftime("%Y%m%d_%H%M%S")
-    counts_total = {"wall": 0, "room": 0, "opening": 0, "beam": 0, "column": 0, "roof": 0}
+    counts_total = {"wall": 0, "room": 0, "opening": 0, "beam": 0, "column": 0, "roof": 0, "riostra": 0, "cloaca": 0, "electricidad": 0}
     style_total = {"arch": 0, "struct": 0}
 
     written = 0

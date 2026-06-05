@@ -72,7 +72,7 @@ function NewProjectWizardInner() {
   const maxReached = project ? Math.max(step, project.wizard_step) : step;
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
+    <main className="mx-auto max-w-5xl px-6 py-10">
       <Link
         href="/projects"
         className="text-sm text-brand hover:underline dark:text-sky-400"
@@ -98,7 +98,11 @@ function NewProjectWizardInner() {
         {step === 2 && project && (
           <Step2Plan
             project={project}
-            onUploaded={() => setStep(3)}
+            onUploaded={(plan) =>
+              // Un DXF trae los elementos ya extraídos de sus capas: salta el
+              // paso de roles/IA (3) y va directo a ubicación (4).
+              setStep(plan?.scale_source === "dxf" ? 4 : 3)
+            }
             onBack={goBack}
           />
         )}

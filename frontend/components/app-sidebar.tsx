@@ -72,9 +72,13 @@ export function AppSidebar() {
         <Link
           href="/projects"
           aria-label="ScalistAI · Inicio"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-lg font-bold text-white transition hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-400"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-white transition hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-400"
         >
-          M
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+            <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+            <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+          </svg>
         </Link>
 
         <nav className="flex flex-col items-center gap-1">

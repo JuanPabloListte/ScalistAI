@@ -13,6 +13,7 @@
     "@react-three/fiber": "^8.18.0",
     "@types/three": "^0.184.1",
     "konva": "9.3.16",
+    "lucide-react": "^1.17.0",
     "mapbox-gl": "^3.24.0",
     "next": "14.2.15",
     "react": "18.3.1",
@@ -20,7 +21,8 @@
     "react-konva": "18.2.10",
     "react-map-gl": "^8.1.1",
     "tailwind-scrollbar": "^3.1.0",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "20.16.10",

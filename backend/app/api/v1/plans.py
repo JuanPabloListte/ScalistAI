@@ -81,12 +81,26 @@ async def upload_plan(
     if project is None or project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
-
     contents = await file.read()
     if len(contents) > MAX_PDF_BYTES:
         raise HTTPException(status_code=413, detail="Archivo demasiado grande (máx 50 MB)")
+
+    # DXF: las coordenadas ya están en metros. No se rasteriza on-demand ni se
+    # corre IA — el servicio genera el PNG de fondo y los elementos a partir de
+    # las capas. Se adjunta como plano al proyecto actual del wizard y se avanza
+    # wizard_step a 3 para saltar el paso de roles/IA (que no aplica a un DXF).
+    if (file.filename or "").lower().endswith(".dxf"):
+        from app.services.dxf_import import build_dxf_plan
+
+        plan, _ = build_dxf_plan(project_id, contents, file.filename or "plano.dxf", db)
+        if project.wizard_step < 3:
+            project.wizard_step = 3
+        db.commit()
+        db.refresh(plan)
+        return plan
+
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF o DXF")
 
     plan_storage = Path(settings.STORAGE_DIR) / "plans" / str(project_id)
     plan_storage.mkdir(parents=True, exist_ok=True)
@@ -774,6 +788,11 @@ def _ml_page_candidates(plan: Plan, page: int, kind: str) -> list[dict]:
     """
     detector = get_ml_detector()
     if not detector.is_available():
+        return []
+
+    # DXF: la geometría ya viene importada de las capas, no hay PDF que
+    # rasterizar para correr inferencia ML.
+    if (plan.scale_source == "dxf") or not str(plan.pdf_path).lower().endswith(".pdf"):
         return []
 
     import fitz

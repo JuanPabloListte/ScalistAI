@@ -161,8 +161,8 @@ export default function ProjectGanttPage() {
                         <div 
                           className="absolute h-full rounded-md bg-brand-500 opacity-90 shadow-sm"
                           style={{
-                            left: \`\${(t.startDate / totalDays) * 100}%\`,
-                            width: \`\${Math.max(1, (t.days / totalDays) * 100)}%\`
+                            left: `${(t.startDate / totalDays) * 100}%`,
+                            width: `${Math.max(1, (t.days / totalDays) * 100)}%`
                           }}
                         />
                       )}

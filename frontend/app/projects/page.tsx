@@ -73,29 +73,6 @@ export default function ProjectsPage() {
                 : `${projects.length} proyecto${projects.length === 1 ? "" : "s"} en total`}
           </p>
         </div>
-        <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 self-start rounded-md border border-slate-300 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
-          <input
-            type="file"
-            accept=".dxf"
-            className="hidden"
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              setLoading(true);
-              try {
-                const res = await api.uploadDxf(file);
-                if (res.success) {
-                  router.push(`/projects/${res.project_id}`);
-                }
-              } catch (err: any) {
-                setError("Error importando DXF: " + err.message);
-                setLoading(false);
-              }
-            }}
-          />
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-          Importar DXF
-        </label>
       </header>
 
       {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}

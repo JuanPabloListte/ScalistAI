@@ -8,13 +8,13 @@ def enhance_for_display(png_bytes: bytes) -> bytes:
     PyMuPDF rasteriza líneas CAD de 0.1mm con antialiasing → quedan en gris muy
     claro. Cuando el browser hace downscale a fit-zoom, ese gris desaparece.
 
-    1) Pasa a grayscale (la mayoría de los planos son B&N).
-    2) Gamma 0.55: cualquier gris medio se oscurece (gris 50% queda 23%).
+    1) Lee en color (BGR) para preservar instalaciones coloreadas (cloacas, electricidad…).
+    2) Gamma 0.55 por canal: líneas claras se oscurecen sin cambiar el tono.
     3) Dilatación 2×2 sobre el inverso: engrosa líneas de 1 px a 2 px.
     4) Reencoda como PNG.
     """
     arr = np.frombuffer(png_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         return png_bytes
 
