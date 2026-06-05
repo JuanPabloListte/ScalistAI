@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import {
   api,
@@ -10,6 +10,8 @@ import {
   type AssemblyCreatePayload,
   type AssemblyMaterialInput,
 } from "@/lib/api";
+
+import { ExcelMapperModal } from "@/components/ExcelMapperModal";
 
 const APPLIES_TO_OPTIONS: { value: string; label: string }[] = [
   { value: "wall", label: "Muro" },
@@ -65,6 +67,9 @@ export default function MaterialsPage() {
   const [deletingAssembly, setDeletingAssembly] = useState<Assembly | null>(null);
 
   const [filter, setFilter] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedExcelFile, setSelectedExcelFile] = useState<File | null>(null);
+  const [uploadingExcel, setUploadingExcel] = useState(false);
 
   useEffect(() => {
     Promise.all([api.listMaterials(), api.listAssemblies()])
@@ -134,6 +139,30 @@ export default function MaterialsPage() {
       : true,
   );
 
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedExcelFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleMapComplete(items: any[]) {
+    setSelectedExcelFile(null);
+    setUploadingExcel(true);
+    setError(null);
+    try {
+      const res = await api.uploadMaterialsJson(items);
+      alert(`Éxito: Se importaron ${res.imported} nuevos insumos y se actualizaron ${res.updated}.`);
+      
+      const m = await api.listMaterials();
+      setMaterials(m);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al subir Excel");
+    } finally {
+      setUploadingExcel(false);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
       <header className="mb-8">
@@ -174,7 +203,7 @@ export default function MaterialsPage() {
       </div>
 
       {!loading && (
-        <div className="mb-4">
+        <div className="mb-4 flex items-center justify-between gap-4">
           <input
             type="search"
             placeholder="Filtrar..."
@@ -182,6 +211,24 @@ export default function MaterialsPage() {
             onChange={(e) => setFilter(e.target.value)}
             className="w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
           />
+          {tab === "materials" && (
+            <div>
+              <input 
+                type="file" 
+                accept=".xlsx" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                className="hidden" 
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingExcel}
+                className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                {uploadingExcel ? "Subiendo..." : "Importar Excel"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -346,6 +393,14 @@ export default function MaterialsPage() {
             await api.deleteAssembly(deletingAssembly.id);
             handleAssemblyDeleted(deletingAssembly.id);
           }}
+        />
+      )}
+
+      {selectedExcelFile && (
+        <ExcelMapperModal
+          file={selectedExcelFile}
+          onCancel={() => setSelectedExcelFile(null)}
+          onMap={handleMapComplete}
         />
       )}
     </main>

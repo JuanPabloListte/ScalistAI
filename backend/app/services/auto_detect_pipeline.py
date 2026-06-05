@@ -240,6 +240,24 @@ def _create_roof_elements(db, plan_id, page, candidates, source: str = "ai") -> 
     )
 
 
+def _create_riostra_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "riostra", 0.40, source
+    )
+
+
+def _create_cloaca_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "cloaca", 0.10, source
+    )
+
+
+def _create_electricidad_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "electricidad", 0.05, source
+    )
+
+
 def _recommended_pages(pdf_path: Path) -> list[int]:
     try:
         recs = recommend_pages(pdf_path)
@@ -323,6 +341,7 @@ async def run_initial_detection(plan_id: int) -> None:
 
 _TYPE_STAGES: list[Stage] = [
     "walls", "rooms", "openings", "columns", "beams", "roofs",
+    "riostras", "cloacas", "electricidad",
 ]
 
 
@@ -391,6 +410,7 @@ def _run_ml_stage(
 
         total_walls = total_rooms = total_openings = 0
         total_beams = total_columns = total_roofs = 0
+        total_riostras = total_cloacas = total_electricidad = 0
 
         with SessionLocal() as db:
             doc = fitz.open(pdf_path)
@@ -440,15 +460,28 @@ def _run_ml_stage(
                         total_roofs += _create_roof_elements(
                             db, plan_id, page, result.roofs, source="ai_ml"
                         )
+                    if "riostra" in roles or "riostras" in roles:
+                        total_riostras += _create_riostra_elements(
+                            db, plan_id, page, result.riostras, source="ai_ml"
+                        )
+                    if "cloaca" in roles or "cloacas" in roles:
+                        total_cloacas += _create_cloaca_elements(
+                            db, plan_id, page, result.cloacas, source="ai_ml"
+                        )
+                    if "electricidad" in roles:
+                        total_electricidad += _create_electricidad_elements(
+                            db, plan_id, page, result.electricidad, source="ai_ml"
+                        )
             finally:
                 doc.close()
             db.commit()
 
         logger.info(
             "ml stage done plan=%s walls=%d rooms=%d openings=%d "
-            "beams=%d columns=%d roofs=%d",
+            "beams=%d columns=%d roofs=%d riostras=%d cloacas=%d electricidad=%d",
             plan_id, total_walls, total_rooms, total_openings,
             total_beams, total_columns, total_roofs,
+            total_riostras, total_cloacas, total_electricidad,
         )
         for st in _TYPE_STAGES:
             if st in assigned_roles:

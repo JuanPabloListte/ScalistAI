@@ -36,7 +36,7 @@ type Props = {
 };
 
 type Point = { x: number; y: number };
-type Tool = "pan" | "wall" | "room" | "opening" | "beam" | "roof" | "column";
+type Tool = "pan" | "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad";
 
 // Subtipos de abertura. El valor se persiste en `geometry.subtype`.
 // `defaultW_m` / `defaultH_m` son los valores físicos típicos en obra; se
@@ -144,6 +144,9 @@ function applicableAssemblies(type: ElementType, all: Assembly[]): Assembly[] {
     if (type === "beam") return applies === "beam";
     if (type === "roof") return applies === "roof";
     if (type === "column") return applies === "column";
+    if (type === "riostra") return applies === "riostra" || applies === "beam"; // a riostra is like a foundation beam
+    if (type === "cloaca") return applies === "cloaca";
+    if (type === "electricidad") return applies === "electricidad";
     return false;
   });
 }
@@ -194,6 +197,8 @@ export default function PlanViewerInner({
   // Herramienta activa
   const [tool, setTool] = useState<Tool>("pan");
   const [activePoints, setActivePoints] = useState<Point[]>([]);
+  const [isFreehandDrawing, setIsFreehandDrawing] = useState(false);
+  const [isFreehandMode, setIsFreehandMode] = useState(true);
   const [mousePos, setMousePos] = useState<Point | null>(null);
   const [drawError, setDrawError] = useState<string | null>(null);
   // Subtipo seleccionado para la próxima abertura que se dibuje. Persiste entre
@@ -201,6 +206,8 @@ export default function PlanViewerInner({
   // cuando `tool === "opening"`.
   const [openingSubtype, setOpeningSubtype] = useState<OpeningSubtype["value"]>(DEFAULT_OPENING_SUBTYPE);
   const [showOpeningMenu, setShowOpeningMenu] = useState(false);
+  const [showElectricidadMenu, setShowElectricidadMenu] = useState(false);
+  const [showDrawingTools, setShowDrawingTools] = useState(true);
 
   // Elementos persistidos
   const [elements, setElements] = useState<DetectedElement[]>([]);
@@ -238,6 +245,9 @@ export default function PlanViewerInner({
       beams: "beam",
       roofs: "roof",
       columns: "column",
+      riostras: "riostra",
+      cloacas: "cloaca",
+      electricidad: "electricidad",
     };
     const target = activeCategory ? tabToType[activeCategory] : null;
     if (!target) return pageVisibleElements; // "all" o sin tab → no filtra
@@ -781,9 +791,9 @@ export default function PlanViewerInner({
     return Math.hypot(dx, dy) < CLOSE_POLYGON_PX;
   }, [tool, activePoints, mousePos, scale]);
 
-  // Crear muro, abertura o viga (2 puntos → 1 elemento)
+  // Crear muro, abertura, viga, riostra, cloaca, electricidad (2 puntos → 1 elemento)
   const createSegmentElement = useCallback(
-    async (pts: Point[], type: "wall" | "opening" | "beam") => {
+    async (pts: Point[], type: "wall" | "opening" | "beam" | "riostra" | "cloaca" | "electricidad") => {
       if (!currentPageScale || pts.length !== 2) return;
       const lengthM = distM(pts[0], pts[1], currentPageScale);
       if (lengthM < MIN_SEGMENT_M) {
@@ -799,7 +809,7 @@ export default function PlanViewerInner({
         : null;
       const defaultHeight = type === "opening"
         ? subtype!.defaultH_m
-        : type === "beam" ? 0.40 : 2.8;
+        : type === "beam" ? 0.40 : type === "riostra" ? 0.40 : type === "cloaca" ? 0.11 : type === "electricidad" ? 0.05 : 2.8;
       try {
         const el = await api.createElement(planId, {
           page,
@@ -877,19 +887,50 @@ export default function PlanViewerInner({
     [planId, page, currentPageScale],
   );
 
+  const createPolylineElement = useCallback(
+    async (pts: Point[], type: "cloaca" | "electricidad") => {
+      if (!currentPageScale || pts.length < 2) return;
+      let lengthM = 0;
+      for (let i = 0; i < pts.length - 1; i++) {
+        lengthM += distM(pts[i], pts[i + 1], currentPageScale);
+      }
+      if (lengthM < MIN_SEGMENT_M) {
+        setDrawError("Trazo demasiado corto, ignorado");
+        setTimeout(() => setDrawError(null), 2000);
+        return;
+      }
+      setDrawError(null);
+      const defaultHeight = type === "cloaca" ? 0.11 : 0.05;
+      const flat = pts.flatMap((p) => [p.x, p.y]);
+      try {
+        const el = await api.createElement(planId, {
+          page,
+          type,
+          geometry: { points: flat },
+          length_m: lengthM,
+          height_m: defaultHeight,
+        });
+        setElements((prev) => [...prev, el]);
+      } catch (err) {
+        setDrawError(err instanceof Error ? err.message : "Error al guardar");
+      }
+    },
+    [planId, page, currentPageScale],
+  );
+
   function handleDrawClick(p: Point) {
     if (tool === "column") {
       void createPointElement(p, "column");
       return;
     }
-    if (tool === "wall" || tool === "opening" || tool === "beam") {
+    if (tool === "wall" || tool === "opening" || tool === "beam" || tool === "riostra" || tool === "cloaca" || (tool === "electricidad" && !isFreehandMode)) {
       if (activePoints.length === 0) {
         setActivePoints([p]);
         return;
       }
       const pts = [...activePoints, p];
       setActivePoints([]);
-      void createSegmentElement(pts, tool);
+      void createSegmentElement(pts, tool as "wall" | "opening" | "beam" | "riostra" | "cloaca" | "electricidad");
       return;
     }
     if (tool === "room" || tool === "roof") {
@@ -921,7 +962,12 @@ export default function PlanViewerInner({
 
     if (tool !== "pan" && !drawingDisabled) {
       const imgPoint = screenToImage(sx, sy);
-      handleDrawClick(imgPoint);
+      if (tool === "electricidad" && isFreehandMode) {
+        setIsFreehandDrawing(true);
+        setActivePoints([imgPoint]);
+      } else {
+        handleDrawClick(imgPoint);
+      }
       return;
     }
 
@@ -932,6 +978,27 @@ export default function PlanViewerInner({
   }
 
   function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (isFreehandDrawing && tool === "electricidad") {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const imgPoint = screenToImage(sx, sy);
+      
+      setActivePoints((prev) => {
+        if (prev.length === 0) return [imgPoint];
+        const lastP = prev[prev.length - 1];
+        const dx = imgPoint.x - lastP.x;
+        const dy = imgPoint.y - lastP.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 10 / scale) {
+          return [...prev, imgPoint];
+        }
+        return prev;
+      });
+      return;
+    }
+
     if (draggingVertex) {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
@@ -979,6 +1046,16 @@ export default function PlanViewerInner({
   }
 
   function onMouseLeave() {
+    if (isFreehandDrawing && tool === "electricidad") {
+      setIsFreehandDrawing(false);
+      const pts = activePoints;
+      setActivePoints([]);
+      if (pts.length >= 2) {
+        void createPolylineElement(pts, "electricidad");
+      }
+      return;
+    }
+
     if (draggingVertex) {
       const elementId = draggingVertex.elementId;
       setDraggingVertex(null);
@@ -994,6 +1071,16 @@ export default function PlanViewerInner({
   }
 
   function onMouseUp() {
+    if (isFreehandDrawing && tool === "electricidad") {
+      setIsFreehandDrawing(false);
+      const pts = activePoints;
+      setActivePoints([]);
+      if (pts.length >= 2) {
+        void createPolylineElement(pts, "electricidad");
+      }
+      return;
+    }
+
     if (draggingVertex) {
       const elementId = draggingVertex.elementId;
       setDraggingVertex(null);
@@ -1014,6 +1101,12 @@ export default function PlanViewerInner({
       const pts = activePoints;
       setActivePoints([]);
       void createPolygonElement(pts, tool);
+    } else if (!isPolygonTool && activePoints.length > 0) {
+      const pts = activePoints;
+      setActivePoints([]);
+      if (tool === "electricidad" && isFreehandMode && pts.length >= 2) {
+        void createPolylineElement(pts, "electricidad");
+      }
     }
   }
 
@@ -1598,12 +1691,22 @@ export default function PlanViewerInner({
         return;
       }
       const isPolygonTool = tool === "room" || tool === "roof";
-      if (e.key === "Enter" && isPolygonTool && activePoints.length >= 3) {
-        e.preventDefault();
-        const pts = activePoints;
-        setActivePoints([]);
-        void createPolygonElement(pts, tool);
-        return;
+      if (e.key === "Enter") {
+        if (isPolygonTool && activePoints.length >= 3) {
+          e.preventDefault();
+          const pts = activePoints;
+          setActivePoints([]);
+          void createPolygonElement(pts, tool);
+          return;
+        } else if (!isPolygonTool && activePoints.length > 0) {
+          e.preventDefault();
+          const pts = activePoints;
+          setActivePoints([]);
+          if ((tool === "cloaca" || tool === "electricidad") && pts.length >= 2) {
+            void createPolylineElement(pts, tool);
+          }
+          return;
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && activePoints.length > 0) {
         e.preventDefault();
@@ -1623,7 +1726,7 @@ export default function PlanViewerInner({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [calibrating, activePoints, tool, drawingDisabled, createPolygonElement]);
+  }, [calibrating, activePoints, tool, drawingDisabled, createPolygonElement, createPolylineElement]);
 
   const processing = rendered !== null && rendered < totalPages;
   const detectedCount = pageScales ? Object.keys(pageScales).length : 0;
@@ -2773,6 +2876,179 @@ export default function PlanViewerInner({
                         );
                       })}
 
+                    {/* Riostras */}
+                    {displayElements
+                      .filter((el) => el.type === "riostra")
+                      .map((el) => {
+                        const [x1, y1, x2, y2] = el.geometry.points;
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        const baseW = 8 / scale;
+                        const hoverW = 9.5 / scale;
+                        const w = hovered ? hoverW : baseW;
+                        return (
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {sel && (
+                              <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                stroke="#F97316"
+                                strokeWidth={(8 / scale) + (12 / scale)}
+                                strokeLinecap="round"
+                                opacity={0.35}
+                              />
+                            )}
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke="transparent"
+                              strokeWidth={34 / scale}
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                              }}
+                            />
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke={hovered ? "#EA580C" : "#F97316"}
+                              strokeWidth={w}
+                              strokeLinecap="round"
+                              opacity={1}
+                              className="pointer-events-none transition-colors duration-200"
+                            />
+                          </g>
+                        );
+                      })}
+
+                    {/* Cloacas */}
+                    {displayElements
+                      .filter((el) => el.type === "cloaca")
+                      .map((el) => {
+                        const pts = el.geometry.points;
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        const baseW = 6 / scale;
+                        const hoverW = 7.5 / scale;
+                        const w = hovered ? hoverW : baseW;
+                        const ptsStr = pts.reduce((acc: string, val: number, i: number) => acc + val + (i % 2 === 0 ? "," : " "), "").trim();
+                        return (
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {sel && (
+                              <polyline
+                                points={ptsStr}
+                                fill="none"
+                                stroke="#15803D"
+                                strokeWidth={(6 / scale) + (12 / scale)}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                opacity={0.35}
+                              />
+                            )}
+                            <polyline
+                              points={ptsStr}
+                              fill="none"
+                              stroke="transparent"
+                              strokeWidth={34 / scale}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                              }}
+                            />
+                            <polyline
+                              points={ptsStr}
+                              fill="none"
+                              stroke={hovered ? "#166534" : "#15803D"}
+                              strokeWidth={w}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeDasharray={`${8 / scale} ${6 / scale}`}
+                              opacity={1}
+                              className="pointer-events-none transition-colors duration-200"
+                            />
+                          </g>
+                        );
+                      })}
+
+                    {/* Electricidad */}
+                    {displayElements
+                      .filter((el) => el.type === "electricidad")
+                      .map((el) => {
+                        const pts = el.geometry.points;
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        const baseW = 4 / scale;
+                        const hoverW = 5.5 / scale;
+                        const w = hovered ? hoverW : baseW;
+                        const ptsStr = pts.reduce((acc: string, val: number, i: number) => acc + val + (i % 2 === 0 ? "," : " "), "").trim();
+                        return (
+                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                            {sel && (
+                              <polyline
+                                points={ptsStr}
+                                fill="none"
+                                stroke="#EAB308"
+                                strokeWidth={(4 / scale) + (12 / scale)}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                opacity={0.35}
+                              />
+                            )}
+                            <polyline
+                              points={ptsStr}
+                              fill="none"
+                              stroke="transparent"
+                              strokeWidth={34 / scale}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                              }}
+                            />
+                            <polyline
+                              points={ptsStr}
+                              fill="none"
+                              stroke={hovered ? "#CA8A04" : "#EAB308"}
+                              strokeWidth={w}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              opacity={1}
+                              className="pointer-events-none transition-colors duration-200"
+                            />
+                          </g>
+                        );
+                      })}
+
                     {/* Candidatos Muros */}
                     {!hideAiElements && wallCandidates.map((c) => {
                       const pts = c.geometry.points;
@@ -3434,94 +3710,171 @@ export default function PlanViewerInner({
                   >
                     <HandIcon />
                   </ToolbarToolButton>
-                  <ToolbarToolButton
-                    active={tool === "wall"}
-                    onClick={() => selectTool("wall")}
-                    disabled={drawingDisabled}
-                    title="Muro (L)"
-                    ariaLabel="Dibujar muro"
+
+                  <button
+                    type="button"
+                    onClick={() => setShowDrawingTools((prev) => !prev)}
+                    className="flex h-8 w-4 items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 transition"
+                    title={showDrawingTools ? "Ocultar herramientas de dibujo" : "Mostrar herramientas de dibujo"}
                   >
-                    <WallIcon />
-                  </ToolbarToolButton>
-                  <ToolbarToolButton
-                    active={tool === "room"}
-                    onClick={() => selectTool("room")}
-                    disabled={drawingDisabled}
-                    title="Recinto (P)"
-                    ariaLabel="Dibujar recinto"
-                  >
-                    <RoomIcon />
-                  </ToolbarToolButton>
-                  <div className="relative flex">
-                    <ToolbarToolButton
-                      active={tool === "opening"}
-                      onClick={() => selectTool("opening")}
-                      disabled={drawingDisabled}
-                      title={`Abertura (O) - ${OPENING_SUBTYPES.find(s => s.value === openingSubtype)?.label ?? "Puerta"}`}
-                      ariaLabel="Dibujar abertura"
-                    >
-                      <OpeningIcon />
-                    </ToolbarToolButton>
-                    <button
-                      type="button"
-                      disabled={drawingDisabled}
-                      onClick={() => setShowOpeningMenu((p) => !p)}
-                      className={`flex w-4 items-center justify-center rounded-r-md transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 ${tool === "opening" ? "text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30" : "text-slate-500 dark:text-slate-400"}`}
-                      title="Elegir tipo de abertura"
-                    >
-                      <ChevronIcon open={showOpeningMenu} />
-                    </button>
-                    {showOpeningMenu && (
-                      <div className="absolute top-[110%] left-1/2 mt-1 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 z-50">
-                        <div className="px-2 py-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Tipo de Abertura</div>
-                        {OPENING_SUBTYPES.map((s) => (
-                          <button
-                            key={s.value}
-                            type="button"
-                            onClick={() => {
-                              setOpeningSubtype(s.value);
-                              setShowOpeningMenu(false);
-                              if (tool !== "opening") selectTool("opening");
-                            }}
-                            className={`flex w-full items-center rounded-sm px-2 py-1.5 text-xs font-medium transition ${openingSubtype === s.value ? "bg-sky-50 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
-                          >
-                            {s.label}
-                          </button>
-                        ))}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: showDrawingTools ? "rotate(180deg)" : "rotate(0deg)" }}>
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </button>
+
+                  {showDrawingTools && (
+                    <>
+                      <ToolbarToolButton
+                        active={tool === "wall"}
+                        onClick={() => selectTool("wall")}
+                        disabled={drawingDisabled}
+                        title="Muro (L)"
+                        ariaLabel="Dibujar muro"
+                      >
+                        <WallIcon />
+                      </ToolbarToolButton>
+                      <ToolbarToolButton
+                        active={tool === "room"}
+                        onClick={() => selectTool("room")}
+                        disabled={drawingDisabled}
+                        title="Recinto (P)"
+                        ariaLabel="Dibujar recinto"
+                      >
+                        <RoomIcon />
+                      </ToolbarToolButton>
+                      <div className="relative flex">
+                        <ToolbarToolButton
+                          active={tool === "opening"}
+                          onClick={() => selectTool("opening")}
+                          disabled={drawingDisabled}
+                          title={`Abertura (O) - ${OPENING_SUBTYPES.find(s => s.value === openingSubtype)?.label ?? "Puerta"}`}
+                          ariaLabel="Dibujar abertura"
+                        >
+                          <OpeningIcon />
+                        </ToolbarToolButton>
+                        <button
+                          type="button"
+                          disabled={drawingDisabled}
+                          onClick={() => setShowOpeningMenu((p) => !p)}
+                          className={`flex w-4 items-center justify-center rounded-r-md transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 ${tool === "opening" ? "text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30" : "text-slate-500 dark:text-slate-400"}`}
+                          title="Elegir tipo de abertura"
+                        >
+                          <ChevronIcon open={showOpeningMenu} />
+                        </button>
+                        {showOpeningMenu && (
+                          <div className="absolute top-[110%] left-1/2 mt-1 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 z-50">
+                            <div className="px-2 py-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Tipo de Abertura</div>
+                            {OPENING_SUBTYPES.map((s) => (
+                              <button
+                                key={s.value}
+                                type="button"
+                                onClick={() => {
+                                  setOpeningSubtype(s.value);
+                                  setShowOpeningMenu(false);
+                                  if (tool !== "opening") selectTool("opening");
+                                }}
+                                className={`flex w-full items-center rounded-sm px-2 py-1.5 text-xs font-medium transition ${openingSubtype === s.value ? "bg-sky-50 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+                              >
+                                {s.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <ToolbarToolButton
-                    active={tool === "beam"}
-                    onClick={() => selectTool("beam")}
-                    disabled={drawingDisabled}
-                    title="Viga (V)"
-                    ariaLabel="Dibujar viga"
-                  >
-                    <BeamIcon />
-                  </ToolbarToolButton>
-                  <ToolbarToolButton
-                    active={tool === "roof"}
-                    onClick={() => selectTool("roof")}
-                    disabled={drawingDisabled}
-                    title="Techo (T)"
-                    ariaLabel="Dibujar techo"
-                  >
-                    <RoofIcon />
-                  </ToolbarToolButton>
-                  <ToolbarToolButton
-                    active={tool === "column"}
-                    onClick={() => selectTool("column")}
-                    disabled={drawingDisabled}
-                    title="Columna (C)"
-                    ariaLabel="Dibujar columna"
-                  >
-                    <ColumnIcon />
-                  </ToolbarToolButton>
+                      <ToolbarToolButton
+                        active={tool === "beam"}
+                        onClick={() => selectTool("beam")}
+                        disabled={drawingDisabled}
+                        title="Viga (V)"
+                        ariaLabel="Dibujar viga"
+                      >
+                        <BeamIcon />
+                      </ToolbarToolButton>
+                      <ToolbarToolButton
+                        active={tool === "roof"}
+                        onClick={() => selectTool("roof")}
+                        disabled={drawingDisabled}
+                        title="Techo (T)"
+                        ariaLabel="Dibujar techo"
+                      >
+                        <RoofIcon />
+                      </ToolbarToolButton>
+                      <ToolbarToolButton
+                        active={tool === "column"}
+                        onClick={() => selectTool("column")}
+                        disabled={drawingDisabled}
+                        title="Columna (C)"
+                        ariaLabel="Dibujar columna"
+                      >
+                        <ColumnIcon />
+                      </ToolbarToolButton>
+                      <ToolbarToolButton
+                        active={tool === "riostra"}
+                        onClick={() => selectTool("riostra")}
+                        disabled={drawingDisabled}
+                        title="Riostra"
+                        ariaLabel="Dibujar riostra"
+                      >
+                        <RiostraIcon />
+                      </ToolbarToolButton>
+                      <ToolbarToolButton
+                        active={tool === "cloaca"}
+                        onClick={() => selectTool("cloaca")}
+                        disabled={drawingDisabled}
+                        title="Cloaca"
+                        ariaLabel="Dibujar cloaca"
+                      >
+                        <CloacaIcon />
+                      </ToolbarToolButton>
+                      <div className="relative flex">
+                        <ToolbarToolButton
+                          active={tool === "electricidad"}
+                          onClick={() => selectTool("electricidad")}
+                          disabled={drawingDisabled}
+                          title={`Electricidad - ${isFreehandMode ? "Mano alzada" : "Línea recta"}`}
+                          ariaLabel="Dibujar electricidad"
+                        >
+                          <ElectricidadIcon />
+                        </ToolbarToolButton>
+                        <button
+                          type="button"
+                          disabled={drawingDisabled}
+                          onClick={() => setShowElectricidadMenu((p) => !p)}
+                          className={`flex w-4 items-center justify-center rounded-r-md transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 ${tool === "electricidad" ? "text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30" : "text-slate-500 dark:text-slate-400"}`}
+                          title="Elegir modo de dibujo"
+                        >
+                          <ChevronIcon open={showElectricidadMenu} />
+                        </button>
+                        {showElectricidadMenu && (
+                          <div className="absolute top-[110%] left-1/2 mt-1 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-800 z-50">
+                            <div className="px-2 py-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Modo de dibujo</div>
+                            {[
+                              { value: true, label: "Mano alzada" },
+                              { value: false, label: "Línea recta" },
+                            ].map((opt) => (
+                              <button
+                                key={String(opt.value)}
+                                type="button"
+                                onClick={() => {
+                                  setIsFreehandMode(opt.value);
+                                  setShowElectricidadMenu(false);
+                                  if (tool !== "electricidad") selectTool("electricidad");
+                                }}
+                                className={`flex w-full items-center rounded-sm px-2 py-1.5 text-xs font-medium transition ${isFreehandMode === opt.value ? "bg-sky-50 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
           </div>
+
 
           {/* Metadatos */}
           {natural && (
@@ -4302,6 +4655,36 @@ function CubeIcon() {
       <path d="M12 22V12" />
       <path d="m12 12 8.7-5" />
       <path d="m12 12-8.7-5" />
+    </svg>
+  );
+}
+
+function RiostraIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 3l18 18" />
+      <path d="M21 3L3 21" />
+    </svg>
+  );
+}
+
+function CloacaIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 22V2" />
+      <path d="M20 22V2" />
+      <path d="M4 12h16" />
+      <path d="M8 2h8" />
+      <path d="M8 22h8" />
+    </svg>
+  );
+}
+
+function ElectricidadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
     </svg>
   );
 }

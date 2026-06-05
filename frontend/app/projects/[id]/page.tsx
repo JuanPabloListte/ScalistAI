@@ -59,6 +59,9 @@ export default function ProjectDetailPage() {
     const beamsPages: number[] = [];
     const roofsPages: number[] = [];
     const columnsPages: number[] = [];
+    const riostrasPages: number[] = [];
+    const cloacasPages: number[] = [];
+    const electricidadPages: number[] = [];
 
     for (const p of allPages) {
       const pRoles = roles[String(p)] ?? [];
@@ -68,6 +71,9 @@ export default function ProjectDetailPage() {
       if (pRoles.includes("beams")) beamsPages.push(p);
       if (pRoles.includes("roofs")) roofsPages.push(p);
       if (pRoles.includes("columns")) columnsPages.push(p);
+      if (pRoles.includes("riostras")) riostrasPages.push(p);
+      if (pRoles.includes("cloacas")) cloacasPages.push(p);
+      if (pRoles.includes("electricidad")) electricidadPages.push(p);
     }
 
     const tabs = [];
@@ -88,6 +94,15 @@ export default function ProjectDetailPage() {
     }
     if (columnsPages.length > 0) {
       tabs.push({ id: "columns", label: "Columna", pages: columnsPages });
+    }
+    if (riostrasPages.length > 0) {
+      tabs.push({ id: "riostras", label: "Riostras", pages: riostrasPages });
+    }
+    if (cloacasPages.length > 0) {
+      tabs.push({ id: "cloacas", label: "Cloacas", pages: cloacasPages });
+    }
+    if (electricidadPages.length > 0) {
+      tabs.push({ id: "electricidad", label: "Electricidad", pages: electricidadPages });
     }
 
     if (tabs.length === 0 && allPages.length > 0) {
@@ -142,7 +157,10 @@ export default function ProjectDetailPage() {
             <div>
               <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{activePlan.original_filename}</h2>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                {activePlan.dpi} DPI · {activePlan.page_count ?? "?"} página
+                {activePlan.scale_source === "dxf"
+                  ? "Importado de DXF"
+                  : `${activePlan.dpi} DPI`}{" "}
+                · {activePlan.page_count ?? "?"} página
                 {activePlan.page_count === 1 ? "" : "s"}
               </p>
             </div>

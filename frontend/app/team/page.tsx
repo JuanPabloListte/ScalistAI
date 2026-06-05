@@ -136,7 +136,7 @@ export default function TeamPage() {
           mode="create"
           onCancel={() => setCreating(false)}
           onSubmit={async (payload) => {
-            await api.createTeamUser(payload);
+            await api.createTeamUser(payload as any);
             setCreating(false);
             reload();
           }}

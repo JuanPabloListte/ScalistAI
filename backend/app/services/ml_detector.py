@@ -65,7 +65,7 @@ MAX_COLUMN_AREA_M2 = 1.0
 MIN_ROOF_AREA_M2 = 1.0
 
 # Set legacy: si active.json no tiene `class_names`, asumimos este orden.
-_LEGACY_CLASS_NAMES = ["background", "wall", "room", "opening"]
+_LEGACY_CLASS_NAMES = ["background", "wall", "room", "opening", "beam", "column", "roof", "riostra", "cloaca", "electricidad"]
 
 
 @dataclass
@@ -78,6 +78,9 @@ class MLDetectionResult:
     beams: list[dict] = field(default_factory=list)
     columns: list[dict] = field(default_factory=list)
     roofs: list[dict] = field(default_factory=list)
+    riostras: list[dict] = field(default_factory=list)
+    cloacas: list[dict] = field(default_factory=list)
+    electricidad: list[dict] = field(default_factory=list)
     # Metadata útil para logging y feedback.
     model_version: str = "unknown"
     inference_time_ms: float = 0.0
@@ -90,16 +93,31 @@ def _resolve_active_model_path(default_path: str) -> tuple[Path, dict | None]:
     apuntando a la versión productiva. Cuando no existe (ambiente fresh,
     o se borró), caemos al `settings.ML_MODEL_PATH` legacy.
     """
-    active_file = Path("backend/models/active.json")
+    active_file = Path("models/active.json")
+    if not active_file.exists():
+        active_file = Path("backend/models/active.json")
+        
     if active_file.exists():
         try:
             data = json.loads(active_file.read_text())
-            p = Path(str(data.get("path", "")))
+            p_str = str(data.get("path", ""))
+            
+            # Ajuste dinámico: Si active.json se generó en el host dice "backend/models/..."
+            # Pero si estamos corriendo en Docker, nuestro cwd es /app y el folder se llama "models/"
+            if p_str.startswith("backend/models/") and not Path(p_str).exists():
+                p_str = p_str.replace("backend/models/", "models/", 1)
+                
+            p = Path(p_str)
             if p.exists():
                 return p, data
         except Exception:  # noqa: BLE001
             pass
-    return Path(default_path), None
+            
+    default_p = default_path
+    if default_p.startswith("./backend/models/") and not Path(default_p).exists():
+        default_p = default_p.replace("./backend/models/", "./models/", 1)
+        
+    return Path(default_p), None
 
 
 def _resolve_class_names(active_info: dict | None) -> list[str]:
@@ -443,6 +461,12 @@ def _postprocess(
             _emit_columns(result, mask, px_per_m, page_index)
         elif name == "roof":
             _emit_roofs(result, mask, px_per_m, page_index)
+        elif name == "riostra":
+            _emit_riostras(result, mask, px_per_m, page_index)
+        elif name == "cloaca":
+            _emit_cloacas(result, mask, px_per_m, page_index)
+        elif name == "electricidad":
+            _emit_electricidad(result, mask, px_per_m, page_index)
         # Tipos desconocidos los ignoramos silenciosamente — los suma quien
         # extienda los handlers (ej: futuro `roof`).
 
@@ -696,3 +720,99 @@ def _skeletonize(mask) -> "Any":
         if cv2.countNonZero(img) == 0:
             break
     return skel
+
+
+def _emit_riostras(result: MLDetectionResult, mask, px_per_m: float, page_index: int) -> None:
+    import cv2
+    import numpy as np
+
+    skel = _skeletonize(mask)
+    min_len_px = int(MIN_WALL_LENGTH_M * px_per_m)
+    lines = cv2.HoughLinesP(
+        skel, rho=1, theta=np.pi / 180, threshold=20,
+        minLineLength=min_len_px, maxLineGap=int(0.25 * px_per_m),
+    )
+    if lines is None:
+        return
+    for idx, line in enumerate(lines, start=1):
+        x1, y1, x2, y2 = (float(v) for v in line[0])
+        length_px = float(np.hypot(x2 - x1, y2 - y1))
+        length_m = length_px / px_per_m
+        if length_m < MIN_WALL_LENGTH_M:
+            continue
+        result.riostras.append({
+            "id": f"ml_riostra_{idx}",
+            "type": "riostra",
+            "geometry": {
+                "points": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
+                "label": f"Riostra ML {idx}",
+            },
+            "length_m": round(length_m, 2),
+            "area_m2": None,
+            "height_m": 0.4,
+            "page": page_index + 1,
+        })
+
+
+def _emit_cloacas(result: MLDetectionResult, mask, px_per_m: float, page_index: int) -> None:
+    import cv2
+    import numpy as np
+
+    skel = _skeletonize(mask)
+    min_len_px = int(MIN_WALL_LENGTH_M * px_per_m)
+    lines = cv2.HoughLinesP(
+        skel, rho=1, theta=np.pi / 180, threshold=20,
+        minLineLength=min_len_px, maxLineGap=int(0.25 * px_per_m),
+    )
+    if lines is None:
+        return
+    for idx, line in enumerate(lines, start=1):
+        x1, y1, x2, y2 = (float(v) for v in line[0])
+        length_px = float(np.hypot(x2 - x1, y2 - y1))
+        length_m = length_px / px_per_m
+        if length_m < MIN_WALL_LENGTH_M:
+            continue
+        result.cloacas.append({
+            "id": f"ml_cloaca_{idx}",
+            "type": "cloaca",
+            "geometry": {
+                "points": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
+                "label": f"Cloaca ML {idx}",
+            },
+            "length_m": round(length_m, 2),
+            "area_m2": None,
+            "height_m": 0.1,
+            "page": page_index + 1,
+        })
+
+
+def _emit_electricidad(result: MLDetectionResult, mask, px_per_m: float, page_index: int) -> None:
+    import cv2
+    import numpy as np
+
+    skel = _skeletonize(mask)
+    min_len_px = int(MIN_WALL_LENGTH_M * px_per_m)
+    lines = cv2.HoughLinesP(
+        skel, rho=1, theta=np.pi / 180, threshold=20,
+        minLineLength=min_len_px, maxLineGap=int(0.25 * px_per_m),
+    )
+    if lines is None:
+        return
+    for idx, line in enumerate(lines, start=1):
+        x1, y1, x2, y2 = (float(v) for v in line[0])
+        length_px = float(np.hypot(x2 - x1, y2 - y1))
+        length_m = length_px / px_per_m
+        if length_m < MIN_WALL_LENGTH_M:
+            continue
+        result.electricidad.append({
+            "id": f"ml_electricidad_{idx}",
+            "type": "electricidad",
+            "geometry": {
+                "points": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
+                "label": f"Electricidad ML {idx}",
+            },
+            "length_m": round(length_m, 2),
+            "area_m2": None,
+            "height_m": 0.05,
+            "page": page_index + 1,
+        })

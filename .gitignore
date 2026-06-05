@@ -62,3 +62,12 @@ test_plans/
 
 ResPlan.zip
 backend/models/
+
+# Database dumps
+*.dump
+
+# TypeScript build artifacts
+frontend/tsconfig.tsbuildinfo
+
+# Accidental duplicate directories
+backend/backend/

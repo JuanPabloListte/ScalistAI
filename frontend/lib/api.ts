@@ -99,7 +99,7 @@ export type MlModelStatus = {
 
 export type PageOverride = "recommended" | "rejected";
 
-export type PageRole = "walls" | "openings" | "rooms" | "beams" | "roofs" | "columns";
+export type PageRole = "walls" | "openings" | "rooms" | "beams" | "roofs" | "columns" | "riostras" | "cloacas" | "electricidad";
 
 export type Plan = {
   id: number;
@@ -126,7 +126,7 @@ export type PageRecommendation = {
   override: PageOverride | null;
 };
 
-export type ElementType = "wall" | "room" | "opening" | "beam" | "roof" | "column";
+export type ElementType = "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad";
 
 export type ElementGeometry = {
   points: number[]; // flat [x1, y1, x2, y2, ...]
@@ -150,6 +150,15 @@ export type Material = {
   unit: string;
   unit_price: number;
 };
+
+export type MaterialCreatePayload = {
+  name: string;
+  category: string;
+  unit: string;
+  unit_price: number;
+};
+
+export type MaterialUpdatePayload = Partial<MaterialCreatePayload>;
 
 export type AssemblyMaterial = {
   id: number;
@@ -177,6 +186,7 @@ export type DetectedElement = {
   area_m2: number | null;
   height_m: number | null;
   source: "manual" | "ai";
+  materials?: any[];
   created_at: string;
   updated_at: string;
   assemblies: Assembly[];
@@ -433,11 +443,11 @@ export const api = {
   listPlans: (projectId: number) =>
     request<Plan[]>(`/api/v1/projects/${projectId}/plans`),
 
-  uploadPlan: (projectId: number, file: File, isPdf: boolean = false) => {
+  uploadPlan: (projectId: number, file: File) => {
     const formData = new FormData();
     formData.append("file", file);
     return request<Plan>(
-      `/api/v1/plans/${projectId}/${isPdf ? "pdf" : "image"}`,
+      `/api/v1/projects/${projectId}/plans`,
       { method: "POST", body: formData },
     );
   },
@@ -788,5 +798,13 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  },
+
+  async uploadMaterialsJson(items: any[]): Promise<{imported: number, updated: number}> {
+    return request<{imported: number, updated: number}>("/api/v1/materials/import-json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(items),
+    });
   },
 };

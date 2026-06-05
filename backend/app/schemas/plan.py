@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-PageRole = Literal["walls", "openings", "rooms", "beams", "roofs", "columns"]
+PageRole = Literal["walls", "openings", "rooms", "beams", "roofs", "columns", "riostras", "cloacas", "electricidad"]
 
 
 class PlanRead(BaseModel):
