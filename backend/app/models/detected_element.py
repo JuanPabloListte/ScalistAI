@@ -24,7 +24,7 @@ class DetectedElement(Base):
     length_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     area_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
     height_m: Mapped[float | None] = mapped_column(Float, default=2.8, nullable=True)
-    source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)  # "manual", "ai"
+    source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)  # ver ElementSource en schemas/detected_element.py
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
