@@ -64,6 +64,17 @@ const MAX_SCALE = 8;
 const FIT_MARGIN = 0.9;
 const CLOSE_POLYGON_PX = 14; // distancia en pantalla para cerrar polígono
 const MIN_SEGMENT_M = 0.05; // ignorar clics muy próximos
+const SNAP_RADIUS_PX = 12; // radio de snap en píxeles de pantalla
+
+// Restringe `to` al múltiplo de 45° más cercano desde `from` (modo Ortho/Shift).
+function applyOrtho(from: Point, to: Point): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  const dist = Math.hypot(dx, dy);
+  return { x: from.x + Math.cos(snapped) * dist, y: from.y + Math.sin(snapped) * dist };
+}
 
 function distM(p1: Point, p2: Point, pxPerM: number): number {
   return Math.hypot(p2.x - p1.x, p2.y - p1.y) / pxPerM;
@@ -200,6 +211,8 @@ export default function PlanViewerInner({
   const [isFreehandDrawing, setIsFreehandDrawing] = useState(false);
   const [isFreehandMode, setIsFreehandMode] = useState(true);
   const [mousePos, setMousePos] = useState<Point | null>(null);
+  const [snapActive, setSnapActive] = useState(false);
+  const [isOrtho, setIsOrtho] = useState(false);
   const [drawError, setDrawError] = useState<string | null>(null);
   // Subtipo seleccionado para la próxima abertura que se dibuje. Persiste entre
   // dibujos de la sesión; el usuario lo cambia desde el dropdown que aparece
@@ -254,6 +267,18 @@ export default function PlanViewerInner({
     return pageVisibleElements.filter((e) => e.type === target);
   }, [pageVisibleElements, activeCategory]);
 
+  // Todos los vértices de los elementos visibles — usados para snap al dibujar.
+  const snapCandidates = useMemo<Point[]>(() => {
+    const pts: Point[] = [];
+    for (const el of pageVisibleElements) {
+      const flat = el.geometry.points;
+      for (let i = 0; i + 1 < flat.length; i += 2) {
+        pts.push({ x: flat[i], y: flat[i + 1] });
+      }
+    }
+    return pts;
+  }, [pageVisibleElements]);
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: number[]; label: string } | null>(null);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
@@ -274,6 +299,7 @@ export default function PlanViewerInner({
   const [pageBusy, setPageBusy] = useState(false);
 
   const [show3D, setShow3D] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
 
   // Estado local para arrastrar vertices
   const [draggingVertex, setDraggingVertex] = useState<{
@@ -761,6 +787,27 @@ export default function PlanViewerInner({
     return { x: pos.x + p.x * scale, y: pos.y + p.y * scale };
   }
 
+  // Aplica snap a vértices existentes y luego restricción ortogonal (Shift).
+  // Devuelve el punto corregido y si hubo snap activo.
+  const applySnapAndOrtho = useCallback(
+    (raw: Point, shiftKey: boolean): { point: Point; snapped: boolean } => {
+      const threshold = SNAP_RADIUS_PX / scale;
+      let best: Point | null = null;
+      let bestDist = threshold;
+      for (const c of snapCandidates) {
+        const d = Math.hypot(raw.x - c.x, raw.y - c.y);
+        if (d < bestDist) { bestDist = d; best = c; }
+      }
+      let pt = best ?? raw;
+      const snapped = best !== null;
+      if (shiftKey && activePoints.length > 0) {
+        pt = applyOrtho(activePoints[activePoints.length - 1], pt);
+      }
+      return { point: pt, snapped };
+    },
+    [scale, snapCandidates, activePoints],
+  );
+
   function zoomAtCenter(direction: 1 | -1) {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -961,7 +1008,8 @@ export default function PlanViewerInner({
     }
 
     if (tool !== "pan" && !drawingDisabled) {
-      const imgPoint = screenToImage(sx, sy);
+      const raw = screenToImage(sx, sy);
+      const { point: imgPoint } = applySnapAndOrtho(raw, e.shiftKey);
       if (tool === "electricidad" && isFreehandMode) {
         setIsFreehandDrawing(true);
         setActivePoints([imgPoint]);
@@ -1041,7 +1089,15 @@ export default function PlanViewerInner({
       const rect = containerRef.current.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
-      setMousePos(screenToImage(sx, sy));
+      const raw = screenToImage(sx, sy);
+      if (calibrating) {
+        setMousePos(raw);
+        setSnapActive(false);
+      } else {
+        const { point, snapped } = applySnapAndOrtho(raw, e.shiftKey);
+        setMousePos(point);
+        setSnapActive(snapped);
+      }
     }
   }
 
@@ -1680,6 +1736,14 @@ export default function PlanViewerInner({
       const tgt = e.target as HTMLElement | null;
       if (tgt && ["INPUT", "TEXTAREA"].includes(tgt.tagName)) return;
 
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedIds.size > 0 && activePoints.length === 0 && !calibrating) {
+          e.preventDefault();
+          requestDelete([...selectedIds]);
+          return;
+        }
+      }
+
       if (e.key === "Escape") {
         if (calibrating) {
           cancelCalibration();
@@ -1724,9 +1788,27 @@ export default function PlanViewerInner({
         if (e.key.toLowerCase() === "c") selectTool("column");
       }
     }
+    function handleShiftDown(e: KeyboardEvent) { if (e.key === "Shift") setIsOrtho(true); }
+    function handleShiftUp(e: KeyboardEvent) { if (e.key === "Shift") setIsOrtho(false); }
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [calibrating, activePoints, tool, drawingDisabled, createPolygonElement, createPolylineElement]);
+    window.addEventListener("keydown", handleShiftDown);
+    window.addEventListener("keyup", handleShiftUp);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("keydown", handleShiftDown);
+      window.removeEventListener("keyup", handleShiftUp);
+    };
+  }, [calibrating, activePoints, tool, drawingDisabled, selectedIds, createPolygonElement, createPolylineElement]);
+
+  // Escape cierra el modo maximizado (prioridad antes del handler de dibujo).
+  useEffect(() => {
+    if (!isMaximized) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsMaximized(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isMaximized]);
 
   const processing = rendered !== null && rendered < totalPages;
   const detectedCount = pageScales ? Object.keys(pageScales).length : 0;
@@ -1760,8 +1842,11 @@ export default function PlanViewerInner({
   const totalColumns = pageVisibleElements.filter((e) => e.type === "column").length;
 
   return (
-    <div className="flex flex-col gap-3">
-      {processing && (
+    <div className={isMaximized
+      ? "fixed inset-0 z-[100] bg-black"
+      : "flex flex-col gap-3"
+    }>
+      {processing && !isMaximized && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs dark:border-sky-900 dark:bg-sky-950/40">
           <div className="mb-1 flex items-center justify-between text-sky-800 dark:text-sky-200">
             <span>
@@ -1782,9 +1867,12 @@ export default function PlanViewerInner({
 
 
 
-      <div className="flex flex-col gap-3 lg:flex-row" style={{ minHeight: height + 80 }}>
+      <div
+        className={isMaximized ? "h-screen w-full" : "flex flex-col gap-3 lg:flex-row"}
+        style={isMaximized ? undefined : { minHeight: height + 80 }}
+      >
         {/* PANEL IZQUIERDO — Elementos */}
-        <aside className="flex w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
+        <aside className={`w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
               Elementos
@@ -2172,10 +2260,10 @@ export default function PlanViewerInner({
         </aside>
 
         {/* CANVAS CENTRAL */}
-        <div className="min-w-0 flex-1">
+        <div className={isMaximized ? "absolute inset-0" : "min-w-0 flex-1"}>
 
-          {/* Controles de página */}
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+          {/* Controles de página — ocultos en modo pantalla completa */}
+          {!isMaximized && <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             {activePages.length > 1 ? (
               <>
                 <div className="flex items-center gap-1">
@@ -2261,10 +2349,9 @@ export default function PlanViewerInner({
                 )}
               </div>
             )}
-          </div>
+          </div>}
 
-
-          {calibrating && (
+          {!isMaximized && calibrating && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700 dark:bg-amber-950/40">
               <span className="text-amber-800 dark:text-amber-200">
                 {calPoints.length === 0
@@ -2283,7 +2370,7 @@ export default function PlanViewerInner({
             </div>
           )}
 
-          {!currentPageScale && !calibrating && (
+          {!isMaximized && !currentPageScale && !calibrating && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-700 dark:bg-amber-950/40">
               <span className="text-amber-800 dark:text-amber-200">
                 Esta página no está calibrada. Calibrala para habilitar el dibujo.
@@ -2299,7 +2386,7 @@ export default function PlanViewerInner({
           )}
 
           {/* Banner de instrucciones de dibujo */}
-          {!calibrating && tool !== "pan" && !drawingDisabled && (
+          {!isMaximized && !calibrating && tool !== "pan" && !drawingDisabled && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs dark:border-sky-800 dark:bg-sky-950/40">
               <span className="text-sky-800 dark:text-sky-200">
                 {tool === "wall" && (
@@ -2329,14 +2416,14 @@ export default function PlanViewerInner({
             </div>
           )}
 
-          {drawError && (
+          {!isMaximized && drawError && (
             <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
               {drawError}
             </div>
           )}
 
           {/* Canvas + barra flotante */}
-          <div className="relative">
+          <div className={isMaximized ? "absolute inset-0" : "relative"}>
             <div
               ref={containerRef}
               onMouseDown={show3D ? undefined : onMouseDown}
@@ -2350,8 +2437,11 @@ export default function PlanViewerInner({
                   setSelectedIds(new Set());
                 }
               }}
-              className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-950"
-              style={{ height, cursor: show3D ? "default" : cursor }}
+              className={isMaximized
+                ? "absolute inset-0 overflow-hidden bg-black"
+                : "relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-950"
+              }
+              style={isMaximized ? { cursor: show3D ? "default" : cursor } : { height, cursor: show3D ? "default" : cursor }}
             >
               {show3D ? (
                 <Plan3DViewer
@@ -3541,6 +3631,19 @@ export default function PlanViewerInner({
                       );
                     })}
 
+                    {/* Indicador de snap — círculo cian en el vértice imantado */}
+                    {snapActive && mousePos && tool !== "pan" && (
+                      <circle
+                        cx={mousePos.x}
+                        cy={mousePos.y}
+                        r={8 / scale}
+                        fill="none"
+                        stroke="#06b6d4"
+                        strokeWidth={1.5 / scale}
+                        opacity={0.9}
+                      />
+                    )}
+
                     {/* Calibración */}
                     {calPoints.length === 2 && (
                       <line
@@ -3675,10 +3778,10 @@ export default function PlanViewerInner({
           )}
         </div>
 
-            {/* Barra flotante inferior-derecha */}
+            {/* Barra flotante */}
             {!calibrating && !show3D && (
-              <div className="pointer-events-none absolute bottom-3 right-3">
-                <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-surface dark:border-slate-700 dark:bg-slate-900">
+              <div className={`pointer-events-none absolute ${isMaximized ? "bottom-5 left-1/2 -translate-x-1/2" : "bottom-3 right-3"}`}>
+                <div className={`pointer-events-auto flex items-center gap-1 rounded-xl p-1.5 shadow-xl ${isMaximized ? "border border-slate-700 bg-slate-900/95 backdrop-blur" : "border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"}`}>
                   <ToolbarIconButton onClick={resetView} title="Centrar (F)" ariaLabel="Centrar vista">
                     <CenterIcon />
                   </ToolbarIconButton>
@@ -3700,6 +3803,22 @@ export default function PlanViewerInner({
                     <CubeIcon />
                   </ToolbarIconButton>
 
+                  <ToolbarIconButton
+                    onClick={() => setIsMaximized((v) => !v)}
+                    title={isMaximized ? "Salir de pantalla completa (Esc)" : "Pantalla completa"}
+                    ariaLabel={isMaximized ? "Salir de pantalla completa" : "Pantalla completa"}
+                  >
+                    {isMaximized ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>
+                      </svg>
+                    )}
+                  </ToolbarIconButton>
+
                   <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
 
                   <ToolbarToolButton
@@ -3710,6 +3829,12 @@ export default function PlanViewerInner({
                   >
                     <HandIcon />
                   </ToolbarToolButton>
+
+                  {isOrtho && tool !== "pan" && (
+                    <span className="ml-1 flex h-6 items-center rounded px-1.5 text-[10px] font-bold tracking-widest text-sky-600 ring-1 ring-sky-400 dark:text-sky-300 dark:ring-sky-500">
+                      ORTHO
+                    </span>
+                  )}
 
                   <button
                     type="button"
@@ -3926,7 +4051,7 @@ export default function PlanViewerInner({
         </div>
 
         {/* PANEL DERECHO — Cómputo */}
-        <aside className="flex w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72">
+        <aside className={`w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
               Cómputo

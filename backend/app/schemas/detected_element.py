@@ -1,6 +1,16 @@
 from datetime import datetime
+from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field
+
 from app.schemas.assembly import AssemblyRead
+
+
+class ElementSource(str, Enum):
+    manual = "manual"    # dibujado a mano por el usuario en el editor
+    ai = "ai"            # sugerido por IA y aceptado explícitamente por el usuario
+    ai_ml = "ai_ml"      # detectado automáticamente por el pipeline ML en background
+    dxf = "dxf"          # importado desde capas de un archivo DXF
 
 
 class DetectedElementBase(BaseModel):
@@ -10,7 +20,7 @@ class DetectedElementBase(BaseModel):
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)
     height_m: float | None = Field(2.8, ge=0)
-    source: str = Field("manual", pattern="^(manual|ai|ai_ml)$")
+    source: ElementSource = ElementSource.manual
 
 
 class DetectedElementCreate(DetectedElementBase):
@@ -22,7 +32,7 @@ class DetectedElementUpdate(BaseModel):
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)
     height_m: float | None = Field(None, ge=0)
-    source: str | None = Field(None, pattern="^(manual|ai|ai_ml)$")
+    source: ElementSource | None = None
 
 
 class DetectedElementRead(DetectedElementBase):

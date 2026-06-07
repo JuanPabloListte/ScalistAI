@@ -1,15 +1,16 @@
 """Pipeline de deteccion automatica que corre en background despues de subir
-un PDF. Detecta muros, recintos y aberturas en las paginas recomendadas y los
-persiste como DetectedElement con source="ai". El editor los muestra con borde
-punteado hasta que el usuario los confirma.
+un PDF. Detecta muros, recintos y aberturas en las paginas asignadas y los
+persiste como DetectedElement con source="ai_ml".
 
-El estado del pipeline se trackea en memoria (proceso del backend). Si el
-container reinicia, las tareas en vuelo se pierden y el usuario puede
-disparar la deteccion manual desde el editor.
+El estado del pipeline se persiste en Redis para ser consistente entre los
+múltiples workers de Gunicorn en producción. Si Redis no está disponible se
+usa un fallback en memoria con el comportamiento original (estado no compartido
+entre workers, aceptable en desarrollo).
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import time
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from app.core.database import SessionLocal
+from app.core.redis import get_redis
 from app.models.detected_element import DetectedElement
 from app.models.plan import Plan
 from app.services.ml_detector import get_ml_detector
@@ -25,56 +27,93 @@ from app.services.pdf import recommend_pages
 logger = logging.getLogger(__name__)
 
 Stage = Literal[
-    "scales", "walls", "rooms", "openings", "columns", "beams", "roofs", "ml"
+    "scales", "walls", "rooms", "openings", "columns", "beams", "roofs",
+    "riostras", "cloacas", "electricidad", "ml",
 ]
 Status = Literal["pending", "running", "done", "failed"]
 
-_progress_lock = threading.Lock()
-# { plan_id: { "scales": "done", "walls": "running", ..., "started_at": <ts> } }
-_progress: dict[int, dict[str, Any]] = {}
+# TTL del estado en Redis: 2 horas. Suficiente para que cualquier detección
+# termine y el frontend termine de polear, sin acumular entradas para siempre.
+_STATUS_TTL = 7_200
+_KEY_PREFIX = "scalistai:ai:"
+
+# Fallback en memoria para cuando Redis no está disponible.
+_mem_lock = threading.Lock()
+_mem: dict[int, dict[str, Any]] = {}
+
+
+def _redis_key(plan_id: int) -> str:
+    return f"{_KEY_PREFIX}{plan_id}"
+
+
+def _default_status() -> dict[str, Any]:
+    return {
+        "scales": "pending",
+        "walls": "pending",
+        "rooms": "pending",
+        "openings": "pending",
+        "columns": "pending",
+        "beams": "pending",
+        "roofs": "pending",
+        "riostras": "pending",
+        "cloacas": "pending",
+        "electricidad": "pending",
+        "ml": "pending",
+        "started_at": None,
+    }
 
 
 def _init_progress(plan_id: int) -> None:
-    with _progress_lock:
-        _progress[plan_id] = {
-            "scales": "done",  # detect_scales ya corre en upload_plan
-            "walls": "pending",
-            "rooms": "pending",
-            "openings": "pending",
-            "columns": "pending",
-            "beams": "pending",
-            "roofs": "pending",
-            "ml": "pending",
-            "started_at": time.time(),
-        }
+    state = {
+        **_default_status(),
+        "scales": "done",   # detect_scales ya corre en upload_plan
+        "started_at": time.time(),
+    }
+    r = get_redis()
+    if r is not None:
+        try:
+            r.set(_redis_key(plan_id), json.dumps(state), ex=_STATUS_TTL)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Redis set failed plan=%s: %s — usando fallback", plan_id, exc)
+    with _mem_lock:
+        _mem[plan_id] = state
 
 
-def _mark(plan_id: int, stage: Stage, status: Status) -> None:
-    with _progress_lock:
-        if plan_id in _progress:
-            _progress[plan_id][stage] = status
+def _mark(plan_id: int, stage: str, status: Status) -> None:
+    r = get_redis()
+    if r is not None:
+        try:
+            key = _redis_key(plan_id)
+            raw = r.get(key)
+            state = json.loads(raw) if raw else _default_status()
+            state[stage] = status
+            r.set(key, json.dumps(state), ex=_STATUS_TTL)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Redis mark failed plan=%s stage=%s: %s", plan_id, stage, exc)
+    with _mem_lock:
+        if plan_id in _mem:
+            _mem[plan_id][stage] = status
 
 
 def get_ai_status(plan_id: int) -> dict[str, Any]:
-    """Devuelve el progreso del pipeline para un plan. Si no hay registro en
-    memoria, devuelve un default que indica "no corrio" — el frontend puede
-    decidir si dispara manualmente o no.
+    """Devuelve el progreso del pipeline para un plan.
+
+    Lee de Redis (compartido entre todos los workers). Si Redis no está
+    disponible cae al fallback en memoria con comportamiento original.
     """
-    with _progress_lock:
-        snapshot = _progress.get(plan_id)
-    if snapshot is None:
-        return {
-            "scales": "pending",
-            "walls": "pending",
-            "rooms": "pending",
-            "openings": "pending",
-            "columns": "pending",
-            "beams": "pending",
-            "roofs": "pending",
-            "ml": "pending",
-            "started_at": None,
-        }
-    return dict(snapshot)
+    r = get_redis()
+    if r is not None:
+        try:
+            raw = r.get(_redis_key(plan_id))
+            if raw:
+                return json.loads(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Redis get failed plan=%s: %s", plan_id, exc)
+    with _mem_lock:
+        snapshot = _mem.get(plan_id)
+    return dict(snapshot) if snapshot else _default_status()
 
 
 def _create_wall_elements(

@@ -16,6 +16,8 @@ COPY . .
 
 # Next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
+# Activa output:standalone para el deploy Docker (VPS).
+ENV DOCKER_BUILD=true
 
 RUN npm run build
 

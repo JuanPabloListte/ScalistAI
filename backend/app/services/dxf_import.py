@@ -241,11 +241,21 @@ def build_dxf_plan(
                 geometry=geometry,
                 area_m2=area if el_type in ("wall", "room", "roof", "opening") else None,
                 length_m=length,
-                source="manual",
+                source="dxf",
             )
         )
 
     if elements:
         db.add_all(elements)
+
+    # Generar pares de training (image + mask) en background, best-effort.
+    # Los DXF con capas bien nombradas son ground truth perfecto para el modelo.
+    try:
+        from app.core.config import settings as _s
+        from app.services.dxf_training import generate_from_dxf_path
+        _out = Path(_s.STORAGE_DIR) / "dxf_training" / f"plan_{plan.id}"
+        generate_from_dxf_path(dxf_path, _out, variations=8, plan_id=plan.id)
+    except Exception:  # noqa: BLE001
+        pass  # training data es best-effort; nunca bloquea el import
 
     return plan, len(elements)
