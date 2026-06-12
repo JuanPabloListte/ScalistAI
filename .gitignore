@@ -66,6 +66,11 @@ backend/models/
 # Database dumps
 *.dump
 
+# ODA File Converter (54 MB, demasiado grande para git).
+# Descargalo de https://www.opendesign.com/guestfiles/oda_file_converter
+# y colocalo en backend/ antes de hacer docker build.
+backend/*.deb
+
 # TypeScript build artifacts
 frontend/tsconfig.tsbuildinfo
 

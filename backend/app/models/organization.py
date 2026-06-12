@@ -18,6 +18,11 @@ class Organization(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     subscription_status: Mapped[str] = mapped_column(String(64), default="active", nullable=False) # e.g., "active", "past_due", "canceled"
     
+    # AI BYOK (Bring Your Own Key) Configuration
+    ai_provider: Mapped[str] = mapped_column(String(64), default="scalist", nullable=False)
+    ai_api_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    ai_model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

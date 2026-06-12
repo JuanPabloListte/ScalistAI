@@ -16,15 +16,15 @@
   }
 
   .dark {
-    /* Dark: oscuro pero NO negro puro. Aproximadamente slate-900 */
-    --background: 220 26% 14%;          /* slate-800-ish, fondo de la app */
+    /* Dark: oscuro mate base */
+    --background: 220 26% 14%;          /* Fondo de la app, levemente más claro que slate-900 */
     --foreground: 210 20% 92%;          /* texto principal */
-    --card: 218 23% 18%;                /* tarjetas: un punto más claras */
+    --card: 218 23% 18%;                /* base color para cards */
     --card-foreground: 210 20% 92%;
-    --border: 217 19% 27%;              /* slate-700 visible pero discreto */
-    --ring: 200 90% 55%;                /* brand */
-    --muted: 218 20% 22%;
-    --muted-foreground: 218 11% 65%;    /* texto secundario */
+    --border: 217 19% 27%;              /* borde general */
+    --ring: 191 97% 77%;                /* cyan-300-ish para glows de focus */
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;    /* texto secundario */
   }
 }
 
@@ -39,18 +39,15 @@ body {
 }
 
 @layer utilities {
-  /* Card neutral: usar en lugar de los glass-* viejos. Sin blur ni
-     gradients, con borde sutil y sombra muy leve. */
+  /* Card neutral: Base de Glassmorphism Premium */
   .surface {
-    @apply bg-card text-card-foreground border border-border rounded-xl;
+    @apply bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl border border-slate-200/50 dark:border-white/10 rounded-2xl shadow-xl dark:shadow-2xl text-card-foreground;
   }
   .surface-soft {
-    @apply bg-card text-card-foreground border border-border/70 rounded-lg;
+    @apply bg-white/40 dark:bg-slate-800/40 backdrop-blur-md border border-slate-200/30 dark:border-white/5 rounded-xl text-card-foreground;
   }
 
-  /* Compatibilidad con clases viejas (`.glass`, `.glass-panel`, `.premium-card`)
-     para no romper componentes mientras barremos. Se mapean a la nueva
-     superficie plana y se sacan progresivamente. */
+  /* Compatibilidad con clases viejas, map to new glassmorphism */
   .glass,
   .glass-panel,
   .premium-card {

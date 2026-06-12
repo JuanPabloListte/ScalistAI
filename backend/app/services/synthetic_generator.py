@@ -54,6 +54,7 @@ MASK_ROOF = 8
 MASK_RIOSTRA = 9
 MASK_CLOACA = 10
 MASK_ELECTRICIDAD = 11
+MASK_ESCALERA = 12
 
 # Espesores de trazo al "rasterizar" la geometría en la máscara
 DEFAULT_WALL_THICK_PX = 4
@@ -109,6 +110,8 @@ def generate_synthetic_variations(
             .filter(
                 DetectedElement.plan_id == plan_id,
                 DetectedElement.page == page,
+                # Candidatos IA sin aprobar no son ground truth de entrenamiento.
+                DetectedElement.is_candidate.is_(False),
             )
             .all()
         )
@@ -130,7 +133,20 @@ def generate_synthetic_variations(
         return []
 
     # ---- Render base + máscara base (una sola vez, a tamaño completo) ----
-    image_full = _render_page_image(pdf_path, page - 1, dpi)
+    if pdf_path.suffix.lower() == ".svg":
+        # Plan CAD: fitz no abre SVG. Cada página tiene un PNG gemelo generado
+        # por apply_layer_mapping ({id}_p{n}.png) con la misma escala.
+        import numpy as _np
+        from PIL import Image as _Img
+
+        stem = pdf_path.stem[:-3] if pdf_path.stem.endswith("_p1") else pdf_path.stem
+        png = pdf_path.with_name(f"{stem}_p{page}.png")
+        if not png.exists():
+            logger.warning("synthetic: PNG de página CAD no encontrado %s", png)
+            return []
+        image_full = _np.array(_Img.open(png).convert("RGB"))
+    else:
+        image_full = _render_page_image(pdf_path, page - 1, dpi)
     H_full, W_full = image_full.shape[:2]
     # Los trazos finos (muros 4px, aberturas 5px, columnas) se dibujan a tamaño
     # COMPLETO y después se baja todo a 512. En planos grandes ese downscale
@@ -439,6 +455,15 @@ def _build_mask_from_elements(
             if len(pts_flat) >= 4:
                 x1, y1, x2, y2 = (int(round(v)) for v in pts_flat[:4])
                 cv2.line(mask, (x1, y1), (x2, y2), MASK_ELECTRICIDAD, elec_t)
+        elif el.type == "escalera":
+            pts_flat = el.geometry.get("points") or []
+            if len(pts_flat) >= 6:
+                pts = _chunk_points(pts_flat)
+                if len(pts) >= 3:
+                    cv2.fillPoly(mask, [pts.astype(np.int32)], MASK_ESCALERA)
+            elif len(pts_flat) >= 4:
+                x1, y1, x2, y2 = (int(round(v)) for v in pts_flat[:4])
+                cv2.line(mask, (x1, y1), (x2, y2), MASK_ESCALERA, wall_t)
 
     return mask
 
@@ -495,7 +520,7 @@ def _rotate(img, angle: int):
 
 
 def _count_elements_by_type(elements: list[DetectedElement]) -> dict[str, int]:
-    counts = {"wall": 0, "room": 0, "opening": 0, "beam": 0, "column": 0, "roof": 0, "riostra": 0, "cloaca": 0, "electricidad": 0}
+    counts = {"wall": 0, "room": 0, "opening": 0, "beam": 0, "column": 0, "roof": 0, "riostra": 0, "cloaca": 0, "electricidad": 0, "escalera": 0}
     for el in elements:
         if el.type in counts:
             counts[el.type] += 1

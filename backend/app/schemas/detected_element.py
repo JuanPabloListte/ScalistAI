@@ -15,12 +15,17 @@ class ElementSource(str, Enum):
 
 class DetectedElementBase(BaseModel):
     page: int = Field(default=1, ge=1)
-    type: str = Field(..., pattern="^(wall|room|opening|beam|roof|column|riostra|cloaca|electricidad)$")
+    type: str = Field(..., pattern="^(wall|room|opening|beam|roof|column|riostra|cloaca|electricidad|escalera)$")
     geometry: dict = Field(..., description="Coordenadas y geometría en píxeles de la página")
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)
     height_m: float | None = Field(2.8, ge=0)
     source: ElementSource = ElementSource.manual
+    is_candidate: bool = Field(
+        default=False,
+        description="Propuesta de la IA pendiente de aprobación; no computa hasta aceptarse",
+    )
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class DetectedElementCreate(DetectedElementBase):
@@ -33,6 +38,20 @@ class DetectedElementUpdate(BaseModel):
     area_m2: float | None = Field(None, ge=0)
     height_m: float | None = Field(None, ge=0)
     source: ElementSource | None = None
+    is_candidate: bool | None = None
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class CandidateBulkAction(BaseModel):
+    """Aceptar o descartar propuestas de la IA (is_candidate=True) en lote.
+
+    `element_ids=None` aplica a todos los candidatos del plan (opcionalmente
+    filtrados por página).
+    """
+
+    action: str = Field(..., pattern="^(accept|discard)$")
+    element_ids: list[int] | None = None
+    page: int | None = Field(None, ge=1)
 
 
 class DetectedElementRead(DetectedElementBase):

@@ -9,6 +9,8 @@ from app.api.v1 import (
     plans,
     projects,
     team,
+    organization,
+    ai_providers,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -20,3 +22,5 @@ api_router.include_router(assemblies.router, prefix="/assemblies")
 api_router.include_router(integrations.router)
 api_router.include_router(admin.router)
 api_router.include_router(team.router)
+api_router.include_router(organization.router)
+api_router.include_router(ai_providers.router)

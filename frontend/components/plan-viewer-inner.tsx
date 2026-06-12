@@ -10,11 +10,13 @@ const Plan3DViewer = dynamic(() => import("./plan-3d-viewer"), {
 import {
   api,
   type DetectedElement,
+  type DxfLayer,
   type ElementGeometry,
   type ElementType,
   type Assembly,
   type MaterialSummaryItem,
   type Plan,
+  type PlanAiContextInfo,
 } from "@/lib/api";
 
 type Props = {
@@ -36,7 +38,7 @@ type Props = {
 };
 
 type Point = { x: number; y: number };
-type Tool = "pan" | "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad";
+type Tool = "pan" | "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad" | "escalera" | "measure";
 
 // Subtipos de abertura. El valor se persiste en `geometry.subtype`.
 // `defaultW_m` / `defaultH_m` son los valores físicos típicos en obra; se
@@ -158,6 +160,7 @@ function applicableAssemblies(type: ElementType, all: Assembly[]): Assembly[] {
     if (type === "riostra") return applies === "riostra" || applies === "beam"; // a riostra is like a foundation beam
     if (type === "cloaca") return applies === "cloaca";
     if (type === "electricidad") return applies === "electricidad";
+    if (type === "escalera") return applies === "escalera";
     return false;
   });
 }
@@ -194,12 +197,16 @@ export default function PlanViewerInner({
     return 1;
   });
   const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [svgContent, setSvgContent] = useState<string | null>(null);
+  // Se incrementa para forzar la recarga del raster (ej: re-render DXF).
+  const [rasterVersion, setRasterVersion] = useState(0);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [dims, setDims] = useState({ w: 0, h: height });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rendered, setRendered] = useState<number | null>(null);
   const [statusTotal, setStatusTotal] = useState<number | null>(null);
+  const [aiContext, setAiContext] = useState<PlanAiContextInfo | null>(null);
 
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -211,6 +218,7 @@ export default function PlanViewerInner({
   const [isFreehandDrawing, setIsFreehandDrawing] = useState(false);
   const [isFreehandMode, setIsFreehandMode] = useState(true);
   const [mousePos, setMousePos] = useState<Point | null>(null);
+  const lastSelectedIdx = useRef<number | null>(null);
   const [snapActive, setSnapActive] = useState(false);
   const [isOrtho, setIsOrtho] = useState(false);
   const [drawError, setDrawError] = useState<string | null>(null);
@@ -261,11 +269,62 @@ export default function PlanViewerInner({
       riostras: "riostra",
       cloacas: "cloaca",
       electricidad: "electricidad",
+      escaleras: "escalera",
     };
     const target = activeCategory ? tabToType[activeCategory] : null;
     if (!target) return pageVisibleElements; // "all" o sin tab → no filtra
     return pageVisibleElements.filter((e) => e.type === target);
   }, [pageVisibleElements, activeCategory]);
+
+  // Panel de capas
+  const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
+
+  // Elementos filtrados por capas ocultas (para el canvas SVG).
+  const canvasElements = useMemo(
+    () => displayElements.filter((el) => !hiddenLayers.has(el.type)),
+    [displayElements, hiddenLayers],
+  );
+
+  // Tipos de elemento presentes en la página (para el panel de capas).
+  const presentTypes = useMemo(
+    () => [...new Set(pageVisibleElements.map((e) => e.type))],
+    [pageVisibleElements],
+  );
+
+  // Propuestas de la IA pendientes de aprobación en esta página (modo híbrido:
+  // gap-fill sobre un plano con elementos vectoriales). No computan hasta
+  // que el usuario las acepte.
+  const pageCandidates = useMemo(
+    () => pageVisibleElements.filter((e) => e.is_candidate),
+    [pageVisibleElements],
+  );
+  const [candidateBusy, setCandidateBusy] = useState(false);
+
+  async function resolveCandidates(action: "accept" | "discard", ids?: number[]) {
+    if (candidateBusy) return;
+    const targetIds = ids ?? pageCandidates.map((e) => e.id);
+    if (targetIds.length === 0) return;
+    setCandidateBusy(true);
+    try {
+      const accepted = await api.candidatesBulkAction(planId, action, targetIds);
+      if (action === "accept") {
+        const byId = new Map(accepted.map((e) => [e.id, e]));
+        setElements((prev) => prev.map((e) => byId.get(e.id) ?? e));
+      } else {
+        const drop = new Set(targetIds);
+        setElements((prev) => prev.filter((e) => !drop.has(e.id)));
+      }
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        targetIds.forEach((id) => next.delete(id));
+        return action === "accept" ? prev : next;
+      });
+    } catch {
+      // best-effort: el usuario puede reintentar desde el banner
+    } finally {
+      setCandidateBusy(false);
+    }
+  }
 
   // Todos los vértices de los elementos visibles — usados para snap al dibujar.
   const snapCandidates = useMemo<Point[]>(() => {
@@ -300,6 +359,24 @@ export default function PlanViewerInner({
 
   const [show3D, setShow3D] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // Herramienta de medición
+  const [measureResult, setMeasureResult] = useState<{ p1: Point; p2: Point; distM: number } | null>(null);
+
+  // Lasso de selección (Ctrl+drag en modo pan)
+  const lassoStart = useRef<{ sx: number; sy: number } | null>(null);
+  const [lasso, setLasso] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  // Planilla de carpinterías
+  const [carpinteriaOpen, setCarpinteriaOpen] = useState(false);
+
+  // Mapeo de capas DXF/DWG
+  const [dxfLayerMapOpen, setDxfLayerMapOpen] = useState(false);
+  const [dxfLayers, setDxfLayers] = useState<DxfLayer[]>([]);
+  const [dxfLayerMapping, setDxfLayerMapping] = useState<Record<string, string>>({});
+  const [dxfLayersLoading, setDxfLayersLoading] = useState(false);
+  const [dxfApplying, setDxfApplying] = useState(false);
+  const [dxfLayerError, setDxfLayerError] = useState<string | null>(null);
 
   // Estado local para arrastrar vertices
   const [draggingVertex, setDraggingVertex] = useState<{
@@ -425,6 +502,10 @@ export default function PlanViewerInner({
 
   useEffect(() => {
     api.startPrewarm(planId).catch(() => {});
+  }, [planId]);
+
+  useEffect(() => {
+    api.getAiContext(planId).then(setAiContext).catch(() => {});
   }, [planId]);
 
   useEffect(() => {
@@ -648,10 +729,28 @@ export default function PlanViewerInner({
 
     api
       .fetchPlanRaster(planId, page)
-      .then((blob) => {
+      .then(async (blob) => {
         if (cancelled) return;
-        blobUrl = URL.createObjectURL(blob);
-        setImgUrl(blobUrl);
+        if (blob.type.includes("svg")) {
+          const text = await blob.text();
+          if (cancelled) return;
+          // Extract width/height from viewBox to set natural
+          const match = text.match(/viewBox=["'][\s\d\.-]+[\s\d\.-]+\s+([\d\.-]+)\s+([\d\.-]+)\s*["']/i);
+          if (match) {
+            setNatural({ w: parseFloat(match[1]), h: parseFloat(match[2]) });
+          } else {
+            setNatural({ w: 1000, h: 1000 });
+          }
+          // Remove explicit width/height from SVG root so it fills the div
+          const processedSvg = text.replace(/<svg([^>]+)width=["'][^"']+["']([^>]*)>/i, '<svg$1$2>').replace(/<svg([^>]+)height=["'][^"']+["']([^>]*)>/i, '<svg$1$2>');
+          setSvgContent(processedSvg);
+          setImgUrl(null);
+          setLoading(false);
+        } else {
+          blobUrl = URL.createObjectURL(blob);
+          setImgUrl(blobUrl);
+          setSvgContent(null);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -663,7 +762,7 @@ export default function PlanViewerInner({
       cancelled = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [planId, page, deletedPages]);
+  }, [planId, page, deletedPages, rasterVersion]);
 
   // Cargar elementos (todos los del plan para el visor 3D)
   useEffect(() => {
@@ -701,6 +800,17 @@ export default function PlanViewerInner({
       cancelled = true;
     };
   }, []);
+
+  // Cargar capas DXF globalmente para el panel de capas
+  useEffect(() => {
+    if (scaleSource === "dxf" && planId) {
+      let cancelled = false;
+      api.getDxfInfo(planId).then(info => {
+        if (!cancelled) setDxfLayers(info.layers);
+      }).catch(console.error);
+      return () => { cancelled = true; };
+    }
+  }, [planId, scaleSource]);
 
   // Cómputo agregado: recargar cuando cambia plan, página, o cualquier cosa
   // que pueda alterar las cantidades (asignación, edición de length/area/height).
@@ -827,11 +937,12 @@ export default function PlanViewerInner({
     setTool(t);
     setActivePoints([]);
     setDrawError(null);
+    if (t !== "measure") setMeasureResult(null);
   }
 
   // Indicador: ¿estoy cerca del primer punto del polígono?
   const isClosingRoom = useMemo(() => {
-    const isPolygonTool = tool === "room" || tool === "roof";
+    const isPolygonTool = tool === "room" || tool === "roof" || tool === "escalera";
     if (!isPolygonTool || activePoints.length < 3 || !mousePos) return false;
     const dx = (mousePos.x - activePoints[0].x) * scale;
     const dy = (mousePos.y - activePoints[0].y) * scale;
@@ -905,12 +1016,12 @@ export default function PlanViewerInner({
 
   // Crear recinto o techo (>= 3 puntos → polígono cerrado)
   const createPolygonElement = useCallback(
-    async (pts: Point[], type: "room" | "roof" = "room") => {
+    async (pts: Point[], type: "room" | "roof" | "escalera" = "room") => {
       if (!currentPageScale || pts.length < 3) return;
       const areaM2 = polygonAreaM2(pts, currentPageScale);
       const perimM = polygonPerimeterM(pts, currentPageScale);
       if (areaM2 < 0.01) {
-        const typeLabel = type === "room" ? "Recinto" : "Techo";
+        const typeLabel = type === "room" ? "Recinto" : type === "escalera" ? "Escalera" : "Techo";
         setDrawError(`${typeLabel} con área insignificante`);
         setTimeout(() => setDrawError(null), 2000);
         return;
@@ -966,6 +1077,18 @@ export default function PlanViewerInner({
   );
 
   function handleDrawClick(p: Point) {
+    if (tool === "measure") {
+      if (activePoints.length === 0) {
+        setActivePoints([p]);
+        setMeasureResult(null);
+        return;
+      }
+      const p1 = activePoints[0];
+      const dM = currentPageScale ? distM(p1, p, currentPageScale) : 0;
+      setMeasureResult({ p1, p2: p, distM: dM });
+      setActivePoints([]);
+      return;
+    }
     if (tool === "column") {
       void createPointElement(p, "column");
       return;
@@ -980,7 +1103,7 @@ export default function PlanViewerInner({
       void createSegmentElement(pts, tool as "wall" | "opening" | "beam" | "riostra" | "cloaca" | "electricidad");
       return;
     }
-    if (tool === "room" || tool === "roof") {
+    if (tool === "room" || tool === "roof" || tool === "escalera") {
       if (activePoints.length >= 3 && isClosingRoom) {
         const pts = activePoints;
         setActivePoints([]);
@@ -1016,6 +1139,13 @@ export default function PlanViewerInner({
       } else {
         handleDrawClick(imgPoint);
       }
+      return;
+    }
+
+    // Lasso: Ctrl+drag en modo pan inicia selección rectangular
+    if (e.ctrlKey && tool === "pan") {
+      lassoStart.current = { sx: sx, sy: sy };
+      setLasso({ x: sx, y: sy, w: 0, h: 0 });
       return;
     }
 
@@ -1075,6 +1205,19 @@ export default function PlanViewerInner({
       return;
     }
 
+    // Lasso activo: actualizar rectángulo
+    if (lassoStart.current && containerRef.current) {
+      const rect2 = containerRef.current.getBoundingClientRect();
+      const cx = e.clientX - rect2.left;
+      const cy2 = e.clientY - rect2.top;
+      const x = Math.min(lassoStart.current.sx, cx);
+      const y = Math.min(lassoStart.current.sy, cy2);
+      const w = Math.abs(cx - lassoStart.current.sx);
+      const h = Math.abs(cy2 - lassoStart.current.sy);
+      setLasso({ x, y, w, h });
+      return;
+    }
+
     if (dragging && dragStart.current) {
       const dx = e.clientX - dragStart.current.x;
       const dy = e.clientY - dragStart.current.y;
@@ -1127,6 +1270,31 @@ export default function PlanViewerInner({
   }
 
   function onMouseUp() {
+    // Finalizar lasso: seleccionar elementos cuya bbox intersecta el rectángulo
+    if (lassoStart.current && lasso) {
+      const r = lasso;
+      if (r.w > 4 && r.h > 4) {
+        // Convertir el rect de pantalla a coordenadas de imagen
+        const imgTL = screenToImage(r.x, r.y);
+        const imgBR = screenToImage(r.x + r.w, r.y + r.h);
+        const newSel = new Set<number>();
+        for (const el of pageVisibleElements) {
+          const flat = el.geometry.points;
+          for (let i = 0; i + 1 < flat.length; i += 2) {
+            const px = flat[i], py = flat[i + 1];
+            if (px >= imgTL.x && px <= imgBR.x && py >= imgTL.y && py <= imgBR.y) {
+              newSel.add(el.id);
+              break;
+            }
+          }
+        }
+        setSelectedIds(newSel);
+      }
+      lassoStart.current = null;
+      setLasso(null);
+      return;
+    }
+
     if (isFreehandDrawing && tool === "electricidad") {
       setIsFreehandDrawing(false);
       const pts = activePoints;
@@ -1152,7 +1320,7 @@ export default function PlanViewerInner({
 
   function onDoubleClick() {
     // Doble-click cierra polígono activo si tiene >= 3 puntos
-    const isPolygonTool = tool === "room" || tool === "roof";
+    const isPolygonTool = tool === "room" || tool === "roof" || tool === "escalera";
     if (isPolygonTool && activePoints.length >= 3) {
       const pts = activePoints;
       setActivePoints([]);
@@ -1385,6 +1553,82 @@ export default function PlanViewerInner({
       setElements((prev) => prev.map((item) => (item.id === el.id ? updated : item)));
     } catch (err) {
       setDrawError(err instanceof Error ? err.message : "Error al actualizar geometría");
+    }
+  }
+
+  // Abre el modal de mapeo de capas DXF: carga las capas y pre-rellena sugerencias.
+  const openDxfLayerMap = useCallback(async () => {
+    setDxfLayerMapOpen(true);
+    setDxfLayersLoading(true);
+    setDxfLayerError(null);
+    try {
+      const info = await api.getDxfInfo(planId);
+      setDxfLayers(info.layers);
+      const initial: Record<string, string> = {};
+      for (const l of info.layers) {
+        // Mapeo completo (igual que el wizard): las capas sin tipo quedan como
+        // "context" (visibles de fondo); "" significa ocultar del plano.
+        initial[l.name] = l.suggested_type || "context";
+      }
+      setDxfLayerMapping(initial);
+    } catch (e: unknown) {
+      setDxfLayerError(e instanceof Error ? e.message : "Error cargando capas");
+    } finally {
+      setDxfLayersLoading(false);
+    }
+  }, [planId]);
+
+  const applyDxfLayerMap = useCallback(async () => {
+    setDxfApplying(true);
+    setDxfLayerError(null);
+    try {
+      const { created } = await api.applyDxfLayers(planId, dxfLayerMapping);
+      setDxfLayerMapOpen(false);
+      const updated = await api.listElements(planId);
+      setElements(updated);
+      // El backend re-renderiza el PDF de fondo según el mapeo: recargar raster.
+      setRasterVersion((v) => v + 1);
+      if (created === 0) setDrawError("No se crearon elementos. Verificá el mapeo.");
+    } catch (e: unknown) {
+      setDxfLayerError(e instanceof Error ? e.message : "Error aplicando mapeo");
+    } finally {
+      setDxfApplying(false);
+    }
+  }, [planId, dxfLayerMapping]);
+
+  // Calcula el valor en metros más prolijo para la barra de escala
+  function niceScaleBarM(pxPerM: number, zoom: number): number {
+    const candidates = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
+    for (const m of candidates) {
+      const px = m * pxPerM * zoom;
+      if (px >= 60 && px <= 160) return m;
+    }
+    return candidates[candidates.length - 1];
+  }
+
+  // Espeja los puntos de uno o varios elementos alrededor de su bbox center.
+  async function flipElements(ids: number[], axis: "h" | "v") {
+    for (const id of ids) {
+      const el = elements.find((e) => e.id === id);
+      if (!el) continue;
+      const flat = el.geometry.points;
+      const xs = flat.filter((_, i) => i % 2 === 0);
+      const ys = flat.filter((_, i) => i % 2 === 1);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const newPts = flat.map((v, i) =>
+        i % 2 === 0 ? (axis === "h" ? 2 * cx - v : v) : axis === "v" ? 2 * cy - v : v,
+      );
+      const metrics = getCalculatedMetrics(el.type, newPts, currentPageScale);
+      try {
+        const updated = await api.updateElement(planId, id, {
+          geometry: { ...el.geometry, points: newPts },
+          ...metrics,
+        });
+        setElements((prev) => prev.map((e) => (e.id === id ? updated : e)));
+      } catch {
+        setDrawError("Error al espejear elemento");
+      }
     }
   }
 
@@ -1754,7 +1998,7 @@ export default function PlanViewerInner({
         }
         return;
       }
-      const isPolygonTool = tool === "room" || tool === "roof";
+      const isPolygonTool = tool === "room" || tool === "roof" || tool === "escalera";
       if (e.key === "Enter") {
         if (isPolygonTool && activePoints.length >= 3) {
           e.preventDefault();
@@ -1786,6 +2030,7 @@ export default function PlanViewerInner({
         if (e.key.toLowerCase() === "v") selectTool("beam");
         if (e.key.toLowerCase() === "t") selectTool("roof");
         if (e.key.toLowerCase() === "c") selectTool("column");
+        if (e.key.toLowerCase() === "m") selectTool("measure");
       }
     }
     function handleShiftDown(e: KeyboardEvent) { if (e.key === "Shift") setIsOrtho(true); }
@@ -1872,7 +2117,7 @@ export default function PlanViewerInner({
         style={isMaximized ? undefined : { minHeight: height + 80 }}
       >
         {/* PANEL IZQUIERDO — Elementos */}
-        <aside className={`w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
+        <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
               Elementos
@@ -1939,174 +2184,75 @@ export default function PlanViewerInner({
             </div>
           </div>
 
-          {/* Detección con IA */}
-          <div className="mb-3 rounded-lg border border-slate-200 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={() => setIaPanelOpen((v) => !v)}
-              className="flex w-full items-center justify-between px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-t-lg"
-            >
-              <span>Detección con IA</span>
-              <ChevronIcon open={iaPanelOpen} />
-            </button>
 
-            {iaPanelOpen && (
-              <div className="border-t border-slate-100 dark:border-slate-800 p-2.5 space-y-2">
-                {detectionError && (
-                  <div className="rounded bg-red-50 dark:bg-red-950/40 p-2 text-[10px] text-red-600 dark:text-red-400">
-                    {detectionError}
-                  </div>
-                )}
 
-                <div className="grid grid-cols-3 gap-1.5">
+
+          {/* Panel de capas (Elementos detectados) */}
+          {presentTypes.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {presentTypes.map((t) => {
+                const hidden = hiddenLayers.has(t);
+                const label: Record<string, string> = {
+                  wall: "Muros", room: "Recintos", opening: "Aberturas",
+                  beam: "Vigas", roof: "Techos", column: "Columnas",
+                  riostra: "Riostras", cloaca: "Cloacas", electricidad: "Electr.", escalera: "Escaleras",
+                };
+                return (
                   <button
+                    key={t}
                     type="button"
-                    onClick={runDetectWalls}
-                    disabled={!currentPageScale || detectingWalls || bulkBusy}
-                    className="flex flex-col items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-[10px] font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                    title={!currentPageScale ? "Calibrá la página primero" : "Detectar muros estructurales"}
+                    onClick={() => setHiddenLayers((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(t)) next.delete(t); else next.add(t);
+                      return next;
+                    })}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${hidden ? "border-slate-300 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500" : "border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}
+                    title={hidden ? `Mostrar ${label[t] ?? t}` : `Ocultar ${label[t] ?? t}`}
                   >
-                    {detectingWalls ? "..." : "Muros"}
+                    <span>{hidden ? "○" : "●"}</span>
+                    {label[t] ?? t}
                   </button>
-                  <button
-                    type="button"
-                    onClick={runDetectRooms}
-                    disabled={!currentPageScale || detectingRooms || bulkBusy}
-                    className="flex flex-col items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-[10px] font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                    title={!currentPageScale ? "Calibrá la página primero" : "Detectar recintos"}
-                  >
-                    {detectingRooms ? "..." : "Recintos"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={runDetectOpenings}
-                    disabled={!currentPageScale || detectingOpenings || bulkBusy}
-                    className="flex flex-col items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-[10px] font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                    title={!currentPageScale ? "Calibrá la página primero" : "Detectar aberturas"}
-                  >
-                    {detectingOpenings ? "..." : "Aberturas"}
-                  </button>
-                </div>
-
-                {/* Ocultar Detección de IA */}
-                <button
-                  type="button"
-                  onClick={() => setHideAiElements((v) => !v)}
-                  className={`flex w-full items-center justify-center gap-1.5 rounded border py-1.5 text-[11px] font-semibold transition-colors ${
-                    hideAiElements
-                      ? "border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-400"
-                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                  }`}
-                >
-                  {hideAiElements ? "Mostrar dibujos IA" : "Ocultar dibujos IA"}
-                </button>
-
-                {/* Resumen Candidatos Muros */}
-                {!hideAiElements && wallCandidates.length > 0 && (() => {
-                  const selCount = wallCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
-                  return (
-                    <div className="rounded-lg bg-sky-50/50 border border-sky-100 p-2 space-y-1.5 dark:bg-sky-950/20 dark:border-sky-900/50">
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="font-bold text-sky-700 dark:text-sky-400">
-                          Muros AI ({selCount}/{wallCandidates.length})
-                        </span>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={confirmCandidateWalls}
-                          disabled={bulkBusy}
-                          className="flex-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[9px] py-1 transition-all disabled:opacity-50"
-                        >
-                          Aceptar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => discardCandidates("wall")}
-                          disabled={bulkBusy}
-                          className="rounded border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-[9px] px-2 py-1 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
-                        >
-                          Descartar
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Resumen Candidatos Recintos */}
-                {!hideAiElements && roomCandidates.length > 0 && (() => {
-                  const selCount = roomCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
-                  return (
-                    <div className="rounded-lg bg-emerald-50/50 border border-emerald-100 p-2 space-y-1.5 dark:bg-emerald-950/20 dark:border-emerald-900/50">
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="font-bold text-emerald-700 dark:text-emerald-400">
-                          Recintos AI ({selCount}/{roomCandidates.length})
-                        </span>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={confirmCandidateRooms}
-                          disabled={bulkBusy}
-                          className="flex-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[9px] py-1 transition-all disabled:opacity-50"
-                        >
-                          Aceptar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => discardCandidates("room")}
-                          disabled={bulkBusy}
-                          className="rounded border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-[9px] px-2 py-1 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
-                        >
-                          Descartar
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Resumen Candidatos Aberturas */}
-                {!hideAiElements && openingCandidates.length > 0 && (() => {
-                  const selCount = openingCandidates.filter((c) => selectedCandidateIds.has(c.id)).length;
-                  return (
-                    <div className="rounded-lg bg-amber-50/50 border border-amber-100 p-2 space-y-1.5 dark:bg-amber-950/20 dark:border-amber-900/50">
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="font-bold text-amber-700 dark:text-amber-400">
-                          Aberturas AI ({selCount}/{openingCandidates.length})
-                        </span>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={confirmCandidateOpenings}
-                          disabled={bulkBusy}
-                          className="flex-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[9px] py-1 transition-all disabled:opacity-50"
-                        >
-                          Aceptar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => discardCandidates("opening")}
-                          disabled={bulkBusy}
-                          className="rounded border border-slate-300 hover:bg-slate-100 text-slate-600 font-semibold text-[9px] px-2 py-1 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
-                        >
-                          Descartar
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Barra de acciones bulk */}
           {selectedIds.size > 0 && (
-            <div className="mb-2 flex items-center justify-between gap-1 rounded-lg border border-brand/30 bg-sky-50/60 px-2 py-1.5 text-xs dark:border-sky-800 dark:bg-sky-950/30">
-              <span className="font-semibold text-brand dark:text-sky-300">
-                {selectedIds.size} seleccionado{selectedIds.size === 1 ? "" : "s"}
-              </span>
-              <div className="flex items-center gap-1">
+            <div className="mb-2 rounded-lg border border-brand/30 bg-sky-50/60 px-2 py-1.5 text-xs dark:border-sky-800 dark:bg-sky-950/30">
+              {/* Fila 1: contador + limpiar selección */}
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-brand dark:text-sky-300">
+                  {selectedIds.size} seleccionado{selectedIds.size === 1 ? "" : "s"}
+                </span>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-white dark:text-slate-400 dark:hover:bg-slate-800"
+                  title="Limpiar selección"
+                  aria-label="Limpiar selección"
+                >
+                  ×
+                </button>
+              </div>
+              {/* Fila 2: acciones */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => flipElements([...selectedIds], "h")}
+                  className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Espejo horizontal (voltear izquierda↔derecha)"
+                >
+                  ↔
+                </button>
+                <button
+                  type="button"
+                  onClick={() => flipElements([...selectedIds], "v")}
+                  className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Espejo vertical (voltear arriba↕abajo)"
+                >
+                  ↕
+                </button>
                 <button
                   type="button"
                   onClick={() => setBulkAssignOpen(true)}
@@ -2130,15 +2276,6 @@ export default function PlanViewerInner({
                   title="Eliminar seleccionados"
                 >
                   Eliminar
-                </button>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-white dark:text-slate-400 dark:hover:bg-slate-800"
-                  title="Limpiar selección"
-                  aria-label="Limpiar selección"
-                >
-                  ×
                 </button>
               </div>
             </div>
@@ -2171,14 +2308,33 @@ export default function PlanViewerInner({
                         ? "border-brand bg-sky-50/70 dark:border-sky-500 dark:bg-sky-950/40"
                         : hovered || editing
                           ? "border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50"
-                          : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+                          : "border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900/50"
                     }`}
                   >
                     <div className="flex items-center gap-2 px-2 py-1.5">
                       <input
                         type="checkbox"
                         checked={selected}
-                        onChange={() => toggleSelected(el.id, true)}
+                        onChange={(e) => {
+                          const isShift = (e.nativeEvent as any).shiftKey;
+                          if (isShift && lastSelectedIdx.current !== null) {
+                            const start = Math.min(lastSelectedIdx.current, idx);
+                            const end = Math.max(lastSelectedIdx.current, idx);
+                            const idsToToggle = displayElements.slice(start, end + 1).map(el => el.id);
+                            const targetState = e.target.checked;
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              for (const tId of idsToToggle) {
+                                if (targetState) next.add(tId);
+                                else next.delete(tId);
+                              }
+                              return next;
+                            });
+                          } else {
+                            toggleSelected(el.id, true);
+                          }
+                          lastSelectedIdx.current = idx;
+                        }}
                         onClick={(e) => e.stopPropagation()}
                         className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand focus:ring-1 focus:ring-brand dark:border-slate-600 dark:bg-slate-900"
                         aria-label="Seleccionar elemento"
@@ -2198,6 +2354,10 @@ export default function PlanViewerInner({
                               : el.type === "beam" ? "#7C3AED"
                               : el.type === "roof" ? "#0D9488"
                               : el.type === "column" ? "#F43F5E"
+                              : el.type === "escalera" ? "#A855F7"
+                              : el.type === "cloaca" ? "#22C55E"
+                              : el.type === "electricidad" ? "#0EA5E9"
+                              : el.type === "riostra" ? "#EC4899"
                               : "#D97706",
                           }}
                         />
@@ -2256,6 +2416,22 @@ export default function PlanViewerInner({
                 );
               })}
             </ul>
+          )}
+
+          {aiContext && aiContext.provider !== "scalist" && aiContext.messages.length > 0 && (
+            <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <h3 className="mb-2 text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-500">
+                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                </svg>
+                Razonamiento IA ({aiContext.provider})
+              </h3>
+              <div className="max-h-40 overflow-y-auto rounded bg-slate-50 p-2 text-xs text-slate-600 dark:bg-slate-950 dark:text-slate-300">
+                {aiContext.messages.filter(m => m.role === "assistant").map((m, i) => (
+                  <p key={i} className="mb-1 last:mb-0">{m.content}</p>
+                ))}
+              </div>
+            </div>
           )}
         </aside>
 
@@ -2482,6 +2658,27 @@ export default function PlanViewerInner({
                   }}
                 />
               )}
+              {svgContent && (
+                <>
+                  <style dangerouslySetInnerHTML={{ __html: Array.from(hiddenLayers).map(l => `svg [id="layer-${l.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"] { display: none !important; }`).join('\n') }} />
+                  <div
+                    dangerouslySetInnerHTML={{ __html: svgContent }}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+                      transformOrigin: "0 0",
+                      width: natural ? natural.w : "auto",
+                      height: natural ? natural.h : "auto",
+                      userSelect: "none",
+                      pointerEvents: "none",
+                      visibility: natural ? "visible" : "hidden",
+                    }}
+                    className="svg-vector-bg"
+                  />
+                </>
+              )}
 
               {/* Overlay SVG: elementos + preview + calibración */}
               {natural && (
@@ -2505,6 +2702,16 @@ export default function PlanViewerInner({
                     <style>{`
                       @keyframes scalistai-pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
                       @keyframes scalistai-dash { to { stroke-dashoffset: -24; } }
+                      /* Candidatos IA (gap-fill híbrido): punteado animado y
+                         semitransparente hasta que el usuario acepte/descarte */
+                      .scalistai-candidate { opacity: 0.6; }
+                      .scalistai-candidate polygon,
+                      .scalistai-candidate polyline,
+                      .scalistai-candidate line,
+                      .scalistai-candidate path {
+                        stroke-dasharray: 8 6;
+                        animation: scalistai-dash 1.4s linear infinite;
+                      }
                       .scalistai-pulse { animation: scalistai-pulse 1.6s ease-in-out infinite; }
                       .scalistai-dash { animation: scalistai-dash 1.4s linear infinite; }
                     `}</style>
@@ -2513,8 +2720,8 @@ export default function PlanViewerInner({
                     transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
                   >
                     {/* Recintos (atrás) */}
-                    {displayElements
-                      .filter((el) => el.type === "room")
+                    {canvasElements
+                    .filter((el) => el.type === "room")
                       .map((el) => {
                         const pts = chunkPoints(el.geometry.points);
                         const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
@@ -2533,7 +2740,7 @@ export default function PlanViewerInner({
                         const pillW = pillText.length * 6.6 + 22;
 
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <polygon
                                 points={ptsStr}
@@ -2603,8 +2810,8 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Techos */}
-                    {displayElements
-                      .filter((el) => el.type === "roof")
+                    {canvasElements
+                    .filter((el) => el.type === "roof")
                       .map((el) => {
                         const pts = chunkPoints(el.geometry.points);
                         const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
@@ -2621,7 +2828,7 @@ export default function PlanViewerInner({
                         const pillW = pillText.length * 6.6 + 22;
 
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <polygon
                                 points={ptsStr}
@@ -2688,9 +2895,62 @@ export default function PlanViewerInner({
                         );
                       })}
 
+                    {/* Escaleras */}
+                    {canvasElements
+                    .filter((el) => el.type === "escalera")
+                      .map((el) => {
+                        const pts = chunkPoints(el.geometry.points);
+                        const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                        const hovered = hoveredId === el.id;
+                        const sel = selectedIds.has(el.id);
+                        const fillColor = sel ? "rgba(168, 85, 247, 0.40)" : hovered ? "rgba(168, 85, 247, 0.30)" : "rgba(168, 85, 247, 0.20)";
+                        const strokeColor = sel ? "#7E22CE" : hovered ? "#9333EA" : "#A855F7";
+                        const centroid = calculatePolygonCentroid(pts);
+                        const labelText = (el.geometry.label || "Escalera").toUpperCase();
+                        const areaText = el.area_m2 ? `${el.area_m2.toFixed(1)} m²` : "";
+                        const pillText = areaText ? `${labelText} · ${areaText}` : labelText;
+                        const pillW = pillText.length * 6.6 + 22;
+                        return (
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
+                            <polygon
+                              points={ptsStr}
+                              fill={fillColor}
+                              stroke={strokeColor}
+                              strokeWidth={(sel || hovered ? 3 : 2) / scale}
+                              strokeLinejoin="round"
+                              filter={sel || hovered ? "url(#shadow-glow)" : "none"}
+                              className={`pointer-events-auto cursor-pointer transition-all duration-200 ${draggingVertex ? "pointer-events-none" : ""}`}
+                              onMouseEnter={() => {
+                                if (!draggingVertex) setHoveredId(el.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (!draggingVertex) setHoveredId(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelected(el.id, e.shiftKey || e.metaKey || e.ctrlKey);
+                              }}
+                            />
+                            <g
+                              transform={`translate(${centroid.x}, ${centroid.y}) scale(${1 / scale})`}
+                              className="pointer-events-none transition-all duration-200"
+                            >
+                              <rect x={-pillW / 2} y={-12} width={pillW} height={24} rx={12}
+                                fill={sel ? "#6B21A8" : "#7E22CE"}
+                                opacity={sel || hovered ? 0.96 : 0.82}
+                                filter="url(#shadow-glow-sm)" />
+                              <text x={0} y={4} fill="#FFFFFF" fontSize={10.5} fontWeight="700"
+                                textAnchor="middle" style={{ letterSpacing: "0.04em" }} className="font-sans">
+                                {pillText}
+                              </text>
+                            </g>
+                          </g>
+                        );
+                      })}
+
                     {/* Columnas */}
-                    {displayElements
-                      .filter((el) => el.type === "column")
+                    {canvasElements
+                    .filter((el) => el.type === "column")
                       .map((el) => {
                         const isPointCol = el.geometry.points.length === 2;
                         let cx = 0;
@@ -2722,7 +2982,7 @@ export default function PlanViewerInner({
                         const pillW = pillText.length * 6.6 + 22;
 
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {isPointCol ? (
                               <>
                                 {sel && (
@@ -2850,18 +3110,23 @@ export default function PlanViewerInner({
                     })}
 
                     {/* Muros */}
-                    {displayElements
-                      .filter((el) => el.type === "wall")
+                    {canvasElements
+                    .filter((el) => el.type === "wall")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
                         const sel = selectedIds.has(el.id);
-                        // Espesor visual del muro: 8px base, +1 hover, halo de selección detrás
-                        const baseW = 8 / scale;
-                        const hoverW = 9.5 / scale;
+                        
+                        // Grosor en coordenadas del mundo (0.15m pared estándar)
+                        const pxPerM = currentPageScale || 100;
+                        const baseW = 0.15 * pxPerM;
+                        const hoverW = 0.18 * pxPerM;
+                        const selW = 0.35 * pxPerM;
+                        const hitW = Math.max(0.40 * pxPerM, 20 / scale); // Hit area at least 20px on screen
                         const w = hovered ? hoverW : baseW;
+                        
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <line
                                 x1={x1}
@@ -2869,7 +3134,7 @@ export default function PlanViewerInner({
                                 x2={x2}
                                 y2={y2}
                                 stroke="#3B82F6"
-                                strokeWidth={(8 / scale) + (12 / scale)}
+                                strokeWidth={selW}
                                 strokeLinecap="round"
                                 opacity={0.35}
                               />
@@ -2880,7 +3145,7 @@ export default function PlanViewerInner({
                               x2={x2}
                               y2={y2}
                               stroke="transparent"
-                              strokeWidth={34 / scale}
+                              strokeWidth={hitW}
                               className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
                               onMouseEnter={() => {
                                 if (!draggingVertex) setHoveredId(el.id);
@@ -2899,7 +3164,7 @@ export default function PlanViewerInner({
                               x2={x2}
                               y2={y2}
                               stroke={hovered ? "#334155" : "#1E293B"}
-                              strokeWidth={(hovered ? 10 : 8) / scale}
+                              strokeWidth={w}
                               strokeLinecap="round"
                               opacity={1}
                               className="pointer-events-none transition-colors duration-200"
@@ -2909,8 +3174,8 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Vigas */}
-                    {displayElements
-                      .filter((el) => el.type === "beam")
+                    {canvasElements
+                    .filter((el) => el.type === "beam")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
@@ -2919,7 +3184,7 @@ export default function PlanViewerInner({
                         const hoverW = 9.5 / scale;
                         const w = hovered ? hoverW : baseW;
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <line
                                 x1={x1}
@@ -2967,8 +3232,8 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Riostras */}
-                    {displayElements
-                      .filter((el) => el.type === "riostra")
+                    {canvasElements
+                    .filter((el) => el.type === "riostra")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
@@ -2977,14 +3242,14 @@ export default function PlanViewerInner({
                         const hoverW = 9.5 / scale;
                         const w = hovered ? hoverW : baseW;
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <line
                                 x1={x1}
                                 y1={y1}
                                 x2={x2}
                                 y2={y2}
-                                stroke="#F97316"
+                                stroke="#EC4899"
                                 strokeWidth={(8 / scale) + (12 / scale)}
                                 strokeLinecap="round"
                                 opacity={0.35}
@@ -3014,7 +3279,7 @@ export default function PlanViewerInner({
                               y1={y1}
                               x2={x2}
                               y2={y2}
-                              stroke={hovered ? "#EA580C" : "#F97316"}
+                              stroke={hovered ? "#BE185D" : "#EC4899"}
                               strokeWidth={w}
                               strokeLinecap="round"
                               opacity={1}
@@ -3025,8 +3290,8 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Cloacas */}
-                    {displayElements
-                      .filter((el) => el.type === "cloaca")
+                    {canvasElements
+                    .filter((el) => el.type === "cloaca")
                       .map((el) => {
                         const pts = el.geometry.points;
                         const hovered = hoveredId === el.id;
@@ -3036,7 +3301,7 @@ export default function PlanViewerInner({
                         const w = hovered ? hoverW : baseW;
                         const ptsStr = pts.reduce((acc: string, val: number, i: number) => acc + val + (i % 2 === 0 ? "," : " "), "").trim();
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <polyline
                                 points={ptsStr}
@@ -3083,8 +3348,8 @@ export default function PlanViewerInner({
                       })}
 
                     {/* Electricidad */}
-                    {displayElements
-                      .filter((el) => el.type === "electricidad")
+                    {canvasElements
+                    .filter((el) => el.type === "electricidad")
                       .map((el) => {
                         const pts = el.geometry.points;
                         const hovered = hoveredId === el.id;
@@ -3094,12 +3359,12 @@ export default function PlanViewerInner({
                         const w = hovered ? hoverW : baseW;
                         const ptsStr = pts.reduce((acc: string, val: number, i: number) => acc + val + (i % 2 === 0 ? "," : " "), "").trim();
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {sel && (
                               <polyline
                                 points={ptsStr}
                                 fill="none"
-                                stroke="#EAB308"
+                                stroke="#0EA5E9"
                                 strokeWidth={(4 / scale) + (12 / scale)}
                                 strokeLinecap="round"
                                 strokeLinejoin="round"
@@ -3128,7 +3393,7 @@ export default function PlanViewerInner({
                             <polyline
                               points={ptsStr}
                               fill="none"
-                              stroke={hovered ? "#CA8A04" : "#EAB308"}
+                              stroke={hovered ? "#0284C7" : "#0EA5E9"}
                               strokeWidth={w}
                               strokeLinecap="round"
                               strokeLinejoin="round"
@@ -3178,8 +3443,8 @@ export default function PlanViewerInner({
                     })}
 
                     {/* Aberturas — símbolos arquitectónicos según subtipo */}
-                    {displayElements
-                      .filter((el) => el.type === "opening")
+                    {canvasElements
+                    .filter((el) => el.type === "opening")
                       .map((el) => {
                         const [x1, y1, x2, y2] = el.geometry.points;
                         const hovered = hoveredId === el.id;
@@ -3202,15 +3467,16 @@ export default function PlanViewerInner({
                         const baseColor = isWindow ? "#0EA5E9" : "#D97706";
                         const hotColor = isWindow ? "#0284C7" : "#B45309";
                         const color = hovered ? hotColor : baseColor;
-                        const sw = (hovered ? 2.4 : 2.0) / scale;
-                        const off = 3.5 / scale; // separación de jambas
+                        const pxPerM = currentPageScale || 100;
+                        const sw = (hovered ? 0.04 : 0.03) * pxPerM;
+                        const off = 0.05 * pxPerM; // separación de jambas
 
                         // Endpoint del barrido (puerta abierta 90°)
                         const swingX = x1 + nx * L;
                         const swingY = y1 + ny * L;
 
                         return (
-                          <g key={el.id} style={{ transition: "all 0.2s ease" }}>
+                          <g key={el.id} className={el.is_candidate ? "scalistai-candidate" : undefined} style={{ transition: "all 0.2s ease" }}>
                             {/* Halo de selección */}
                             {sel && (
                               <line
@@ -3219,7 +3485,7 @@ export default function PlanViewerInner({
                                 x2={x2}
                                 y2={y2}
                                 stroke={baseColor}
-                                strokeWidth={16 / scale}
+                                strokeWidth={0.35 * pxPerM}
                                 strokeLinecap="round"
                                 opacity={0.22}
                               />
@@ -3231,7 +3497,7 @@ export default function PlanViewerInner({
                               x2={x2}
                               y2={y2}
                               stroke="transparent"
-                              strokeWidth={28 / scale}
+                              strokeWidth={Math.max(0.40 * pxPerM, 20 / scale)}
                               className={`pointer-events-auto cursor-pointer ${draggingVertex ? "pointer-events-none" : ""}`}
                               onMouseEnter={() => {
                                 if (!draggingVertex) setHoveredId(el.id);
@@ -3251,7 +3517,7 @@ export default function PlanViewerInner({
                               x2={x2}
                               y2={y2}
                               stroke="#FFFFFF"
-                              strokeWidth={11 / scale}
+                              strokeWidth={0.15 * pxPerM}
                               strokeLinecap="butt"
                               className="pointer-events-none"
                             />
@@ -3291,19 +3557,19 @@ export default function PlanViewerInner({
                                 />
                                 {/* Marcas de jamba en extremos */}
                                 <line
-                                  x1={x1 + nx * (off + 1.5 / scale)}
-                                  y1={y1 + ny * (off + 1.5 / scale)}
-                                  x2={x1 - nx * (off + 1.5 / scale)}
-                                  y2={y1 - ny * (off + 1.5 / scale)}
+                                  x1={x1 + nx * (off + 0.02 * pxPerM)}
+                                  y1={y1 + ny * (off + 0.02 * pxPerM)}
+                                  x2={x1 - nx * (off + 0.02 * pxPerM)}
+                                  y2={y1 - ny * (off + 0.02 * pxPerM)}
                                   stroke={color}
                                   strokeWidth={sw}
                                   strokeLinecap="round"
                                 />
                                 <line
-                                  x1={x2 + nx * (off + 1.5 / scale)}
-                                  y1={y2 + ny * (off + 1.5 / scale)}
-                                  x2={x2 - nx * (off + 1.5 / scale)}
-                                  y2={y2 - ny * (off + 1.5 / scale)}
+                                  x1={x2 + nx * (off + 0.02 * pxPerM)}
+                                  y1={y2 + ny * (off + 0.02 * pxPerM)}
+                                  x2={x2 - nx * (off + 0.02 * pxPerM)}
+                                  y2={y2 - ny * (off + 0.02 * pxPerM)}
                                   stroke={color}
                                   strokeWidth={sw}
                                   strokeLinecap="round"
@@ -3587,7 +3853,7 @@ export default function PlanViewerInner({
                       )}
 
                      {/* Preview polígono (room/roof) */}
-                    {(tool === "room" || tool === "roof") && activePoints.length > 0 && (() => {
+                    {(tool === "room" || tool === "roof" || tool === "escalera") && activePoints.length > 0 && (() => {
                       const pts = mousePos ? [...activePoints, mousePos] : activePoints;
                       const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                       const fillColor =
@@ -3630,6 +3896,36 @@ export default function PlanViewerInner({
                         />
                       );
                     })}
+
+                    {/* Preview herramienta de medición */}
+                    {tool === "measure" && activePoints.length === 1 && mousePos && (
+                      <line
+                        x1={activePoints[0].x} y1={activePoints[0].y}
+                        x2={mousePos.x} y2={mousePos.y}
+                        stroke="#f59e0b" strokeWidth={1.5 / scale}
+                        strokeDasharray={`${5 / scale} ${3 / scale}`}
+                      />
+                    )}
+
+                    {/* Resultado de medición */}
+                    {measureResult && (() => {
+                      const { p1, p2, distM: d } = measureResult;
+                      const mx = (p1.x + p2.x) / 2;
+                      const my = (p1.y + p2.y) / 2;
+                      const label = d >= 1 ? `${d.toFixed(2)} m` : `${(d * 100).toFixed(1)} cm`;
+                      return (
+                        <g>
+                          <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#f59e0b" strokeWidth={2 / scale} />
+                          <circle cx={p1.x} cy={p1.y} r={4 / scale} fill="#f59e0b" />
+                          <circle cx={p2.x} cy={p2.y} r={4 / scale} fill="#f59e0b" />
+                          <text x={mx} y={my - 8 / scale} textAnchor="middle" fontSize={12 / scale}
+                            fill="#f59e0b" stroke="white" strokeWidth={3 / scale} paintOrder="stroke"
+                            fontWeight="bold">
+                            {label}
+                          </text>
+                        </g>
+                      );
+                    })()}
 
                     {/* Indicador de snap — círculo cian en el vértice imantado */}
                     {snapActive && mousePos && tool !== "pan" && (
@@ -3772,7 +4068,100 @@ export default function PlanViewerInner({
                       </g>
                     )}
                   </g>
+
+                  {/* Barra de escala — coords de pantalla, fuera del transform */}
+                  {currentPageScale && dims.w > 100 && (() => {
+                    const m = niceScaleBarM(currentPageScale, scale);
+                    const barPx = m * currentPageScale * scale;
+                    const bx = 16, by = dims.h - 32;
+                    return (
+                      <g>
+                        <rect x={bx} y={by} width={barPx} height={5} fill="white" stroke="#666" strokeWidth={1.2} rx={1} />
+                        <line x1={bx} y1={by} x2={bx} y2={by + 5} stroke="#666" strokeWidth={1.2} />
+                        <line x1={bx + barPx} y1={by} x2={bx + barPx} y2={by + 5} stroke="#666" strokeWidth={1.2} />
+                        <text x={bx + barPx / 2} y={by - 4} textAnchor="middle" fontSize="11"
+                          fill="white" stroke="black" strokeWidth="3" paintOrder="stroke" fontWeight="600">
+                          {m >= 1 ? `${m} m` : `${(m * 100).toFixed(0)} cm`}
+                        </text>
+                      </g>
+                    );
+                  })()}
+
+                  {/* Lasso de selección (Ctrl+drag) */}
+                  {lasso && lasso.w > 4 && lasso.h > 4 && (
+                    <rect
+                      x={lasso.x} y={lasso.y} width={lasso.w} height={lasso.h}
+                      fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth={1.5}
+                      strokeDasharray="5 3" pointerEvents="none"
+                    />
+                  )}
                 </svg>
+              )}
+
+              {/* Toolbar flotante: aceptar/descartar la propuesta IA seleccionada */}
+              {selectedElement?.is_candidate && natural && (() => {
+                const flat = selectedElement.geometry.points;
+                let cx = 0, cy = 0, n = 0;
+                for (let i = 0; i + 1 < flat.length; i += 2) {
+                  cx += flat[i]; cy += flat[i + 1]; n++;
+                }
+                if (n === 0) return null;
+                cx /= n; cy /= n;
+                return (
+                  <div
+                    className="pointer-events-auto absolute z-40 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-sky-300 bg-white p-1 shadow-xl dark:border-sky-700 dark:bg-slate-900"
+                    style={{ left: pos.x + cx * scale, top: pos.y + cy * scale + 16 }}
+                  >
+                    <span className="px-1.5 text-[10px] font-bold uppercase tracking-wide text-sky-600 dark:text-sky-400">
+                      Propuesta IA
+                    </span>
+                    <button
+                      type="button"
+                      disabled={candidateBusy}
+                      onClick={() => resolveCandidates("accept", [selectedElement.id])}
+                      className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      ✓ Aceptar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={candidateBusy}
+                      onClick={() => resolveCandidates("discard", [selectedElement.id])}
+                      className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-red-600 ring-1 ring-red-300 hover:bg-red-50 disabled:opacity-50 dark:bg-slate-800 dark:ring-red-800 dark:hover:bg-red-950/40"
+                    >
+                      ✗ Descartar
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* Banner: propuestas de la IA pendientes en la página */}
+              {pageCandidates.length > 0 && !calibrating && (
+                <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2">
+                  <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-sky-300 bg-sky-50/95 py-1.5 pl-3.5 pr-1.5 shadow-lg backdrop-blur dark:border-sky-800 dark:bg-sky-950/90">
+                    <span className="text-xs font-semibold text-sky-800 dark:text-sky-200">
+                      {pageCandidates.length === 1
+                        ? "1 propuesta de la IA pendiente"
+                        : `${pageCandidates.length} propuestas de la IA pendientes`}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={candidateBusy}
+                      onClick={() => resolveCandidates("accept")}
+                      className="rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      Aceptar todas
+                    </button>
+                    <button
+                      type="button"
+                      disabled={candidateBusy}
+                      onClick={() => resolveCandidates("discard")}
+                      className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-red-600 ring-1 ring-red-300 hover:bg-red-50 disabled:opacity-50 dark:bg-slate-800 dark:ring-red-800 dark:hover:bg-red-950/40"
+                    >
+                      Descartar todas
+                    </button>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -3925,6 +4314,17 @@ export default function PlanViewerInner({
                         <RoofIcon />
                       </ToolbarToolButton>
                       <ToolbarToolButton
+                        active={tool === "escalera"}
+                        onClick={() => selectTool("escalera")}
+                        disabled={drawingDisabled}
+                        title="Escalera (polígono)"
+                        ariaLabel="Dibujar escalera"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 20h4v-4h4v-4h4V8h4V4" />
+                        </svg>
+                      </ToolbarToolButton>
+                      <ToolbarToolButton
                         active={tool === "column"}
                         onClick={() => selectTool("column")}
                         disabled={drawingDisabled}
@@ -3995,6 +4395,21 @@ export default function PlanViewerInner({
                       </div>
                     </>
                   )}
+
+                  <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
+
+                  {/* Herramienta de medición */}
+                  <ToolbarToolButton
+                    active={tool === "measure"}
+                    onClick={() => selectTool("measure")}
+                    disabled={drawingDisabled}
+                    title="Medir distancia (M)"
+                    ariaLabel="Medir distancia entre dos puntos"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 6H3"/><path d="M21 12H3"/><path d="M21 18H3"/><path d="M9 3l-6 9 6 9"/>
+                    </svg>
+                  </ToolbarToolButton>
                 </div>
               </div>
             )}
@@ -4051,7 +4466,7 @@ export default function PlanViewerInner({
         </div>
 
         {/* PANEL DERECHO — Cómputo */}
-        <aside className={`w-full shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
+        <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
               Cómputo
@@ -4135,6 +4550,184 @@ export default function PlanViewerInner({
         </aside>
       </div>
 
+      {/* Modal mapeo de capas DXF/DWG */}
+      {dxfLayerMapOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          onClick={() => !dxfApplying && setDxfLayerMapOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-2xl flex-col gap-4 surface p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Mapear capas DXF/DWG</h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Asigná cada capa a un tipo de elemento. Las sugerencias se pre-rellenan automáticamente.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDxfLayerMapOpen(false)}
+                disabled={dxfApplying}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none"
+              >×</button>
+            </div>
+
+            {dxfLayerError && (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-400">
+                {dxfLayerError}
+              </p>
+            )}
+
+            {dxfLayersLoading ? (
+              <p className="py-8 text-center text-sm text-slate-500">Cargando capas…</p>
+            ) : (
+              <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
+                    <tr className="text-left text-slate-500 dark:text-slate-400">
+                      <th className="px-3 py-2 font-semibold">Capa</th>
+                      <th className="px-3 py-2 font-semibold text-center">Ents.</th>
+                      <th className="px-3 py-2 font-semibold">Tipo de elemento</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                    {dxfLayers.map((layer) => (
+                      <tr key={layer.name} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                        <td className="px-3 py-1.5 font-mono">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="inline-block h-3 w-3 shrink-0 rounded-sm border border-slate-200 dark:border-slate-600"
+                              style={{ backgroundColor: `rgb(${layer.color_rgb.join(",")})` }}
+                            />
+                            {layer.name}
+                          </span>
+                        </td>
+                        <td className="px-3 py-1.5 text-center text-slate-500">{layer.entity_count}</td>
+                        <td className="px-3 py-1.5">
+                          <select
+                            value={dxfLayerMapping[layer.name] ?? ""}
+                            onChange={(e) =>
+                              setDxfLayerMapping((prev) => ({
+                                ...prev,
+                                [layer.name]: e.target.value,
+                              }))
+                            }
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-sky-400 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                          >
+                            <option value="">Ignorar (ocultar del plano)</option>
+                            <option value="context">Solo fondo (sin elementos)</option>
+                            <option value="wall">Muro</option>
+                            <option value="room">Recinto</option>
+                            <option value="opening">Abertura</option>
+                            <option value="column">Columna</option>
+                            <option value="beam">Viga</option>
+                            <option value="roof">Techo / Losa</option>
+                            <option value="riostra">Riostra</option>
+                            <option value="cloaca">Cloaca</option>
+                            <option value="electricidad">Electricidad</option>
+                            <option value="escalera">Escalera</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-xs text-slate-400">
+                {Object.values(dxfLayerMapping).filter(Boolean).length} capa
+                {Object.values(dxfLayerMapping).filter(Boolean).length !== 1 ? "s" : ""} asignada
+                {Object.values(dxfLayerMapping).filter(Boolean).length !== 1 ? "s" : ""}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDxfLayerMapOpen(false)}
+                  disabled={dxfApplying}
+                  className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={applyDxfLayerMap}
+                  disabled={dxfApplying || dxfLayersLoading || !Object.values(dxfLayerMapping).some((v) => v && v !== "context")}
+                  className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                >
+                  {dxfApplying ? "Importando…" : "Importar elementos"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Planilla de Carpinterías */}
+      {carpinteriaOpen && (() => {
+        const openings = pageVisibleElements.filter((e) => e.type === "opening");
+        type Row = { code: string; subtype: string; w: string; h: string; count: number };
+        const groups = new Map<string, Row>();
+        openings.forEach((el) => {
+          const sub = el.geometry.subtype ?? "door";
+          const pts = el.geometry.points;
+          const wM = pts.length >= 4 ? Math.hypot(pts[2] - pts[0], pts[3] - pts[1]) / (currentPageScale ?? 1) : (el.length_m ?? 0);
+          const hM = el.height_m ?? (sub === "window" ? 1.2 : 2.1);
+          const key = `${sub}_${wM.toFixed(2)}_${hM.toFixed(2)}`;
+          if (!groups.has(key)) {
+            const prefix = sub === "door" ? "P" : sub === "window" ? "V" : "PV";
+            const idx = [...groups.values()].filter((r) => r.code.startsWith(prefix)).length + 1;
+            groups.set(key, { code: `${prefix}${idx}`, subtype: sub === "door" ? "Puerta" : sub === "window" ? "Ventana" : "Puerta-Ventana", w: wM.toFixed(2), h: hM.toFixed(2), count: 0 });
+          }
+          groups.get(key)!.count++;
+        });
+        const rows = [...groups.values()];
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setCarpinteriaOpen(false)}>
+            <div onClick={(e) => e.stopPropagation()} className="flex w-full max-w-lg flex-col gap-4 surface p-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Planilla de Carpinterías — Página {page}</h3>
+                <button type="button" onClick={() => setCarpinteriaOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg">×</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-left">
+                      <th className="border border-slate-200 dark:border-slate-600 px-3 py-2">Código</th>
+                      <th className="border border-slate-200 dark:border-slate-600 px-3 py-2">Tipo</th>
+                      <th className="border border-slate-200 dark:border-slate-600 px-3 py-2">Ancho (m)</th>
+                      <th className="border border-slate-200 dark:border-slate-600 px-3 py-2">Alto (m)</th>
+                      <th className="border border-slate-200 dark:border-slate-600 px-3 py-2 text-center">Cantidad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.code} className="even:bg-slate-50 dark:even:bg-slate-700/40">
+                        <td className="border border-slate-200 dark:border-slate-600 px-3 py-2 font-bold text-sky-700 dark:text-sky-300">{r.code}</td>
+                        <td className="border border-slate-200 dark:border-slate-600 px-3 py-2">{r.subtype}</td>
+                        <td className="border border-slate-200 dark:border-slate-600 px-3 py-2">{r.w}</td>
+                        <td className="border border-slate-200 dark:border-slate-600 px-3 py-2">{r.h}</td>
+                        <td className="border border-slate-200 dark:border-slate-600 px-3 py-2 text-center font-semibold">{r.count}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-100 dark:bg-slate-700 font-bold">
+                      <td colSpan={4} className="border border-slate-200 dark:border-slate-600 px-3 py-2 text-right">Total aberturas</td>
+                      <td className="border border-slate-200 dark:border-slate-600 px-3 py-2 text-center">{openings.length}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-slate-400">Los códigos P=Puerta, V=Ventana, PV=Puerta-Ventana se asignan automáticamente por dimensión.</p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Modal confirmación eliminar */}
       {confirmDelete && (
         <div
@@ -4143,7 +4736,7 @@ export default function PlanViewerInner({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+            className="flex w-full max-w-sm flex-col gap-4 surface p-6"
           >
             <h3 className="text-lg font-semibold">Eliminar elemento{confirmDelete.ids.length === 1 ? "" : "s"}</h3>
             <p className="text-sm text-slate-600 dark:text-slate-300">
@@ -4184,7 +4777,7 @@ export default function PlanViewerInner({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+            className="flex w-full max-w-sm flex-col gap-4 surface p-6"
           >
             <h3 className="text-lg font-semibold text-red-600 dark:text-red-400">Eliminar página {confirmDeletePage}</h3>
             <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
@@ -4248,7 +4841,7 @@ export default function PlanViewerInner({
                 if (bulkAssignMaterialId != null) applyBulkAssignAssembly(bulkAssignMaterialId);
               }}
               onClick={(e) => e.stopPropagation()}
-              className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+              className="flex w-full max-w-sm flex-col gap-4 surface p-6"
             >
               <div>
                 <h3 className="text-lg font-semibold">
@@ -4330,7 +4923,7 @@ export default function PlanViewerInner({
               applyScale(parseFloat(scaleFactor.replace(",", ".")));
             }}
             onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+            className="flex w-full max-w-sm flex-col gap-4 surface p-6"
           >
             <div>
               <h3 className="text-lg font-semibold">
@@ -4385,7 +4978,7 @@ export default function PlanViewerInner({
           <form
             onSubmit={submitCalibration}
             onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+            className="flex w-full max-w-sm flex-col gap-4 surface p-6"
           >
             <h3 className="text-lg font-semibold">Distancia real</h3>
             <p className="text-sm text-slate-600 dark:text-slate-300">
@@ -4431,7 +5024,7 @@ export default function PlanViewerInner({
           <form
             onSubmit={submitBulkScales}
             onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-lg flex-col gap-4 rounded-xl bg-white p-6 shadow-xl dark:bg-slate-800"
+            className="flex w-full max-w-lg flex-col gap-4 surface p-6"
           >
             <div>
               <h3 className="text-lg font-semibold">Confirmar escalas detectadas</h3>
@@ -4519,6 +5112,10 @@ function labelFor(type: ElementType, n: number): string {
   if (type === "beam") return `Viga ${n}`;
   if (type === "roof") return `Techo ${n}`;
   if (type === "column") return `Columna ${n}`;
+  if (type === "escalera") return `Escalera ${n}`;
+  if (type === "cloaca") return `Cloaca ${n}`;
+  if (type === "electricidad") return `Electricidad ${n}`;
+  if (type === "riostra") return `Riostra ${n}`;
   return `Elemento ${n}`;
 }
 

@@ -276,3 +276,151 @@ def recommend_pages(pdf_path: str | Path) -> list[dict]:
         doc.close()
     return recommendations
 
+
+# ---------------------------------------------------------------------------
+# Clasificación de tipo de vista y sugerencia automática de roles
+# ---------------------------------------------------------------------------
+
+SECTION_KEYWORDS = [
+    "corte", "cortes", "fachada", "fachadas",
+    "elevacion", "elevación", "elevaciones",
+    "vista lateral", "seccion", "sección", "secciones",
+    "perfil", "frente", "contrafrente",
+]
+
+PLANILLA_KEYWORDS = [
+    "planilla", "carpinteria", "carpintería", "aberturas",
+    "memoria", "esquema", "indice", "índice", "caratula", "carátula",
+]
+
+STRUCTURE_KEYWORDS = [
+    "estructura", "estructuras", "encofrado", "fundacion", "fundación",
+    "fundaciones", "cimentacion", "cimentación", "replanteo",
+]
+
+INSTALLATION_KEYWORDS = [
+    "sanitaria", "electrica", "eléctrica", "pluvial",
+    "cloacal", "instalacion", "instalación", "gas",
+]
+
+ROOF_KEYWORDS_TITLE = [
+    "techo", "techos", "cubierta", "cubiertas", "losa", "losas",
+]
+
+
+def _classify_view_type(
+    title_text: str, full_text: str, is_table: bool,
+    room_mentions: int, drawings_count: int, polygons: int,
+) -> tuple[str, list[str]]:
+    """Clasifica una página y devuelve (view_type, suggested_roles).
+
+    view_type: "planta", "corte", "planilla", "estructura", "instalacion",
+               "techos", "otro"
+    suggested_roles: lista de PageRole sugeridos para esa página.
+    """
+    # 1) Planillas / tablas: rótulo o firma de tabla
+    if any(k in title_text for k in PLANILLA_KEYWORDS):
+        if any(k in title_text for k in ("aberturas", "carpinteria", "carpintería")):
+            return "planilla", ["openings"]
+        return "planilla", []
+
+    if is_table and drawings_count < 100:
+        return "planilla", []
+
+    # 2) Cortes / fachadas / elevaciones
+    if any(k in title_text for k in SECTION_KEYWORDS):
+        return "corte", ["cortes"]
+    if not any(k in title_text for k in HARD_POSITIVE_TITLE):
+        if any(k in full_text for k in SECTION_KEYWORDS):
+            section_hits = sum(1 for k in SECTION_KEYWORDS if k in full_text)
+            plant_hits = sum(1 for k in HARD_POSITIVE_TITLE if k in full_text)
+            if section_hits > plant_hits and room_mentions < MIN_ROOM_MENTIONS:
+                return "corte", ["cortes"]
+
+    # 3) Techos / cubiertas
+    if any(k in title_text for k in ROOF_KEYWORDS_TITLE):
+        return "techos", ["roofs"]
+
+    # 4) Estructura
+    if any(k in title_text for k in STRUCTURE_KEYWORDS):
+        roles = ["columns", "beams"]
+        if "fundacion" in title_text or "fundación" in title_text or "cimentacion" in title_text or "cimentación" in title_text:
+            roles = ["riostras", "columns"]
+        return "estructura", roles
+
+    # 5) Instalaciones
+    if any(k in title_text for k in INSTALLATION_KEYWORDS):
+        if "electrica" in title_text or "eléctrica" in title_text:
+            return "instalacion", ["electricidad"]
+        if "cloacal" in title_text or "sanitaria" in title_text:
+            return "instalacion", ["cloacas"]
+        return "instalacion", []
+
+    # 6) Planta de arquitectura (positiva)
+    if any(k in title_text for k in HARD_POSITIVE_TITLE):
+        return "planta", ["walls", "rooms"]
+
+    if room_mentions >= MIN_ROOM_MENTIONS and polygons >= 5:
+        return "planta", ["walls", "rooms"]
+
+    if room_mentions >= MIN_ROOM_MENTIONS:
+        return "planta", ["walls", "rooms"]
+
+    if drawings_count >= 100 and polygons >= 3:
+        return "planta", ["walls", "rooms"]
+
+    return "otro", []
+
+
+def classify_pages(pdf_path: str | Path) -> list[dict]:
+    """Clasifica cada página del PDF y sugiere roles automáticamente.
+
+    Retorna una lista de dicts con: page, view_type, suggested_roles, reason.
+    """
+    doc = fitz.open(pdf_path)
+    results: list[dict] = []
+    try:
+        for i in range(doc.page_count):
+            page = doc.load_page(i)
+            full_text = (page.get_text("text") or "").lower()
+            title_text = _title_block_text(page)
+
+            room_mentions = sum(full_text.count(k) for k in ROOM_KEYWORDS)
+            is_table, _ = _table_grid_score(page)
+            polygons = _large_closed_polygons(page)
+            try:
+                drawings_count = len(page.get_drawings() or [])
+            except Exception:  # noqa: BLE001
+                drawings_count = 0
+
+            view_type, suggested_roles = _classify_view_type(
+                title_text, full_text, is_table,
+                room_mentions, drawings_count, polygons,
+            )
+
+            reasons: list[str] = []
+            if view_type == "planta":
+                reasons.append("Detectada como planta")
+            elif view_type == "corte":
+                reasons.append("Detectada como corte/elevación")
+            elif view_type == "planilla":
+                reasons.append("Detectada como planilla/tabla")
+            elif view_type == "estructura":
+                reasons.append("Detectada como plano de estructura")
+            elif view_type == "instalacion":
+                reasons.append("Detectada como instalación")
+            elif view_type == "techos":
+                reasons.append("Detectada como plano de techos")
+            else:
+                reasons.append("Sin clasificación clara")
+
+            results.append({
+                "page": i + 1,
+                "view_type": view_type,
+                "suggested_roles": suggested_roles,
+                "reason": ", ".join(reasons),
+            })
+    finally:
+        doc.close()
+    return results
+

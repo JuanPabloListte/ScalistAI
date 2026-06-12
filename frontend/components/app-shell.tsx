@@ -15,9 +15,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="relative min-h-screen">
       <AppSidebar />
-      <div className="pl-16">{children}</div>
+      <div className="pl-16 relative z-0">{children}</div>
     </div>
   );
 }

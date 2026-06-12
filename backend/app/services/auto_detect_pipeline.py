@@ -21,6 +21,11 @@ from app.core.database import SessionLocal
 from app.core.redis import get_redis
 from app.models.detected_element import DetectedElement
 from app.models.plan import Plan
+from app.services.hybrid_validation import (
+    GAP_FILL_CONFIDENCE,
+    filter_gap_fill_candidates,
+    filter_gap_fill_openings,
+)
 from app.services.ml_detector import get_ml_detector
 from app.services.pdf import recommend_pages
 
@@ -28,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 Stage = Literal[
     "scales", "walls", "rooms", "openings", "columns", "beams", "roofs",
-    "riostras", "cloacas", "electricidad", "ml",
+    "riostras", "cloacas", "electricidad", "escaleras", "ml",
 ]
 Status = Literal["pending", "running", "done", "failed"]
 
@@ -58,6 +63,7 @@ def _default_status() -> dict[str, Any]:
         "riostras": "pending",
         "cloacas": "pending",
         "electricidad": "pending",
+        "escaleras": "pending",
         "ml": "pending",
         "started_at": None,
     }
@@ -117,7 +123,8 @@ def get_ai_status(plan_id: int) -> dict[str, Any]:
 
 
 def _create_wall_elements(
-    db, plan_id: int, page: int, candidates: list[dict], source: str = "ai"
+    db, plan_id: int, page: int, candidates: list[dict], source: str = "ai",
+    is_candidate: bool = False, confidence: float = 1.0,
 ) -> int:
     """Crea DetectedElement(type='wall') a partir de los candidatos.
 
@@ -125,6 +132,9 @@ def _create_wall_elements(
       - "ai": detector clásico de OpenCV (default, backwards compat)
       - "ai_ml": detector ML (CubiCasa5K)
       - "manual": dibujado por el usuario
+
+    `is_candidate=True` marca propuestas pendientes de aprobación (modo
+    híbrido: la IA propone, el usuario acepta).
     """
     created = 0
     for c in candidates:
@@ -142,6 +152,8 @@ def _create_wall_elements(
                     length_m=float(length_m),
                     height_m=2.8,
                     source=source,
+                    is_candidate=is_candidate,
+                    confidence=confidence,
                 )
             )
             created += 1
@@ -151,7 +163,8 @@ def _create_wall_elements(
 
 
 def _create_room_elements(
-    db, plan_id: int, page: int, candidates: list[dict], source: str = "ai"
+    db, plan_id: int, page: int, candidates: list[dict], source: str = "ai",
+    is_candidate: bool = False, confidence: float = 1.0,
 ) -> int:
     created = 0
     for c in candidates:
@@ -169,6 +182,8 @@ def _create_room_elements(
                     area_m2=c.get("area_m2"),
                     height_m=2.8,
                     source=source,
+                    is_candidate=is_candidate,
+                    confidence=confidence,
                 )
             )
             created += 1
@@ -179,7 +194,7 @@ def _create_room_elements(
 
 def _create_opening_elements(
     db, plan_id: int, page: int, candidates: list[dict], px_per_m: float | None,
-    source: str = "ai",
+    source: str = "ai", is_candidate: bool = False, confidence: float = 1.0,
 ) -> int:
     if not px_per_m:
         return 0
@@ -212,6 +227,8 @@ def _create_opening_elements(
                     length_m=width_m,
                     height_m=2.1,
                     source=source,
+                    is_candidate=is_candidate,
+                    confidence=confidence,
                 )
             )
             created += 1
@@ -228,6 +245,8 @@ def _create_structural_elements(
     type_: str,
     default_height_m: float,
     source: str = "ai",
+    is_candidate: bool = False,
+    confidence: float = 1.0,
 ) -> int:
     """Persiste candidatos de columnas, vigas o losas como DetectedElement.
 
@@ -253,6 +272,8 @@ def _create_structural_elements(
                     area_m2=c.get("area_m2"),
                     height_m=c.get("height_m") or default_height_m,
                     source=source,
+                    is_candidate=is_candidate,
+                    confidence=confidence,
                 )
             )
             created += 1
@@ -261,39 +282,45 @@ def _create_structural_elements(
     return created
 
 
-def _create_column_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+def _create_column_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
     return _create_structural_elements(
-        db, plan_id, page, candidates, "column", 2.8, source
+        db, plan_id, page, candidates, "column", 2.8, source, **flags
     )
 
 
-def _create_beam_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+def _create_beam_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
     return _create_structural_elements(
-        db, plan_id, page, candidates, "beam", 0.40, source
+        db, plan_id, page, candidates, "beam", 0.40, source, **flags
     )
 
 
-def _create_roof_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+def _create_roof_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
     return _create_structural_elements(
-        db, plan_id, page, candidates, "roof", 0.20, source
+        db, plan_id, page, candidates, "roof", 0.20, source, **flags
     )
 
 
-def _create_riostra_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+def _create_riostra_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
     return _create_structural_elements(
-        db, plan_id, page, candidates, "riostra", 0.40, source
+        db, plan_id, page, candidates, "riostra", 0.40, source, **flags
     )
 
 
-def _create_cloaca_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+def _create_cloaca_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
     return _create_structural_elements(
-        db, plan_id, page, candidates, "cloaca", 0.10, source
+        db, plan_id, page, candidates, "cloaca", 0.10, source, **flags
     )
 
 
-def _create_electricidad_elements(db, plan_id, page, candidates, source: str = "ai") -> int:
+def _create_electricidad_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
     return _create_structural_elements(
-        db, plan_id, page, candidates, "electricidad", 0.05, source
+        db, plan_id, page, candidates, "electricidad", 0.05, source, **flags
+    )
+
+
+def _create_escalera_elements(db, plan_id, page, candidates, source: str = "ai", **flags) -> int:
+    return _create_structural_elements(
+        db, plan_id, page, candidates, "escalera", 2.8, source, **flags
     )
 
 
@@ -346,6 +373,30 @@ async def run_initial_detection(plan_id: int) -> None:
         page_scales = dict(plan.page_scales or {})
         deleted_pages = set(plan.deleted_pages or [])
         page_roles = dict(plan.page_roles or {})
+        
+        # BYOK config
+        org = plan.project.organization
+        ai_provider = getattr(org, "ai_provider", "scalist")
+        ai_api_key = getattr(org, "ai_api_key", None)
+        ai_model_name = getattr(org, "ai_model_name", None)
+
+        # Si el import vectorial ya creó elementos exactos desde las capas del
+        # PDF (pdf_vector_import), entramos en modo HÍBRIDO: la IA corre igual
+        # pero sus predicciones se cruzan contra los elementos vectoriales.
+        # Duplicados se descartan (el vector manda); lo que la IA encuentra
+        # donde el CAD no tiene nada se guarda como candidato a aprobar.
+        hybrid_mode = (
+            db.query(DetectedElement)
+            .filter(DetectedElement.plan_id == plan_id, DetectedElement.source == "dxf")
+            .first()
+            is not None
+        )
+
+    if hybrid_mode:
+        logger.info(
+            "ai pipeline hybrid plan=%s: cross-validation contra elementos vectoriales",
+            plan_id,
+        )
 
     if not page_roles:
         logger.info("ai pipeline skip plan=%s: sin page_roles asignados", plan_id)
@@ -366,22 +417,40 @@ async def run_initial_detection(plan_id: int) -> None:
         _filter(_pages_for_role(page_roles, "roofs")),
     )
 
-    # --- Detección 100% ML ---
-    # Una sola etapa de inferencia detecta TODOS los tipos (walls/rooms/openings/
-    # beams/columns/roofs). Los detectores clásicos de OpenCV quedaron deprecados:
-    # generaban falsos positivos (líneas que no eran muros). El ML detecta con
-    # alta precisión lo que está seguro; el resto lo dibuja el usuario a mano.
-    # Si el modelo no está disponible, no se crea nada (detección 100% manual).
-    await asyncio.to_thread(
-        _run_ml_stage,
-        plan_id, page_roles, pdf_path, dpi, page_scales, deleted_pages,
-    )
+    # --- Detección Híbrida / ML / LLM ---
+    if ai_provider == "scalist" or not ai_api_key:
+        await asyncio.to_thread(
+            _run_ml_stage,
+            plan_id, page_roles, pdf_path, dpi, page_scales, deleted_pages,
+            hybrid_mode,
+        )
+    else:
+        from app.services.llm_detector import _run_llm_stage
+        await asyncio.to_thread(
+            _run_llm_stage,
+            plan_id, page_roles, pdf_path, dpi, page_scales, deleted_pages,
+            ai_provider, ai_api_key, ai_model_name, hybrid_mode,
+        )
 
 
 _TYPE_STAGES: list[Stage] = [
     "walls", "rooms", "openings", "columns", "beams", "roofs",
-    "riostras", "cloacas", "electricidad",
+    "riostras", "cloacas", "electricidad", "escaleras",
 ]
+
+
+def _vector_elements_for(db, plan_id: int, page: int, el_type: str) -> list:
+    """Elementos vectoriales (source='dxf') de un tipo en una página."""
+    return (
+        db.query(DetectedElement)
+        .filter(
+            DetectedElement.plan_id == plan_id,
+            DetectedElement.page == page,
+            DetectedElement.type == el_type,
+            DetectedElement.source == "dxf",
+        )
+        .all()
+    )
 
 
 def _run_ml_stage(
@@ -391,9 +460,14 @@ def _run_ml_stage(
     dpi: int,
     page_scales: dict,
     deleted_pages: set[int],
+    hybrid: bool = False,
 ) -> None:
     """Corre el detector ML (modelo propio) sobre las páginas asignadas y crea
     los DetectedElement con `source="ai_ml"`. Es la ÚNICA etapa de detección.
+
+    Con `hybrid=True` (el PDF ya aportó elementos vectoriales exactos), las
+    predicciones se cruzan contra el CAD: duplicados se descartan y lo nuevo
+    se persiste como candidato (is_candidate=True) a aprobar por el usuario.
 
     Diseño:
       - Una sola inferencia por página: el modelo predice walls/rooms/openings/
@@ -410,6 +484,7 @@ def _run_ml_stage(
     assigned_roles: set[str] = set()
     for roles in page_roles.values():
         assigned_roles.update(roles)
+    assigned_roles.discard("cortes")
     for st in _TYPE_STAGES:
         _mark(plan_id, st, "running" if st in assigned_roles else "done")
 
@@ -430,7 +505,10 @@ def _run_ml_stage(
         import numpy as np
         import cv2  # noqa: F401  # usado indirectamente al cargar la imagen
 
-        # Set de páginas únicas que tienen algún rol asignado.
+        # Set de páginas únicas que tienen algún rol de detección asignado.
+        # Páginas con solo "cortes" (elevaciones/fachadas) se saltan: no
+        # generan elementos, son solo referencia visual de alturas.
+        _INFO_ONLY_ROLES = {"cortes"}
         pages_to_process: dict[int, set[str]] = {}
         for page_str, roles in page_roles.items():
             try:
@@ -439,7 +517,9 @@ def _run_ml_stage(
                 continue
             if p in deleted_pages:
                 continue
-            pages_to_process[p] = set(roles)
+            detection_roles = set(roles) - _INFO_ONLY_ROLES
+            if detection_roles:
+                pages_to_process[p] = detection_roles
 
         if not pages_to_process:
             for st in _TYPE_STAGES:
@@ -475,41 +555,78 @@ def _run_ml_stage(
                         continue
 
                     # Persistir candidatos por rol asignado a esta página.
+                    # En modo híbrido, cada lista pasa por el cross-validation
+                    # contra los elementos vectoriales antes de persistirse, y
+                    # lo que sobrevive entra como candidato a aprobar.
+                    img_h, img_w = pixmap.height, pixmap.width
+                    flags: dict = (
+                        {"is_candidate": True, "confidence": GAP_FILL_CONFIDENCE}
+                        if hybrid else {}
+                    )
+
+                    def _gap_fill(el_type: str, candidates: list[dict]) -> list[dict]:
+                        if not hybrid:
+                            return candidates
+                        vec = _vector_elements_for(db, plan_id, page, el_type)
+                        return filter_gap_fill_candidates(
+                            vec, candidates, el_type, px_per_m, img_w, img_h
+                        )
+
                     if "walls" in roles:
                         total_walls += _create_wall_elements(
-                            db, plan_id, page, result.walls, source="ai_ml"
+                            db, plan_id, page, _gap_fill("wall", result.walls),
+                            source="ai_ml", **flags,
                         )
                     if "rooms" in roles:
                         total_rooms += _create_room_elements(
-                            db, plan_id, page, result.rooms, source="ai_ml"
+                            db, plan_id, page, _gap_fill("room", result.rooms),
+                            source="ai_ml", **flags,
                         )
                     if "openings" in roles:
+                        openings = result.openings
+                        if hybrid:
+                            openings = filter_gap_fill_openings(
+                                _vector_elements_for(db, plan_id, page, "opening"),
+                                openings, px_per_m,
+                            )
                         total_openings += _create_opening_elements(
-                            db, plan_id, page, result.openings, px_per_m, source="ai_ml"
+                            db, plan_id, page, openings, px_per_m,
+                            source="ai_ml", **flags,
                         )
                     if "beams" in roles:
                         total_beams += _create_beam_elements(
-                            db, plan_id, page, result.beams, source="ai_ml"
+                            db, plan_id, page, _gap_fill("beam", result.beams),
+                            source="ai_ml", **flags,
                         )
                     if "columns" in roles:
                         total_columns += _create_column_elements(
-                            db, plan_id, page, result.columns, source="ai_ml"
+                            db, plan_id, page, _gap_fill("column", result.columns),
+                            source="ai_ml", **flags,
                         )
                     if "roofs" in roles:
                         total_roofs += _create_roof_elements(
-                            db, plan_id, page, result.roofs, source="ai_ml"
+                            db, plan_id, page, _gap_fill("roof", result.roofs),
+                            source="ai_ml", **flags,
                         )
                     if "riostra" in roles or "riostras" in roles:
                         total_riostras += _create_riostra_elements(
-                            db, plan_id, page, result.riostras, source="ai_ml"
+                            db, plan_id, page, _gap_fill("riostra", result.riostras),
+                            source="ai_ml", **flags,
                         )
                     if "cloaca" in roles or "cloacas" in roles:
                         total_cloacas += _create_cloaca_elements(
-                            db, plan_id, page, result.cloacas, source="ai_ml"
+                            db, plan_id, page, _gap_fill("cloaca", result.cloacas),
+                            source="ai_ml", **flags,
                         )
                     if "electricidad" in roles:
                         total_electricidad += _create_electricidad_elements(
-                            db, plan_id, page, result.electricidad, source="ai_ml"
+                            db, plan_id, page, _gap_fill("electricidad", result.electricidad),
+                            source="ai_ml", **flags,
+                        )
+                    if "escalera" in roles or "escaleras" in roles:
+                        _create_escalera_elements(
+                            db, plan_id, page, _gap_fill("escalera", result.escaleras),
+                            source="ai_ml", **flags,
                         )
             finally:
                 doc.close()

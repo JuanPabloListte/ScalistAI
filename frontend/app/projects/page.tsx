@@ -82,7 +82,7 @@ export default function ProjectsPage() {
       ) : projects.length === 0 ? (
         <Link
           href="/projects/new"
-          className="group block rounded-xl border-2 border-dashed border-slate-300 bg-white px-6 py-16 text-center transition hover:border-brand-400 hover:bg-brand-50/30 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-brand-500/60 dark:hover:bg-brand-500/5"
+          className="group block rounded-2xl border-2 border-dashed border-slate-300/50 bg-white/20 px-6 py-16 text-center backdrop-blur-sm transition hover:border-cyan-400 hover:bg-cyan-50/30 dark:border-white/10 dark:bg-slate-900/30 dark:hover:border-cyan-500/60 dark:hover:bg-cyan-500/10"
         >
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition group-hover:bg-brand-100 group-hover:text-brand-600 dark:bg-slate-800 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -99,7 +99,7 @@ export default function ProjectsPage() {
           <li className="min-h-[180px]">
             <Link
               href="/projects/new"
-              className="group flex h-full min-h-[180px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-white p-5 text-center transition hover:border-brand-400 hover:bg-brand-50/30 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-brand-500/60 dark:hover:bg-brand-500/5"
+              className="group flex h-full min-h-[180px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300/50 bg-white/20 p-5 text-center backdrop-blur-sm transition hover:border-cyan-400 hover:bg-cyan-50/30 dark:border-white/10 dark:bg-slate-900/30 dark:hover:border-cyan-500/60 dark:hover:bg-cyan-500/10"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400 transition group-hover:bg-brand-100 group-hover:text-brand-600 dark:bg-slate-800 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -119,7 +119,7 @@ export default function ProjectsPage() {
             return (
               <li
                 key={p.id}
-                className="group relative flex flex-col rounded-xl border border-slate-200 bg-white p-5 transition hover:border-brand-300 hover:shadow-surface-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-500/40"
+                className="group relative flex flex-col surface p-5 transition hover:border-cyan-300/50 hover:shadow-cyan-500/10 dark:hover:border-cyan-500/40 dark:hover:shadow-cyan-500/10"
               >
                 <div className="absolute right-2 top-2 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
                   <IconButton
@@ -237,7 +237,7 @@ function ProjectsLoadingSkeleton() {
       {Array.from({ length: 6 }).map((_, i) => (
         <li
           key={i}
-          className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
+          className="flex flex-col gap-3 surface p-5"
         >
           <div className="h-4 w-2/3 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
           <div className="h-3 w-full rounded bg-slate-200/70 dark:bg-slate-800/70 animate-pulse" />
@@ -322,7 +322,7 @@ function EditProjectModal({
             maxLength={255}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
+            className="rounded-lg border border-slate-300/50 bg-white/60 px-4 py-2.5 text-sm text-slate-800 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-100 dark:focus:border-cyan-400 dark:focus:ring-cyan-400 transition-all"
           />
         </label>
 
@@ -344,7 +344,7 @@ function EditProjectModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="rounded-md border border-slate-300/50 bg-white/50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white/80 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800/80"
           >
             Cancelar
           </button>
@@ -401,7 +401,7 @@ function DeleteProjectModal({
             type="button"
             onClick={onCancel}
             disabled={deleting}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="rounded-md border border-slate-300/50 bg-white/50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white/80 disabled:opacity-50 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800/80"
           >
             Cancelar
           </button>
@@ -432,7 +432,7 @@ function Modal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-surface-lg dark:border-slate-700 dark:bg-slate-900"
+        className="w-full max-w-md surface p-6"
         onClick={(e) => e.stopPropagation()}
       >
         {children}

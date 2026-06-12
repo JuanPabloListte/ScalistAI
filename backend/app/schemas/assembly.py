@@ -17,7 +17,7 @@ class AssemblyMaterialRead(AssemblyMaterialBase):
 
 class AssemblyBase(BaseModel):
     name: str
-    applies_to: str = Field(..., pattern="^(wall|room_floor|room_wall|room_perimeter|opening|opening_perimeter|beam|roof|column|riostra|cloaca|electricidad)$")
+    applies_to: str = Field(..., pattern="^(wall|room_floor|room_wall|room_perimeter|opening|opening_perimeter|beam|roof|column|riostra|cloaca|electricidad|escalera)$")
     daily_yield: float | None = Field(0.0, description="Rendimiento diario (ej. m2/día)")
 
 class AssemblyCreate(AssemblyBase):
