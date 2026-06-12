@@ -52,4 +52,7 @@ def list_provider_models(
         return [
             ModelInfo(id="gpt-4o", name="GPT-4o"),
             ModelInfo(id="gpt-4-turbo", name="GPT-4 Turbo"),
+            ModelInfo(id="gpt-4o-mini", name="GPT-4o Mini"),
+        ]
+
     raise HTTPException(status_code=400, detail="Proveedor no soportado")

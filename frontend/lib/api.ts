@@ -216,7 +216,7 @@ export type DetectedElement = {
   length_m: number | null;
   area_m2: number | null;
   height_m: number | null;
-  source: "manual" | "ai" | "ai_ml" | "dxf";
+  source: "manual" | "ai" | "ai_ml" | "dxf" | "llm";
   is_candidate: boolean;
   confidence: number;
   materials?: any[];
