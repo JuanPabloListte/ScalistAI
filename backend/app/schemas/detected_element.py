@@ -11,6 +11,7 @@ class ElementSource(str, Enum):
     ai = "ai"            # sugerido por IA y aceptado explícitamente por el usuario
     ai_ml = "ai_ml"      # detectado automáticamente por el pipeline ML en background
     dxf = "dxf"          # importado desde capas de un archivo DXF
+    llm = "llm"          # detectado por LLM externo (BYOK: Claude/GPT/Gemini)
 
 
 class DetectedElementBase(BaseModel):
