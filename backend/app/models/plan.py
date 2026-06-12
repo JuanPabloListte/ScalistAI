@@ -9,6 +9,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.detected_element import DetectedElement
     from app.models.project import Project
+    from app.models.plan_ai_context import PlanAiContext
 
 
 class Plan(Base):
@@ -47,5 +48,8 @@ class Plan(Base):
     project: Mapped["Project"] = relationship(back_populates="plans")
     detected_elements: Mapped[list["DetectedElement"]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"
+    )
+    ai_context: Mapped["PlanAiContext"] = relationship(
+        back_populates="plan", cascade="all, delete-orphan", uselist=False
     )
 

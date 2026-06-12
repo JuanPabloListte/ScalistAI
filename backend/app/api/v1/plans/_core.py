@@ -20,7 +20,7 @@ from app.core.deps import get_current_user
 from app.models import DetectedElement, Plan, Project, User
 from app.schemas.plan import PlanRead
 from app.services.auto_scale import detect_scales
-from app.services.pdf import page_count, recommend_pages
+from app.services.pdf import classify_pages, page_count, recommend_pages
 from app.services.prewarm import prewarm_plan_pages
 
 from ._common import MAX_PDF_BYTES, RASTER_DPI, _page_raster_path
@@ -48,19 +48,21 @@ async def upload_plan(
     if len(contents) > MAX_PDF_BYTES:
         raise HTTPException(status_code=413, detail="Archivo demasiado grande (máx 50 MB)")
 
-    # DXF: coordenadas ya en metros, no se rasteriza ni se corre IA.
-    if (file.filename or "").lower().endswith(".dxf"):
+    # DXF / DWG: se plotea a PDF vectorial; los elementos salen del mapeo de capas.
+    fname_lower = (file.filename or "").lower()
+    if fname_lower.endswith(".dxf") or fname_lower.endswith(".dwg"):
         from app.services.dxf_import import build_dxf_plan
 
-        plan, _ = build_dxf_plan(project_id, contents, file.filename or "plano.dxf", db)
-        if project.wizard_step < 3:
-            project.wizard_step = 3
+        ext = ".dwg" if fname_lower.endswith(".dwg") else ".dxf"
+        plan, _ = build_dxf_plan(project_id, contents, file.filename or f"plano{ext}", db)
+        if project.wizard_step < 2:
+            project.wizard_step = 2
         db.commit()
         db.refresh(plan)
         return plan
 
     if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF o DXF")
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF, DXF o DWG")
 
     plan_storage = Path(settings.STORAGE_DIR) / "plans" / str(project_id)
     plan_storage.mkdir(parents=True, exist_ok=True)
@@ -97,6 +99,10 @@ async def upload_plan(
     db.refresh(plan)
 
     background_tasks.add_task(prewarm_plan_pages, plan.id)
+    # Si el PDF es vectorial con capas CAD (muros/aberturas/etc.), extrae los
+    # elementos exactos en background. Si no tiene capas, no hace nada.
+    from app.services.pdf_vector_import import try_vector_import
+    background_tasks.add_task(try_vector_import, plan.id)
     return plan
 
 
@@ -161,6 +167,33 @@ def recommend_plan_pages(
     return recs
 
 
+@router.get("/plans/{plan_id}/suggest-roles")
+def suggest_page_roles(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Clasifica cada página del PDF y sugiere roles automáticamente.
+
+    Usa heurísticas sobre el texto del rótulo y el contenido para determinar
+    si una página es planta, corte, planilla, estructura, etc. y sugiere los
+    roles apropiados para la detección.
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    pdf_path = Path(plan.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF original no disponible")
+
+    try:
+        return classify_pages(pdf_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"Error clasificando páginas: {exc}"
+        ) from exc
+
+
 @router.post("/plans/{plan_id}/page-override", response_model=PlanRead)
 def set_page_override(
     plan_id: int,
@@ -218,6 +251,9 @@ def delete_page(
     if page < 1 or (plan.page_count and page > plan.page_count):
         raise HTTPException(status_code=400, detail="Número de página inválido")
 
+    if plan.page_count == 1:
+        raise HTTPException(status_code=400, detail="No puedes eliminar la única página del documento")
+
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF original no encontrado")
@@ -228,16 +264,21 @@ def delete_page(
     ).delete(synchronize_session=False)
 
     try:
-        doc = fitz.open(pdf_path)
-        if doc.page_count > 1:
-            doc.delete_page(page - 1)
-            tmp_path = pdf_path.with_suffix(".tmp.pdf")
-            doc.save(tmp_path)
-            doc.close()
-            tmp_path.replace(pdf_path)
+        if plan.scale_source == "dxf":
+            # Para planos DXF no se usa PDF (ni PyMuPDF).
+            # Las páginas están divididas en archivos _p{n}.svg y _p{n}.png
+            pass
         else:
-            doc.close()
-            raise HTTPException(status_code=400, detail="No puedes eliminar la única página del documento")
+            doc = fitz.open(pdf_path)
+            if doc.page_count > 1:
+                doc.delete_page(page - 1)
+                tmp_path = pdf_path.with_suffix(".tmp.pdf")
+                doc.save(tmp_path)
+                doc.close()
+                tmp_path.replace(pdf_path)
+            else:
+                doc.close()
+                raise HTTPException(status_code=400, detail="No puedes eliminar la única página del documento")
     except HTTPException:
         raise
     except Exception as exc:
@@ -251,6 +292,9 @@ def delete_page(
     if plan.page_scales:
         new_scales = {}
         for p_str, scale_val in plan.page_scales.items():
+            if not p_str.isdigit():
+                new_scales[p_str] = scale_val
+                continue
             p_num = int(p_str)
             if p_num < page:
                 new_scales[str(p_num)] = scale_val
@@ -264,19 +308,39 @@ def delete_page(
     flag_modified(plan, "deleted_pages")
 
     try:
-        raster_file = _page_raster_path(pdf_path, page)
-        raster_file.unlink(missing_ok=True)
-        enhanced = raster_file.parent / f"{raster_file.stem}_enhanced{raster_file.suffix}"
-        enhanced.unlink(missing_ok=True)
-        for p in range(page + 1, plan.page_count + 2):
-            old_r = _page_raster_path(pdf_path, p)
-            new_r = _page_raster_path(pdf_path, p - 1)
-            if old_r.exists():
-                old_r.rename(new_r)
-            old_e = old_r.parent / f"{old_r.stem}_enhanced{old_r.suffix}"
-            new_e = new_r.parent / f"{new_r.stem}_enhanced{new_r.suffix}"
-            if old_e.exists():
-                old_e.rename(new_e)
+        if plan.scale_source == "dxf":
+            base_stem = pdf_path.stem
+            if base_stem.endswith("_p1"):
+                base_stem = base_stem[:-3]
+            
+            # Borrar los archivos de la página
+            pdf_path.with_name(f"{base_stem}_p{page}.svg").unlink(missing_ok=True)
+            pdf_path.with_name(f"{base_stem}_p{page}.png").unlink(missing_ok=True)
+            
+            # Renombrar los archivos de páginas siguientes (page+1 -> page)
+            for p in range(page + 1, plan.page_count + 2):
+                old_svg = pdf_path.with_name(f"{base_stem}_p{p}.svg")
+                new_svg = pdf_path.with_name(f"{base_stem}_p{p - 1}.svg")
+                old_png = pdf_path.with_name(f"{base_stem}_p{p}.png")
+                new_png = pdf_path.with_name(f"{base_stem}_p{p - 1}.png")
+                if old_svg.exists():
+                    old_svg.rename(new_svg)
+                if old_png.exists():
+                    old_png.rename(new_png)
+        else:
+            raster_file = _page_raster_path(pdf_path, page)
+            raster_file.unlink(missing_ok=True)
+            enhanced = raster_file.parent / f"{raster_file.stem}_enhanced{raster_file.suffix}"
+            enhanced.unlink(missing_ok=True)
+            for p in range(page + 1, plan.page_count + 2):
+                old_r = _page_raster_path(pdf_path, p)
+                new_r = _page_raster_path(pdf_path, p - 1)
+                if old_r.exists():
+                    old_r.rename(new_r)
+                old_e = old_r.parent / f"{old_r.stem}_enhanced{old_r.suffix}"
+                new_e = new_r.parent / f"{new_r.stem}_enhanced{new_r.suffix}"
+                if old_e.exists():
+                    old_e.rename(new_e)
     except Exception:  # noqa: BLE001
         pass  # limpieza de caché es best-effort
 

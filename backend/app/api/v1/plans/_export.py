@@ -46,7 +46,11 @@ def _get_materials_summary_data(plan_id: int, page: int | None, db: Session) -> 
     plan = db.get(Plan, plan_id)
     page_scales: dict[str, float] = (plan.page_scales or {}) if plan else {}
 
-    stmt = select(DetectedElement).where(DetectedElement.plan_id == plan_id)
+    # Candidatos (propuestas IA sin aprobar) no computan materiales.
+    stmt = select(DetectedElement).where(
+        DetectedElement.plan_id == plan_id,
+        DetectedElement.is_candidate.is_(False),
+    )
     if page is not None:
         stmt = stmt.where(DetectedElement.page == page)
     elements = list(db.scalars(stmt).all())

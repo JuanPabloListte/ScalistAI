@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { api, type PageRole, type Plan, type Project } from "@/lib/api";
+import { api, type PageClassification, type PageRole, type Plan, type Project } from "@/lib/api";
 
 const ROLE_DEFS: { value: PageRole; label: string; description: string; color: string }[] = [
   {
@@ -59,6 +59,12 @@ const ROLE_DEFS: { value: PageRole; label: string; description: string; color: s
     description: "Plano para instalación eléctrica (ej: iluminación y tomas)",
     color: "yellow",
   },
+  {
+    value: "cortes",
+    label: "Cortes",
+    description: "Corte / elevación / fachada — solo referencia, no genera elementos",
+    color: "slate",
+  },
 ];
 
 const COLOR_STYLES: Record<string, { active: string; idle: string; ring: string }> = {
@@ -107,7 +113,34 @@ const COLOR_STYLES: Record<string, { active: string; idle: string; ring: string 
     idle: "bg-white text-yellow-700 border-yellow-300 hover:bg-yellow-50 dark:bg-slate-800 dark:text-yellow-400 dark:border-yellow-700 dark:hover:bg-yellow-950/50",
     ring: "ring-yellow-500",
   },
+  slate: {
+    active: "bg-slate-600 text-white border-slate-600 dark:bg-slate-500 dark:border-slate-500",
+    idle: "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-950/50",
+    ring: "ring-slate-500",
+  },
 };
+
+// Opciones de mapeo capa CAD → tipo de elemento (valores que espera el backend).
+const DXF_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "wall", label: "Muros" },
+  { value: "opening", label: "Aberturas" },
+  { value: "room", label: "Recintos" },
+  { value: "beam", label: "Vigas" },
+  { value: "roof", label: "Techos / Losas" },
+  { value: "column", label: "Columnas" },
+  { value: "riostra", label: "Riostras" },
+  { value: "cloaca", label: "Cloacas" },
+  { value: "electricidad", label: "Electricidad" },
+  { value: "escalera", label: "Escalera" },
+];
+const DXF_ELEMENT_VALUES = new Set(DXF_TYPE_OPTIONS.map((o) => o.value));
+// La capa se ve de fondo pero no genera elementos.
+const DXF_CONTEXT = "context";
+// Import de elementos desde capas CAD: deshabilitado. Una lámina trae la misma
+// puerta dibujada en planta, cortes y fachadas → elementos duplicados y mal
+// ubicados. El CAD entra como fondo visual (recortes = páginas, escala del
+// archivo) y los elementos se generan con IA o dibujo manual, igual que un PDF.
+const DXF_LAYER_MAPPING_ENABLED = false;
 
 type PageRoleMap = Record<string, PageRole[]>;
 
@@ -134,6 +167,228 @@ export function Step3PageRoles({
   const [zoomedPage, setZoomedPage] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skipAiDetection, setSkipAiDetection] = useState(false);
+  const [classifications, setClassifications] = useState<PageClassification[]>([]);
+  const [suggestionsApplied, setSuggestionsApplied] = useState(false);
+
+  const isDxf = plan?.original_filename?.toLowerCase().endsWith(".dxf") || plan?.original_filename?.toLowerCase().endsWith(".dwg");
+  const [dxfLayers, setDxfLayers] = useState<import("@/lib/api").DxfLayer[]>([]);
+  const [dxfMapping, setDxfMapping] = useState<Record<string, string | null>>({});
+  const [dxfInfo, setDxfInfo] = useState<import("@/lib/api").DxfInfo | null>(null);
+  const [dxfUnit, setDxfUnit] = useState<"mm" | "cm" | "m">("m");
+  const [layerPreviews, setLayerPreviews] = useState<Record<string, string>>({});
+  const [zoomedLayer, setZoomedLayer] = useState<string | null>(null);
+
+  // Recortes de vistas: una lámina CAD trae plantas, cortes y planillas
+  // juntas; el usuario dibuja un rectángulo por cada vista a computar y cada
+  // recorte se convierte en una página del plano.
+  const [overviewUrl, setOverviewUrl] = useState<string | null>(null);
+  const [overviewNat, setOverviewNat] = useState<{ w: number; h: number } | null>(null);
+  const [dxfRegions, setDxfRegions] = useState<number[][]>([]); // [x1,y1,x2,y2] en unidades de dibujo
+  // Tipo de cada recorte (paralelo a dxfRegions): "planta" genera elementos,
+  // "corte" es solo referencia visual de alturas (fachadas/elevaciones).
+  const [dxfRegionTypes, setDxfRegionTypes] = useState<import("@/lib/api").DxfRegionType[]>([]);
+  const [regionDraft, setRegionDraft] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [ovZoom, setOvZoom] = useState(1); // zoom del overview para reconocer las vistas
+  const [ovMode, setOvMode] = useState<"crop" | "pan">("crop"); // arrastre: recortar o mover
+  const overviewRef = useRef<HTMLDivElement>(null);
+  const ovScrollRef = useRef<HTMLDivElement>(null);
+  const draftStart = useRef<{ x: number; y: number } | null>(null);
+  const panStart = useRef<{ mx: number; my: number; sl: number; st: number } | null>(null);
+  // Padding fijo que get_dxf_overview deja alrededor del contenido (px de imagen).
+  const OVERVIEW_PAD = 10;
+
+  const unitFactor = dxfUnit === "mm" ? 0.001 : dxfUnit === "cm" ? 0.01 : 1;
+
+  useEffect(() => {
+    if (!plan || !isDxf) return;
+    let url: string | null = null;
+    let cancelled = false;
+    api
+      .fetchDxfOverview(plan.id)
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setOverviewUrl(url);
+      })
+      .catch(() => {
+        /* sin overview el usuario igual puede mapear capas (recorte = todo) */
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [plan, isDxf]);
+
+  // Ctrl+rueda = zoom del overview centrado en el cursor (como en CAD).
+  useEffect(() => {
+    const el = ovScrollRef.current;
+    if (!el || !overviewUrl) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left + el.scrollLeft;
+      const my = e.clientY - rect.top + el.scrollTop;
+      setOvZoom((prev) => {
+        const next = Math.min(8, Math.max(1, prev * (e.deltaY < 0 ? 1.25 : 0.8)));
+        if (next === prev) return prev;
+        const r = next / prev;
+        requestAnimationFrame(() => {
+          el.scrollLeft = mx * r - (e.clientX - rect.left);
+          el.scrollTop = my * r - (e.clientY - rect.top);
+        });
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [overviewUrl]);
+
+  // Fracción [0..1] del cursor dentro de la imagen del overview.
+  function overviewFrac(e: React.MouseEvent): { x: number; y: number } {
+    const rect = overviewRef.current!.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1),
+      y: Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1),
+    };
+  }
+
+  // Fracción de imagen (incluye padding) → unidades de dibujo (y crece hacia arriba).
+  function fracToUnits(fx: number, fy: number): [number, number] | null {
+    if (!dxfInfo || !overviewNat) return null;
+    const [gx1, gy1, gx2, gy2] = dxfInfo.overview.bounds;
+    const cx = Math.min(Math.max((fx * overviewNat.w - OVERVIEW_PAD) / (overviewNat.w - 2 * OVERVIEW_PAD), 0), 1);
+    const cy = Math.min(Math.max((fy * overviewNat.h - OVERVIEW_PAD) / (overviewNat.h - 2 * OVERVIEW_PAD), 0), 1);
+    return [gx1 + cx * (gx2 - gx1), gy2 - cy * (gy2 - gy1)];
+  }
+
+  // Región en unidades → estilo CSS (porcentajes sobre la imagen completa).
+  function regionStyle(r: number[]): React.CSSProperties {
+    if (!dxfInfo || !overviewNat) return { display: "none" };
+    const [gx1, gy1, gx2, gy2] = dxfInfo.overview.bounds;
+    const W = Math.max(gx2 - gx1, 1e-9);
+    const H = Math.max(gy2 - gy1, 1e-9);
+    const padX = OVERVIEW_PAD / overviewNat.w;
+    const padY = OVERVIEW_PAD / overviewNat.h;
+    const sx = (f: number) => (padX + f * (1 - 2 * padX)) * 100;
+    const sy = (f: number) => (padY + f * (1 - 2 * padY)) * 100;
+    const left = sx((r[0] - gx1) / W);
+    const right = sx((r[2] - gx1) / W);
+    const top = sy((gy2 - r[3]) / H);
+    const bottom = sy((gy2 - r[1]) / H);
+    return {
+      left: `${left}%`,
+      top: `${top}%`,
+      width: `${right - left}%`,
+      height: `${bottom - top}%`,
+    };
+  }
+
+  function handleOverviewMouseDown(e: React.MouseEvent) {
+    if (!overviewUrl || !overviewNat) return;
+    e.preventDefault();
+    const el = ovScrollRef.current;
+    // Botón del medio (como en CAD) o modo "mover": panear, no recortar.
+    if ((ovMode === "pan" || e.button === 1) && el) {
+      panStart.current = { mx: e.clientX, my: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
+      return;
+    }
+    if (e.button !== 0) return;
+    const p = overviewFrac(e);
+    draftStart.current = p;
+    setRegionDraft({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+  }
+
+  function handleOverviewMouseMove(e: React.MouseEvent) {
+    if (panStart.current && ovScrollRef.current) {
+      const el = ovScrollRef.current;
+      el.scrollLeft = panStart.current.sl - (e.clientX - panStart.current.mx);
+      el.scrollTop = panStart.current.st - (e.clientY - panStart.current.my);
+      return;
+    }
+    if (!draftStart.current) return;
+    const p = overviewFrac(e);
+    setRegionDraft({ x1: draftStart.current.x, y1: draftStart.current.y, x2: p.x, y2: p.y });
+  }
+
+  function handleOverviewMouseUp() {
+    panStart.current = null;
+    const draft = regionDraft;
+    draftStart.current = null;
+    setRegionDraft(null);
+    if (!draft) return;
+    if (Math.abs(draft.x2 - draft.x1) < 0.02 || Math.abs(draft.y2 - draft.y1) < 0.02) return;
+    const a = fracToUnits(Math.min(draft.x1, draft.x2), Math.min(draft.y1, draft.y2)); // arriba-izq
+    const b = fracToUnits(Math.max(draft.x1, draft.x2), Math.max(draft.y1, draft.y2)); // abajo-der
+    if (!a || !b) return;
+    setDxfRegions((prev) => [...prev, [a[0], b[1], b[0], a[1]]]);
+    setDxfRegionTypes((prev) => [...prev, "planta"]);
+  }
+
+  useEffect(() => {
+    if (plan && isDxf) {
+      api.getDxfInfo(plan.id).then((info) => {
+         setDxfInfo(info);
+         setDxfLayers(info.layers);
+         setDxfUnit(info.suggested_unit);
+         if (info.overview?.regions?.length) {
+           setDxfRegions(info.overview.regions);
+           const types = info.overview.region_types ?? [];
+           setDxfRegionTypes(
+             info.overview.regions.map((_, i) => types[i] ?? "planta"),
+           );
+         }
+         const initialMapping: Record<string, string | null> = {};
+         info.layers.forEach(l => {
+           if (DXF_LAYER_MAPPING_ENABLED) {
+             // Si no hay tipo sugerido, la ocultamos por defecto para mantener
+             // el plano limpio. El usuario puede habilitarlas si las necesita.
+             initialMapping[l.name] = l.suggested_type || null;
+           } else {
+             // Modo solo-visual: todas las capas se ven de fondo, ninguna
+             // genera elementos (la visibilidad CAD off/frozen la respeta el back).
+             initialMapping[l.name] = DXF_CONTEXT;
+           }
+         });
+         setDxfMapping(initialMapping);
+      }).catch((err) => {
+        setError(
+          err instanceof Error
+            ? `No se pudieron cargar las capas del CAD: ${err.message}`
+            : "No se pudieron cargar las capas del CAD",
+        );
+      });
+    }
+  }, [plan, isDxf]);
+
+  // Vistas previas por capa (la capa resaltada sobre el plano en gris).
+  // Solo si el mapeo de capas está activo: cada preview es un render del server.
+  useEffect(() => {
+    if (!DXF_LAYER_MAPPING_ENABLED) return;
+    if (!plan || !isDxf || dxfLayers.length === 0) return;
+    let cancelled = false;
+    const urls: string[] = [];
+
+    (async () => {
+      for (const layer of dxfLayers) {
+        if (cancelled) break;
+        try {
+          const blob = await api.fetchDxfLayerPreview(plan.id, layer.name);
+          if (cancelled) break;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          setLayerPreviews((prev) => ({ ...prev, [layer.name]: url }));
+        } catch {
+          // si una capa falla seguimos con las demás
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [plan, isDxf, dxfLayers]);
 
   // Cargar el plano activo del proyecto
   useEffect(() => {
@@ -162,9 +417,40 @@ export function Step3PageRoles({
     };
   }, [project.id]);
 
-  // Cargar thumbnails de cada página
+  // Auto-clasificación: cargar sugerencias de roles y pre-llenar si no hay roles guardados
   useEffect(() => {
-    if (!plan?.page_count) return;
+    if (!plan || isDxf || suggestionsApplied) return;
+    const hasExistingRoles = plan.page_roles && Object.keys(plan.page_roles).length > 0;
+    if (hasExistingRoles) {
+      setSuggestionsApplied(true);
+      return;
+    }
+    let cancelled = false;
+    api
+      .suggestRoles(plan.id)
+      .then((cls) => {
+        if (cancelled) return;
+        setClassifications(cls);
+        const suggested: Record<string, PageRole[]> = {};
+        for (const c of cls) {
+          if (c.suggested_roles.length > 0) {
+            suggested[String(c.page)] = c.suggested_roles;
+          }
+        }
+        if (Object.keys(suggested).length > 0) {
+          setPageRoles(suggested);
+        }
+        setSuggestionsApplied(true);
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestionsApplied(true);
+      });
+    return () => { cancelled = true; };
+  }, [plan, isDxf, suggestionsApplied]);
+
+  // Cargar thumbnails de cada página (solo PDF; el flujo CAD muestra capas)
+  useEffect(() => {
+    if (!plan?.page_count || isDxf) return;
     const deleted = new Set(plan.deleted_pages ?? []);
     const blobs: string[] = [];
     let cancelled = false;
@@ -194,7 +480,16 @@ export function Step3PageRoles({
       cancelled = true;
       blobs.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [plan?.id, plan?.page_count, plan?.deleted_pages]);
+  }, [plan?.id, plan?.page_count, plan?.deleted_pages, isDxf]);
+
+  useEffect(() => {
+    if (zoomedLayer === null) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoomedLayer(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [zoomedLayer]);
 
   function togglePageRole(page: number, role: PageRole) {
     setPageRoles((prev) => {
@@ -218,10 +513,23 @@ export function Step3PageRoles({
     setSaving(true);
     setError(null);
     try {
-      await api.setPageRoles(plan.id, pageRoles, skipAiDetection);
+      if (isDxf) {
+        // La unidad PRIMERO: el apply re-encuadra y crea los elementos
+        // leyendo este override; al revés, la escala elegida se ignora.
+        await api.setDxfScale(plan.id, dxfUnit);
+        await api.applyDxfLayers(
+          plan.id,
+          dxfMapping,
+          dxfRegions.length > 0 ? dxfRegions : undefined,
+          dxfRegions.length > 0 ? dxfRegionTypes : undefined,
+        );
+      } else {
+        await api.setPageRoles(plan.id, pageRoles, skipAiDetection);
+      }
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo guardar");
+      setError(err instanceof Error ? err.message : "Error al guardar");
+    } finally {
       setSaving(false);
     }
   }
@@ -236,7 +544,7 @@ export function Step3PageRoles({
 
   const summary = useMemo(() => {
     let walls = 0, openings = 0, rooms = 0, beams = 0, roofs = 0, columns = 0;
-    let riostras = 0, cloacas = 0, electricidad = 0;
+    let riostras = 0, cloacas = 0, electricidad = 0, cortes = 0;
     for (const roles of Object.values(pageRoles)) {
       if (roles.includes("walls")) walls++;
       if (roles.includes("openings")) openings++;
@@ -247,8 +555,9 @@ export function Step3PageRoles({
       if (roles.includes("riostras")) riostras++;
       if (roles.includes("cloacas")) cloacas++;
       if (roles.includes("electricidad")) electricidad++;
+      if (roles.includes("cortes")) cortes++;
     }
-    return { walls, openings, rooms, beams, roofs, columns, riostras, cloacas, electricidad };
+    return { walls, openings, rooms, beams, roofs, columns, riostras, cloacas, electricidad, cortes };
   }, [pageRoles]);
 
   // Modificado: comparar con el estado guardado en plan.page_roles
@@ -280,8 +589,11 @@ export function Step3PageRoles({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [zoomedPage, activePages]);
 
-  const canContinue =
-    Object.keys(pageRoles).length > 0 || Object.keys(plan?.page_roles ?? {}).length > 0;
+  const canContinue = isDxf
+    ? dxfRegions.length > 0 &&
+      (!DXF_LAYER_MAPPING_ENABLED ||
+        Object.values(dxfMapping).some((val) => val !== null && DXF_ELEMENT_VALUES.has(val)))
+    : Object.keys(pageRoles).length > 0 || Object.keys(plan?.page_roles ?? {}).length > 0;
 
   if (loadingPlan) {
     return (
@@ -315,17 +627,27 @@ export function Step3PageRoles({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-lg font-semibold">Asignar páginas a detectores</h2>
+        <h2 className="text-lg font-semibold">
+          {isDxf
+            ? DXF_LAYER_MAPPING_ENABLED
+              ? "Mapear capas del CAD"
+              : "Preparar el plano CAD"
+            : "Asignar páginas a detectores"}
+        </h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Marcá qué páginas usar para cada tipo de detección. La IA evita procesar páginas
-          que no corresponden y los resultados son mucho más precisos.
+          {isDxf
+            ? DXF_LAYER_MAPPING_ENABLED
+              ? "Asigná cada capa del archivo a un tipo de elemento. Los elementos se crean con la geometría exacta del CAD, sin IA. Las capas en \"Solo fondo\" se ven en el plano sin generar elementos; las ignoradas se ocultan."
+              : "Confirmá la escala y recortá las plantas que quieras computar. Cada recorte se convierte en una página del plano, con la escala exacta del archivo. Después dibujás los elementos o usás la detección con IA, igual que con un PDF."
+            : "Marcá qué páginas usar para cada tipo de detección. La IA evita procesar páginas que no corresponden y los resultados son mucho más precisos."}
         </p>
       </div>
 
       {/* Layout: sidebar izquierdo + grilla de páginas */}
       <div className="flex gap-5 items-start">
 
-        {/* Sidebar: leyenda de roles */}
+        {/* Sidebar: leyenda de roles (solo PDF; para CAD el select ya explica cada tipo) */}
+        {!isDxf && (
         <div className="w-52 shrink-0">
           <div className="sticky top-4 flex flex-col gap-1.5">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
@@ -354,9 +676,289 @@ export function Step3PageRoles({
             })}
           </div>
         </div>
+        )}
 
-        {/* Grilla de páginas */}
         <div className="flex-1 min-w-0">
+          {isDxf ? (
+            <div className="flex flex-col gap-6">
+              {/* Unit Confirmation UI */}
+              {dxfInfo && (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 shadow-sm dark:border-indigo-900/50 dark:bg-indigo-950/30">
+                  <h3 className="mb-2 text-sm font-semibold text-indigo-900 dark:text-indigo-200">
+                    Confirmar escala del plano
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-indigo-800 dark:text-indigo-300">
+                    <span>
+                      Tu dibujo CAD mide <strong>{dxfInfo.width_units} &times; {dxfInfo.height_units}</strong> unidades. ¿En qué escala está dibujado?
+                    </span>
+                    <select
+                      className="rounded border border-indigo-300 bg-white px-2 py-1 text-sm font-medium text-indigo-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-indigo-700 dark:bg-slate-900 dark:text-indigo-100"
+                      value={dxfUnit}
+                      onChange={(e) => setDxfUnit(e.target.value as any)}
+                    >
+                      <option value="mm">Milímetros</option>
+                      <option value="cm">Centímetros</option>
+                      <option value="m">Metros</option>
+                    </select>
+                    <span className="ml-2 font-mono text-xs opacity-75">
+                      = {(dxfInfo.width_units * (dxfUnit === "mm" ? 0.001 : dxfUnit === "cm" ? 0.01 : 1)).toFixed(1)}m &times; {(dxfInfo.height_units * (dxfUnit === "mm" ? 0.001 : dxfUnit === "cm" ? 0.01 : 1)).toFixed(1)}m reales
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Recortes de vistas a computar */}
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/40">
+                <h3 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Recortá las vistas a computar
+                </h3>
+                <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+                  Una lámina CAD suele traer plantas, cortes, fachadas y planillas juntas.
+                  Dibujá un rectángulo sobre cada <strong>planta</strong> que quieras computar:
+                  cada recorte será una página del plano, con su zoom y escala propios.
+                  Si recortás un <strong>corte o fachada</strong> (sirven para ver alturas),
+                  marcalo con el botón de la vista: se va a ver como página pero
+                  no genera elementos — computarlo duplicaría muros.
+                  Lo que quede afuera no genera elementos.
+                </p>
+                {/* Controles de zoom del overview */}
+                <div className="mb-2 flex items-center gap-2">
+                  <div className="flex overflow-hidden rounded border border-slate-300 dark:border-slate-600">
+                    <button
+                      type="button"
+                      onClick={() => setOvMode("crop")}
+                      className={`px-2.5 py-1 text-xs font-semibold transition ${
+                        ovMode === "crop"
+                          ? "bg-brand text-white"
+                          : "bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                      }`}
+                      title="Arrastrá para dibujar un recorte"
+                    >
+                      Recortar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOvMode("pan")}
+                      className={`px-2.5 py-1 text-xs font-semibold transition ${
+                        ovMode === "pan"
+                          ? "bg-brand text-white"
+                          : "bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                      }`}
+                      title="Arrastrá para moverte por la lámina (también: botón del medio del mouse)"
+                    >
+                      Mover
+                    </button>
+                  </div>
+                  <div className="h-5 w-px bg-slate-300 dark:bg-slate-600" />
+                  <button
+                    type="button"
+                    onClick={() => setOvZoom((z) => Math.max(1, z / 1.5))}
+                    className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    title="Alejar"
+                  >
+                    −
+                  </button>
+                  <span className="w-12 text-center text-xs font-mono text-slate-500 dark:text-slate-400">
+                    {Math.round(ovZoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOvZoom((z) => Math.min(8, z * 1.5))}
+                    className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    title="Acercar"
+                  >
+                    +
+                  </button>
+                  {ovZoom > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setOvZoom(1)}
+                      className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      Ajustar
+                    </button>
+                  )}
+                  <span className="ml-auto text-[11px] text-slate-400 dark:text-slate-500">
+                    Ctrl + rueda = zoom · botón del medio = mover
+                  </span>
+                </div>
+                <div
+                  ref={ovScrollRef}
+                  className="max-h-[70vh] overflow-auto rounded border border-slate-300 bg-white dark:border-slate-600"
+                >
+                <div
+                  ref={overviewRef}
+                  className={`relative select-none ${ovMode === "pan" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"}`}
+                  style={{ width: `${ovZoom * 100}%` }}
+                  onMouseDown={handleOverviewMouseDown}
+                  onMouseMove={handleOverviewMouseMove}
+                  onMouseUp={handleOverviewMouseUp}
+                  onMouseLeave={handleOverviewMouseUp}
+                >
+                  {overviewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={overviewUrl}
+                      alt="Lámina completa del CAD"
+                      className="block w-full"
+                      draggable={false}
+                      onLoad={(e) =>
+                        setOverviewNat({
+                          w: e.currentTarget.naturalWidth,
+                          h: e.currentTarget.naturalHeight,
+                        })
+                      }
+                    />
+                  ) : (
+                    <div className="flex h-48 items-center justify-center text-xs text-slate-400">
+                      Generando vista de la lámina…
+                    </div>
+                  )}
+                  {dxfRegions.map((r, i) => {
+                    const isCorte = dxfRegionTypes[i] === "corte";
+                    return (
+                    <div
+                      key={i}
+                      className={`absolute border-2 ${isCorte ? "border-slate-500 bg-slate-500/10" : "border-brand bg-sky-500/10"}`}
+                      style={regionStyle(r)}
+                    >
+                      <span className={`absolute left-0 top-0 rounded-br px-1.5 py-0.5 text-[10px] font-bold text-white ${isCorte ? "bg-slate-600" : "bg-brand"}`}>
+                        Vista {i + 1}{isCorte ? " · Corte" : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDxfRegionTypes((prev) =>
+                            prev.map((t, j) => (j === i ? (t === "corte" ? "planta" : "corte") : t)),
+                          );
+                        }}
+                        className={`absolute bottom-0 left-0 rounded-tr px-1.5 py-0.5 text-[10px] font-bold text-white ${
+                          isCorte ? "bg-slate-600 hover:bg-slate-700" : "bg-emerald-600 hover:bg-emerald-700"
+                        }`}
+                        title={isCorte
+                          ? "Vista de corte/fachada: se ve pero no genera elementos. Clic para marcarla como planta."
+                          : "Vista de planta: genera elementos. Clic para marcarla como corte (solo referencia de alturas)."}
+                      >
+                        {isCorte ? "Corte (sin cómputo)" : "Planta"}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDxfRegions((prev) => prev.filter((_, j) => j !== i));
+                          setDxfRegionTypes((prev) => prev.filter((_, j) => j !== i));
+                        }}
+                        className="absolute right-0 top-0 flex h-5 w-5 items-center justify-center rounded-bl bg-red-600 text-xs font-bold text-white hover:bg-red-700"
+                        title="Quitar recorte"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    );
+                  })}
+                  {regionDraft && (
+                    <div
+                      className="absolute border-2 border-dashed border-brand bg-sky-500/10 pointer-events-none"
+                      style={{
+                        left: `${Math.min(regionDraft.x1, regionDraft.x2) * 100}%`,
+                        top: `${Math.min(regionDraft.y1, regionDraft.y2) * 100}%`,
+                        width: `${Math.abs(regionDraft.x2 - regionDraft.x1) * 100}%`,
+                        height: `${Math.abs(regionDraft.y2 - regionDraft.y1) * 100}%`,
+                      }}
+                    />
+                  )}
+                </div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {dxfRegions.length === 0 ? (
+                    <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      Dibujá al menos un recorte para continuar
+                    </span>
+                  ) : (
+                    dxfRegions.map((r, i) => (
+                      <span
+                        key={i}
+                        className={
+                          dxfRegionTypes[i] === "corte"
+                            ? "rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300"
+                            : "rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+                        }
+                      >
+                        Vista {i + 1}{dxfRegionTypes[i] === "corte" ? " (corte)" : ""}: {((r[2] - r[0]) * unitFactor).toFixed(1)} × {((r[3] - r[1]) * unitFactor).toFixed(1)} m
+                      </span>
+                    ))
+                  )}
+                  {dxfRegions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => { setDxfRegions([]); setDxfRegionTypes([]); }}
+                      className="text-[11px] text-slate-500 underline hover:text-slate-800 dark:hover:text-slate-200"
+                    >
+                      Limpiar recortes
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Grilla de capas (solo si el import de elementos por capa está activo) */}
+              {DXF_LAYER_MAPPING_ENABLED && (
+              <div className="flex flex-col rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/40">
+              {/* Header */}
+              <div className="grid grid-cols-[1fr_80px_220px] items-center gap-4 border-b border-slate-200 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                <div>Capa</div>
+                <div className="text-right">Ents.</div>
+                <div>Tipo de elemento</div>
+              </div>
+              
+              {/* Body */}
+              <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800/60 max-h-[500px] overflow-y-auto custom-scrollbar">
+                {dxfLayers.length === 0 && !error && (
+                  <div className="p-8 text-center text-sm text-slate-500">
+                    Leyendo capas del archivo CAD…
+                  </div>
+                )}
+                {dxfLayers.map((layer) => {
+                  const mapped = dxfMapping[layer.name];
+                  return (
+                    <div key={layer.name} className="grid grid-cols-[1fr_80px_220px] items-center gap-4 px-4 py-2.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <div
+                        className={`flex items-center gap-3 overflow-hidden ${layerPreviews[layer.name] ? "cursor-zoom-in" : ""}`}
+                        onClick={() => layerPreviews[layer.name] && setZoomedLayer(layer.name)}
+                        title={layerPreviews[layer.name] ? "Clic para ver la capa resaltada en el plano" : layer.name}
+                      >
+                        <div className="h-3.5 w-3.5 shrink-0 rounded-sm shadow-sm" style={{ backgroundColor: `rgb(${layer.color_rgb.join(',')})` }} />
+                        <span className="truncate text-sm font-medium font-mono text-slate-700 hover:underline dark:text-slate-200">
+                          {layer.name}
+                        </span>
+                        {layerPreviews[layer.name] && <span className="shrink-0 text-xs opacity-50">ver</span>}
+                      </div>
+                      <div className="text-right text-sm font-mono text-slate-500 dark:text-slate-500">
+                        {layer.entity_count}
+                      </div>
+                      <div>
+                        <select
+                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500 dark:focus:border-sky-500 dark:focus:ring-sky-500"
+                          value={mapped || ""}
+                          onChange={(e) => setDxfMapping(prev => ({ ...prev, [layer.name]: e.target.value || null }))}
+                        >
+                          <option value="">Ignorar (ocultar)</option>
+                          <option value={DXF_CONTEXT}>Solo fondo (sin elementos)</option>
+                          {DXF_TYPE_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              </div>
+              )}
+            </div>
+          ) : (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {activePages.map((page) => {
           const roles = pageRoles[String(page)] ?? [];
@@ -390,12 +992,31 @@ export function Step3PageRoles({
                 {/* Hover overlay effect */}
                 <div className="absolute inset-0 bg-slate-950/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
                   <span className="rounded bg-slate-950/80 px-2 py-1 text-[10px] font-semibold text-white shadow backdrop-blur-xs">
-                    Ampliar 🔍
+                    Ampliar
                   </span>
                 </div>
                 <span className="absolute left-1.5 top-1.5 rounded bg-slate-900/80 px-1.5 py-0.5 text-xs font-semibold text-white">
                   p. {page}
                 </span>
+                {(() => {
+                  const cls = classifications.find((c) => c.page === page);
+                  if (!cls || cls.view_type === "otro") return null;
+                  const labels: Record<string, { text: string; bg: string }> = {
+                    planta: { text: "Planta", bg: "bg-emerald-600" },
+                    corte: { text: "Corte/Elev.", bg: "bg-slate-600" },
+                    planilla: { text: "Planilla", bg: "bg-amber-600" },
+                    estructura: { text: "Estructura", bg: "bg-purple-600" },
+                    instalacion: { text: "Instalación", bg: "bg-green-600" },
+                    techos: { text: "Techos", bg: "bg-teal-600" },
+                  };
+                  const l = labels[cls.view_type];
+                  if (!l) return null;
+                  return (
+                    <span className={`absolute right-1.5 top-1.5 rounded ${l.bg} px-1.5 py-0.5 text-[10px] font-semibold text-white`}>
+                      {l.text}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="flex flex-wrap gap-1">
                 {ROLE_DEFS.map((r) => {
@@ -422,10 +1043,24 @@ export function Step3PageRoles({
           );
         })}
       </div>
+          )}
         </div>{/* end flex-1 pages column */}
       </div>{/* end flex sidebar+pages row */}
 
-      {/* Resumen */}
+      {/* Resumen (CAD): capas que generan elementos */}
+      {DXF_LAYER_MAPPING_ENABLED && isDxf && dxfLayers.length > 0 && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+          <strong>
+            {Object.values(dxfMapping).filter((v) => v !== null && DXF_ELEMENT_VALUES.has(v)).length}
+          </strong>{" "}
+          de {dxfLayers.length} capas generan elementos ·{" "}
+          {Object.values(dxfMapping).filter((v) => v === DXF_CONTEXT).length} solo fondo ·{" "}
+          {Object.values(dxfMapping).filter((v) => !v).length} ocultas
+        </div>
+      )}
+
+      {/* Resumen (PDF) */}
+      {!isDxf && (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
         <div className="flex flex-wrap gap-3 text-slate-700 dark:text-slate-300">
           <span>
@@ -463,6 +1098,12 @@ export function Step3PageRoles({
           <span>
             <strong>{summary.electricidad}</strong> p. para electricidad
           </span>
+          {summary.cortes > 0 && (<>
+          <span className="text-slate-400">·</span>
+          <span>
+            <strong>{summary.cortes}</strong> p. cortes/elev.
+          </span>
+          </>)}
         </div>
         {Object.keys(pageRoles).length > 0 && (
           <button
@@ -474,8 +1115,10 @@ export function Step3PageRoles({
           </button>
         )}
       </div>
+      )}
 
-      {/* Manual Configuration Toggle */}
+      {/* Manual Configuration Toggle (solo PDF: el flujo CAD nunca usa IA) */}
+      {!isDxf && (
       <div className="rounded-md border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-900/60">
         <label className="flex cursor-pointer items-start gap-2.5 text-slate-700 dark:text-slate-300">
           <input
@@ -494,6 +1137,7 @@ export function Step3PageRoles({
           </div>
         </label>
       </div>
+      )}
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
@@ -513,15 +1157,69 @@ export function Step3PageRoles({
           className="rounded-md bg-brand px-5 py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
           title={
             !canContinue
-              ? "Asigná al menos una página a un rol para continuar"
-              : isDirty
-                ? "Guardar y disparar detección IA"
-                : "Continuar al siguiente paso"
+              ? isDxf
+                ? "Asigná al menos una capa a un tipo de elemento para continuar"
+                : "Asigná al menos una página a un rol para continuar"
+              : isDxf
+                ? "Crear elementos desde las capas mapeadas"
+                : isDirty
+                  ? "Guardar y disparar detección IA"
+                  : "Continuar al siguiente paso"
           }
         >
-          {saving ? "Guardando..." : isDirty ? "Guardar y continuar →" : "Continuar →"}
+          {saving
+            ? "Guardando..."
+            : isDxf
+              ? "Aplicar capas y continuar →"
+              : isDirty
+                ? "Guardar y continuar →"
+                : "Continuar →"}
         </button>
       </div>
+
+      {zoomedLayer !== null && layerPreviews[zoomedLayer] && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/85 p-4 backdrop-blur-xs"
+          onClick={() => setZoomedLayer(null)}
+        >
+          <div
+            className="relative flex max-h-[90vh] max-w-[90vw] flex-col items-center gap-3 rounded-xl bg-slate-900 p-4 shadow-2xl border border-slate-700/50"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex w-full items-center justify-between gap-4">
+              <span className="truncate text-sm font-semibold text-white" title={zoomedLayer}>
+                Capa: {zoomedLayer}
+              </span>
+              <button
+                onClick={() => setZoomedLayer(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950/70 text-lg font-bold text-white hover:bg-slate-800 transition"
+                title="Cerrar"
+              >
+                ×
+              </button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={layerPreviews[zoomedLayer]}
+              alt={`Capa ${zoomedLayer} ampliada`}
+              className="max-h-[72vh] max-w-[85vw] rounded bg-white object-contain"
+            />
+            <select
+              className="w-full rounded border-slate-300 bg-slate-50 p-2 text-sm font-semibold dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              value={dxfMapping[zoomedLayer] || ""}
+              onChange={(e) =>
+                setDxfMapping((prev) => ({ ...prev, [zoomedLayer]: e.target.value || null }))
+              }
+            >
+              <option value="">Ignorar (ocultar del plano)</option>
+              <option value={DXF_CONTEXT}>Solo fondo (sin elementos)</option>
+              {DXF_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {zoomedPage !== null && (
         <div 

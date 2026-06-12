@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "PowerShell(Get-Location; npx tsc --noEmit; echo \"Exit: $LASTEXITCODE\")",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(python -m py_compile app/services/dxf_import.py app/api/v1/plans/_dxf.py app/api/v1/plans/_render.py)",
+      "Bash(python -c ' *)",
+      "Bash(python -)",
+      "Bash(docker exec *)",
+      "Bash(docker restart *)",
+      "WebFetch(domain:www.plan0.dev)",
+      "WebFetch(domain:www.argentina.gob.ar)",
+      "Bash(npx tsc *)",
+      "PowerShell(docker cp scalistai-backend-1:/app/storage/plans/77/4f48aad001b740ef9396eb88d05722da_overview.png $env:TEMP\\\\plan68_overview.png; docker cp scalistai-backend-1:/app/storage/plans/78/0ed920b566384c42ab9f959f336f7c50_overview.png $env:TEMP\\\\plan69_overview.png; docker cp scalistai-backend-1:/app/storage/plans/81/456247cd1ba64cf09961d9bc2ca71cc8_overview.png $env:TEMP\\\\plan72_overview.png)"
     ]
   }
 }

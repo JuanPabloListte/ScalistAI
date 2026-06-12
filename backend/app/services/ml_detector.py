@@ -81,6 +81,7 @@ class MLDetectionResult:
     riostras: list[dict] = field(default_factory=list)
     cloacas: list[dict] = field(default_factory=list)
     electricidad: list[dict] = field(default_factory=list)
+    escaleras: list[dict] = field(default_factory=list)
     # Metadata útil para logging y feedback.
     model_version: str = "unknown"
     inference_time_ms: float = 0.0
@@ -467,6 +468,8 @@ def _postprocess(
             _emit_cloacas(result, mask, px_per_m, page_index)
         elif name == "electricidad":
             _emit_electricidad(result, mask, px_per_m, page_index)
+        elif name == "escalera":
+            _emit_escaleras(result, mask, px_per_m, page_index)
         # Tipos desconocidos los ignoramos silenciosamente — los suma quien
         # extienda los handlers (ej: futuro `roof`).
 
@@ -536,6 +539,42 @@ def _emit_rooms(result: MLDetectionResult, mask, px_per_m: float, page_index: in
             "id": f"ml_room_{idx}",
             "type": "room",
             "geometry": {"points": pts, "label": f"Recinto ML {idx}"},
+            "length_m": None,
+            "area_m2": round(area_m2, 2),
+            "height_m": 2.8,
+            "page": page_index + 1,
+        })
+
+
+def _emit_escaleras(result: MLDetectionResult, mask, px_per_m: float, page_index: int) -> None:
+    """Escaleras: cada componente conexo → polígono con área (ocupan superficie;
+    el cómputo de hormigón/revestimiento sale del m²)."""
+    import cv2
+
+    n_labels, labels = cv2.connectedComponents(mask, connectivity=4)
+    for comp_id in range(1, n_labels):
+        comp = (labels == comp_id).astype("uint8") * 255
+        area_px = int(comp.sum() // 255)
+        area_m2 = area_px / (px_per_m * px_per_m)
+        if area_m2 < 1.0 or area_m2 > 40.0:
+            continue
+        contours, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
+        contour = max(contours, key=cv2.contourArea)
+        eps = max(0.005 * cv2.arcLength(contour, True), 3.0)
+        approx = cv2.approxPolyDP(contour, eps, True)
+        if len(approx) < 3:
+            continue
+        pts: list[float] = []
+        for pt in approx:
+            pts.append(round(float(pt[0][0]), 2))
+            pts.append(round(float(pt[0][1]), 2))
+        idx = len(result.escaleras) + 1
+        result.escaleras.append({
+            "id": f"ml_escalera_{idx}",
+            "type": "escalera",
+            "geometry": {"points": pts, "label": f"Escalera ML {idx}"},
             "length_m": None,
             "area_m2": round(area_m2, 2),
             "height_m": 2.8,

@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import DetectedElement, Plan, User
 from app.schemas.detected_element import (
+    CandidateBulkAction,
     DetectedElementCreate,
     DetectedElementRead,
     DetectedElementUpdate,
@@ -105,6 +106,62 @@ def delete_element(
 
     db.delete(element)
     db.commit()
+
+
+@router.post(
+    "/plans/{plan_id}/elements/candidates/bulk-action",
+    response_model=list[DetectedElementRead],
+)
+def candidates_bulk_action(
+    plan_id: int,
+    payload: CandidateBulkAction,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[DetectedElement]:
+    """Acepta o descarta propuestas de la IA (is_candidate=True) en lote.
+
+    - accept: el elemento pasa a confirmado (is_candidate=False, confidence=1.0,
+      source="ai" = aceptado explícitamente) y empieza a computar.
+    - discard: se elimina.
+
+    Devuelve los elementos aceptados (lista vacía para discard).
+    """
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    query = db.query(DetectedElement).filter(
+        DetectedElement.plan_id == plan_id,
+        DetectedElement.is_candidate.is_(True),
+    )
+    if payload.element_ids is not None:
+        if not payload.element_ids:
+            return []
+        query = query.filter(DetectedElement.id.in_(payload.element_ids))
+    if payload.page is not None:
+        query = query.filter(DetectedElement.page == payload.page)
+
+    candidates = query.all()
+    if not candidates:
+        return []
+
+    if payload.action == "accept":
+        for el in candidates:
+            el.is_candidate = False
+            el.confidence = 1.0
+            el.source = "ai"
+        db.commit()
+        for el in candidates:
+            db.refresh(el)
+        return candidates
+
+    # discard
+    ids = [el.id for el in candidates]
+    db.query(DetectedElement).filter(DetectedElement.id.in_(ids)).delete(
+        synchronize_session=False
+    )
+    db.commit()
+    return []
 
 
 @router.post("/plans/{plan_id}/elements/bulk/delete", status_code=status.HTTP_204_NO_CONTENT)

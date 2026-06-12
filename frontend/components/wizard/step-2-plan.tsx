@@ -53,9 +53,10 @@ export function Step2Plan({
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Subir plano del proyecto</h2>
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        Subí el plano en PDF o DXF. Si es PDF, la IA detecta muros, recintos y
-        aberturas en background mientras avanzás con los pasos siguientes. Si es
-        DXF, importamos los elementos directamente desde sus capas.
+        Subí el plano en PDF, DXF o DWG. Si es PDF, en el paso siguiente asignás
+        qué páginas usar para cada tipo de detección. Si es DXF/DWG, en el paso
+        siguiente mapeás las capas del archivo a tipos de elementos, con la
+        precisión exacta del CAD.
       </p>
 
       {hasPlan && (
@@ -75,7 +76,7 @@ export function Step2Plan({
       >
         <input
           type="file"
-          accept="application/pdf,.pdf,.dxf"
+          accept="application/pdf,.pdf,.dxf,.dwg"
           onChange={handleUpload}
           disabled={uploading}
           className="hidden"
@@ -86,10 +87,10 @@ export function Step2Plan({
             ? "Procesando plano..."
             : hasPlan
               ? "Subir otro plano"
-              : "Hacé clic para elegir un PDF o DXF"}
+              : "Hacé clic para elegir un archivo"}
         </span>
         <span className="text-xs text-slate-500 dark:text-slate-400">
-          Máximo 50 MB · archivos .pdf o .dxf
+          Máximo 50 MB · archivos .pdf, .dxf o .dwg
         </span>
       </label>
 

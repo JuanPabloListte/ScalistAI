@@ -31,7 +31,7 @@ import numpy as np
 # ----------------------------------------------------------------------
 # Constantes (sincronizadas con app/services/ml_detector.py)
 # ----------------------------------------------------------------------
-CLASS_NAMES = ["background", "wall", "room", "door", "window", "sliding_door", "beam", "column", "roof", "riostra", "cloaca", "electricidad"]
+CLASS_NAMES = ["background", "wall", "room", "door", "window", "sliding_door", "beam", "column", "roof", "riostra", "cloaca", "electricidad", "escalera"]
 NUM_CLASSES = len(CLASS_NAMES)
 INPUT_SIZE = 512
 
@@ -40,7 +40,7 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 # Pesos por clase para CrossEntropy. Vigas y columnas pesan más porque
 # son raras y de pocos pixeles. El orden DEBE matchear CLASS_NAMES.
-CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0, 2.0, 2.0, 2.0]
+CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0, 2.0, 2.0, 2.0, 1.5]
 
 # Paths convencionales
 MODELS_DIR = Path("backend/models")

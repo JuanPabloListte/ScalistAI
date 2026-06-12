@@ -99,9 +99,7 @@ function NewProjectWizardInner() {
           <Step2Plan
             project={project}
             onUploaded={(plan) =>
-              // Un DXF trae los elementos ya extraídos de sus capas: salta el
-              // paso de roles/IA (3) y va directo a ubicación (4).
-              setStep(plan?.scale_source === "dxf" ? 4 : 3)
+              setStep(3)
             }
             onBack={goBack}
           />

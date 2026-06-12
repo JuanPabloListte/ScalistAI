@@ -99,7 +99,14 @@ export type MlModelStatus = {
 
 export type PageOverride = "recommended" | "rejected";
 
-export type PageRole = "walls" | "openings" | "rooms" | "beams" | "roofs" | "columns" | "riostras" | "cloacas" | "electricidad";
+export type PageRole = "walls" | "openings" | "rooms" | "beams" | "roofs" | "columns" | "riostras" | "cloacas" | "electricidad" | "escaleras" | "cortes";
+
+export type PageClassification = {
+  page: number;
+  view_type: "planta" | "corte" | "planilla" | "estructura" | "instalacion" | "techos" | "otro";
+  suggested_roles: PageRole[];
+  reason: string;
+};
 
 export type Plan = {
   id: number;
@@ -126,7 +133,31 @@ export type PageRecommendation = {
   override: PageOverride | null;
 };
 
-export type ElementType = "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad";
+export type ElementType = "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad" | "escalera";
+
+export type DxfLayer = {
+  name: string;
+  color_rgb: [number, number, number];
+  entity_count: number;
+  suggested_type: ElementType | null;
+};
+
+export type DxfInfo = {
+  layers: DxfLayer[];
+  width_units: number;
+  height_units: number;
+  suggested_unit: "mm" | "cm" | "m";
+  overview: {
+    /** Marco del contenido en unidades de dibujo: [x1, y1, x2, y2] (y crece hacia arriba) */
+    bounds: [number, number, number, number];
+    /** Recortes ya aplicados (re-edición) */
+    regions: number[][];
+    /** Tipo de cada recorte, paralelo a regions: "planta" | "corte" */
+    region_types: DxfRegionType[];
+  };
+};
+
+export type DxfRegionType = "planta" | "corte";
 
 export type ElementGeometry = {
   points: number[]; // flat [x1, y1, x2, y2, ...]
@@ -185,7 +216,9 @@ export type DetectedElement = {
   length_m: number | null;
   area_m2: number | null;
   height_m: number | null;
-  source: "manual" | "ai";
+  source: "manual" | "ai" | "ai_ml" | "dxf";
+  is_candidate: boolean;
+  confidence: number;
   materials?: any[];
   created_at: string;
   updated_at: string;
@@ -292,6 +325,28 @@ export type AdminUserUpdatePayload = {
   role?: "admin" | "member";
 };
 
+export type AiConfigRead = {
+  ai_provider: string;
+  ai_model_name: string | null;
+  has_api_key: boolean;
+};
+
+export type AiConfigUpdate = {
+  ai_provider?: string;
+  ai_api_key?: string;
+  ai_model_name?: string;
+};
+
+export type ProviderModelInfo = {
+  id: string;
+  name: string;
+};
+
+export type PlanAiContextInfo = {
+  provider: string;
+  messages: Array<{ role: string; content: string }>;
+};
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("scalistai_token");
@@ -363,6 +418,8 @@ export const api = {
     }),
   getAiStatus: (planId: number) =>
     request<AiStatus>(`/api/v1/plans/${planId}/ai-status`),
+  getAiContext: (planId: number) =>
+    request<PlanAiContextInfo>(`/api/v1/plans/${planId}/ai-context`),
   getMlStatus: () => request<MlModelStatus>(`/api/v1/plans/ml-status`),
   getTrainingStats: () => request<TrainingStats>(`/api/v1/plans/training-stats`),
   async getMe(): Promise<User> {
@@ -547,6 +604,24 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
+  candidatesBulkAction: (
+    planId: number,
+    action: "accept" | "discard",
+    elementIds?: number[],
+    page?: number,
+  ) =>
+    request<DetectedElement[]>(
+      `/api/v1/plans/${planId}/elements/candidates/bulk-action`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          element_ids: elementIds ?? null,
+          page: page ?? null,
+        }),
+      },
+    ),
+
   deleteElement: async (planId: number, elementId: number): Promise<void> => {
     const token = getToken();
     const res = await fetch(
@@ -696,6 +771,9 @@ export const api = {
   recommendPages: (planId: number) =>
     request<PageRecommendation[]>(`/api/v1/plans/${planId}/recommend-pages`),
 
+  suggestRoles: (planId: number) =>
+    request<PageClassification[]>(`/api/v1/plans/${planId}/suggest-roles`),
+
   setPageOverride: (
     planId: number,
     page: number,
@@ -714,6 +792,49 @@ export const api = {
     request<Plan>(`/api/v1/plans/${planId}/page-roles`, {
       method: "PATCH",
       body: JSON.stringify({ page_roles: pageRoles, skip_ai_detection: skipAiDetection }),
+    }),
+
+  getDxfInfo: (planId: number) =>
+    request<DxfInfo>(`/api/v1/plans/${planId}/dxf-info`),
+
+  setDxfScale: (planId: number, unit: "mm" | "cm" | "m") =>
+    request<{ success: boolean }>(`/api/v1/plans/${planId}/dxf-scale`, {
+      method: "POST",
+      body: JSON.stringify({ unit }),
+    }),
+
+  fetchDxfOverview: async (planId: number): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/dxf-overview`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`No se pudo cargar la vista de la lámina (HTTP ${res.status})`);
+    return res.blob();
+  },
+
+  fetchDxfLayerPreview: async (planId: number, layer: string): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(
+      `${API_URL}/api/v1/plans/${planId}/dxf-layer-preview?layer=${encodeURIComponent(layer)}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+    if (!res.ok) throw new Error(`No se pudo cargar la vista previa de la capa (HTTP ${res.status})`);
+    return res.blob();
+  },
+
+  applyDxfLayers: (
+    planId: number,
+    mapping: Record<string, string | null>,
+    regions?: number[][],
+    regionTypes?: DxfRegionType[],
+  ) =>
+    request<{ created: number }>(`/api/v1/plans/${planId}/dxf-layers/apply`, {
+      method: "POST",
+      body: JSON.stringify({
+        mapping,
+        regions: regions ?? null,
+        region_types: regionTypes ?? null,
+      }),
     }),
 
   createElementsBulk: (planId: number, payload: any[]) =>
@@ -758,8 +879,9 @@ export const api = {
       method: "DELETE",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar la organización");
   },
+
   createOrgUser: (orgId: number, payload: AdminUserCreatePayload) =>
     request<OrgUser>(`/api/v1/admin/organizations/${orgId}/users`, {
       method: "POST",
@@ -800,6 +922,19 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   },
 
+  // ---- Organization AI Config (BYOK) ----
+  getAiConfig: () => request<AiConfigRead>("/api/v1/organization/ai-config"),
+  updateAiConfig: (payload: AiConfigUpdate) =>
+    request<AiConfigRead>("/api/v1/organization/ai-config", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  listProviderModels: (provider: string, api_key?: string) =>
+    request<ProviderModelInfo[]>("/api/v1/ai-providers/list-models", {
+      method: "POST",
+      body: JSON.stringify({ provider, api_key }),
+    }),
+
   async uploadMaterialsJson(items: any[]): Promise<{imported: number, updated: number}> {
     return request<{imported: number, updated: number}>("/api/v1/materials/import-json", {
       method: "POST",
@@ -808,3 +943,4 @@ export const api = {
     });
   },
 };
+

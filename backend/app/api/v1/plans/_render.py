@@ -29,6 +29,11 @@ def start_prewarm(
     if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
+    # Los planos CAD se sirven como SVG vectorial: no hay nada que pre-rasterizar
+    # y PyMuPDF no puede abrir el .svg.
+    if plan.scale_source == "dxf":
+        return {"status": "skipped", "page_count": plan.page_count or 1}
+
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF original no disponible")
@@ -77,6 +82,22 @@ def get_plan_raster(
     if plan.deleted_pages and page in plan.deleted_pages:
         raise HTTPException(status_code=410, detail=f"Página {page} fue eliminada")
 
+    # Antes de aplicar recortes, la página inicial de un plano CAD es el
+    # overview PNG liviano de la lámina.
+    if plan.scale_source == "dxf" and pdf_path.suffix.lower() == ".png":
+        return FileResponse(pdf_path, media_type="image/png")
+
+    if plan.scale_source == "dxf" and pdf_path.suffix.lower() == ".svg":
+        # Cada recorte del CAD es una página con su propio SVG: {id}_p{n}.svg
+        page_svg = pdf_path
+        if page > 1:
+            stem = pdf_path.stem
+            if stem.endswith("_p1"):
+                page_svg = pdf_path.with_name(f"{stem[:-3]}_p{page}.svg")
+        if not page_svg.exists():
+            raise HTTPException(status_code=404, detail=f"No hay SVG para la página {page}")
+        return FileResponse(page_svg, media_type="image/svg+xml")
+
     cached = _page_raster_path(pdf_path, page)
     if not cached.exists():
         try:
@@ -102,6 +123,10 @@ def get_render_status(
     if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     total = plan.page_count or 0
+    # Los planos CAD no rasterizan en background: sus páginas (SVG/PNG) quedan
+    # listas en el import, así que el conteo de PNGs cacheados no aplica.
+    if plan.scale_source == "dxf":
+        return {"rendered": total, "total": total}
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists() or total == 0:
         return {"rendered": 0, "total": total}

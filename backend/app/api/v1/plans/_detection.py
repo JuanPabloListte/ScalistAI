@@ -7,6 +7,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Plan, User
+from app.models.plan_ai_context import PlanAiContext
 from app.schemas.plan import PageRolesUpdate
 from app.services.auto_detect_pipeline import get_ai_status, run_initial_detection
 from app.services.ml_detector import get_ml_detector
@@ -25,29 +26,43 @@ def _ml_page_candidates(plan: Plan, page: int, kind: str) -> list[dict]:
     if not detector.is_available():
         return []
 
-    if (plan.scale_source == "dxf") or not str(plan.pdf_path).lower().endswith(".pdf"):
-        return []
-
-    import fitz
     import numpy as np
 
-    pdf_path = Path(plan.pdf_path)
     scales = plan.page_scales or {}
     px_per_m = scales.get(str(page))
-    dpi = plan.dpi or RASTER_DPI
 
-    doc = fitz.open(pdf_path)
-    try:
-        if page - 1 < 0 or page - 1 >= doc.page_count:
+    if plan.scale_source == "dxf":
+        # Página CAD: el apply de recortes deja un PNG gemelo del SVG de cada
+        # página ({id}_p{n}.png) con la misma escala. La IA corre sobre ese
+        # PNG exactamente igual que sobre el raster de una página PDF.
+        from PIL import Image
+
+        src = Path(plan.pdf_path)
+        stem = src.stem[:-3] if src.stem.endswith("_p1") else src.stem
+        png = src.with_name(f"{stem}_p{page}.png")
+        if not png.exists():
             return []
-        p_obj = doc.load_page(page - 1)
-        zoom = dpi / 72.0
-        pixmap = p_obj.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-        img = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
-            pixmap.height, pixmap.width, 3
-        )
-    finally:
-        doc.close()
+        img = np.array(Image.open(png).convert("RGB"))
+    elif not str(plan.pdf_path).lower().endswith(".pdf"):
+        return []
+    else:
+        import fitz
+
+        pdf_path = Path(plan.pdf_path)
+        dpi = plan.dpi or RASTER_DPI
+
+        doc = fitz.open(pdf_path)
+        try:
+            if page - 1 < 0 or page - 1 >= doc.page_count:
+                return []
+            p_obj = doc.load_page(page - 1)
+            zoom = dpi / 72.0
+            pixmap = p_obj.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            img = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+                pixmap.height, pixmap.width, 3
+            )
+        finally:
+            doc.close()
 
     result = detector.detect(img, px_per_m, page_index=page - 1)
     return list(getattr(result, kind, []) or [])
@@ -129,6 +144,22 @@ def get_ai_pipeline_status(
     if plan is None or plan.project.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     return get_ai_status(plan_id)
+
+@router.get("/plans/{plan_id}/ai-context")
+def get_ai_context(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Devuelve el contexto y análisis del LLM para este plano, si lo hay."""
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    
+    ctx = db.query(PlanAiContext).filter(PlanAiContext.plan_id == plan_id).first()
+    if not ctx:
+        return {"provider": "scalist", "messages": []}
+    return {"provider": ctx.provider, "messages": ctx.messages}
 
 
 @router.get("/plans/{plan_id}/detect-openings")
