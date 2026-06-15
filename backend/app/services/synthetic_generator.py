@@ -72,8 +72,11 @@ DEFAULT_BEAM_THICK_PX = 18
 # IoU se quedaba en 0.08 mientras beam llegaba a 0.53.
 DEFAULT_COLUMN_RADIUS_PX = 14
 DEFAULT_RIOSTRA_THICK_PX = 18
-DEFAULT_CLOACA_THICK_PX = 6
-DEFAULT_ELECTRICIDAD_THICK_PX = 4
+# Engrosados (antes 6 y 4): a 4-6px la red no tenía gradiente suficiente
+# para aprender estas clases (IoU 0.0 en v11). El espesor real se recupera
+# en post-proceso; acá importa que la máscara tenga señal.
+DEFAULT_CLOACA_THICK_PX = 14
+DEFAULT_ELECTRICIDAD_THICK_PX = 10
 
 # Límites de seguridad
 MIN_VARIATIONS = 1

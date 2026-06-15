@@ -40,7 +40,10 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 # Pesos por clase para CrossEntropy. Vigas y columnas pesan más porque
 # son raras y de pocos pixeles. El orden DEBE matchear CLASS_NAMES.
-CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0, 2.0, 2.0, 2.0, 1.5]
+# Cloaca/electricidad pesan 7.0: son trazos finos con ~0.2-0.5% de los
+# píxeles (desbalance ~500:1 vs fondo); con 2.0 la red aprendía a no
+# predecirlas nunca (IoU 0.0 en v11).
+CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0, 2.0, 7.0, 7.0, 1.5]
 
 # Paths convencionales
 MODELS_DIR = Path("backend/models")
@@ -369,21 +372,59 @@ def initialize_or_load_holdout(all_pairs: list[tuple[Path, Path]], frac: float =
         write_holdout([p[0] for p in holdout_pairs], seed)
         return train_pairs, holdout_pairs
 
-    # Para datasets grandes, agrupar y aislar por batch completo (evita data leakage)
+    # Para datasets grandes: split ESTRATIFICADO por clase, aislando batches
+    # completos (anti-leakage). Tomar batches al azar dejaba clases enteras sin
+    # representación en el holdout (cloaca/escalera daban IoU 0.000/nan porque el
+    # holdout no las contenía). Acá garantizamos que cada clase presente en el
+    # dataset, y que tenga al menos 2 batches, aporte >=1 batch al holdout.
+    import cv2
+
+    def _batch_classes(pairs: list[tuple[Path, Path]]) -> set[int]:
+        """Clases (sin fondo) presentes en un batch. Todas las variaciones de
+        una misma página comparten elementos, así que basta una máscara."""
+        m = cv2.imread(str(pairs[0][1]), cv2.IMREAD_GRAYSCALE)
+        if m is None:
+            return set()
+        return {int(v) for v in np.unique(m) if v != 0}
+
     group_keys = list(groups.keys())
     rng.shuffle(group_keys)
     n_target = max(1, int(len(all_pairs) * frac))
 
-    holdout_pairs = []
-    for i, k in enumerate(group_keys):
-        # Siempre dejamos al menos un grupo para entrenar.
-        if i >= len(group_keys) - 1:
-            break
-        holdout_pairs.extend(groups[k])
-        if len(holdout_pairs) >= n_target:
-            break
+    group_classes = {k: _batch_classes(groups[k]) for k in group_keys}
+    all_classes: set[int] = set().union(*group_classes.values()) if group_classes else set()
 
+    holdout_groups: set[Path] = set()
+
+    # Pasada 1 (cobertura): cada clase con >=2 batches aporta >=1 al holdout.
+    # Las clases en un solo batch quedan en train (priorizar aprenderlas sobre
+    # medirlas; igual no serían medibles sin sacarlas del train).
+    for cls in sorted(all_classes):
+        batches_with = [k for k in group_keys if cls in group_classes[k]]
+        if len(batches_with) >= 2 and not any(k in holdout_groups for k in batches_with):
+            holdout_groups.add(batches_with[0])
+
+    def _holdout_size() -> int:
+        return sum(len(groups[k]) for k in holdout_groups)
+
+    # Pasada 2 (relleno): completar hasta ~frac sin vaciar el train.
+    for k in group_keys:
+        if _holdout_size() >= n_target:
+            break
+        if k not in holdout_groups and (len(groups) - len(holdout_groups)) > 1:
+            holdout_groups.add(k)
+
+    holdout_pairs = [p for k in holdout_groups for p in groups[k]]
     holdout_set = {p[0] for p in holdout_pairs}
     train_pairs = [p for p in all_pairs if p[0] not in holdout_set]
+
+    covered = set().union(*(group_classes[k] for k in holdout_groups)) if holdout_groups else set()
+    missing = sorted(all_classes - covered)
+    if missing:
+        names = [CLASS_NAMES[c] if c < len(CLASS_NAMES) else str(c) for c in missing]
+        print(f"[holdout] AVISO: clases sin cobertura en holdout (1 solo batch): {names}")
+    print(f"[holdout] estratificado: {len(holdout_groups)} batches, "
+          f"{len(holdout_pairs)} samples, {len(covered)}/{len(all_classes)} clases cubiertas")
+
     write_holdout([p[0] for p in holdout_pairs], seed)
     return train_pairs, holdout_pairs
