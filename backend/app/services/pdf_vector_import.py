@@ -32,13 +32,19 @@ logger = logging.getLogger(__name__)
 # Palabras clave (en mayúsculas) para clasificar capas por nombre.
 _WALL_KEYS = ("MURO", "WALL", "PARED")
 _OPENING_KEYS = ("ABERTURA", "CARPINTERIA", "PUERTA", "VENTANA", "DOOR", "WINDOW")
-_CLOACA_KEYS = ("CLOACA", "CLOACAL", "PLUVIAL", "DESAGUE")
+_CLOACA_KEYS = ("CLOACA", "CLOACAL", "DESAGUE")
 _ELEC_KEYS = ("ELECTRIC", "ELÉCTRIC", "BOCAS", "TOMAS", "IE-BARRAS")
 _STAIR_KEYS = ("ESCALERA", "STAIR")
 _SCALE_KEYS = ("COTA",)
 
 # Capas que NUNCA son elementos aunque matcheen (hatches del plotter, etc.)
 _EXCLUDE_KEYS = ("PDF32_", "SOLID FILL")
+
+# Pluvial (desagüe de lluvia / pendientes de techo) NO es cloaca: es otro
+# sistema y en un plano de techos son flechas de pendiente, no cañerías.
+# Como el modelo no tiene clase pluvial, se descarta para no contaminar cloaca
+# (matchea ANTES que _CLOACA_KEYS porque "desaguepluvial" contiene DESAGUE).
+_PLUVIAL_KEYS = ("PLUVIAL",)
 
 _MIN_WALL_SEG_M = 0.15
 _MIN_LINE_M = 0.08
@@ -50,6 +56,8 @@ _OPENING_CLUSTER_GAP_M = 0.12
 def _classify_layer(name: str) -> Optional[str]:
     up = name.upper()
     if any(k in up for k in _EXCLUDE_KEYS):
+        return None
+    if any(k in up for k in _PLUVIAL_KEYS):
         return None
     if any(k in up for k in _WALL_KEYS):
         return "wall"
