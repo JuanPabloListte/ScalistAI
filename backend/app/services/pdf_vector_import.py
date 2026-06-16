@@ -53,6 +53,35 @@ _OPENING_MAX_M = 4.0
 _OPENING_CLUSTER_GAP_M = 0.12
 
 
+# Disciplina de la lámina, leída del rótulo ("Plano: ..."). Una lámina CAD
+# trae la arquitectura como fondo (xref) en TODAS las disciplinas; sin esto
+# los muros/aberturas se duplicaban en cada página (cloacas, vigas, techos,
+# electricidad). Cada página aporta SOLO los tipos de su disciplina; los
+# recintos se derivan de los muros y caen solos donde están los muros.
+_ARCH_LEGEND = ("ARQUITECT", "ALBAÑIL", "ALBANIL")
+_CLOACA_LEGEND = ("CLOACA", "CLOACAL", "SANITARI")
+_ELEC_LEGEND = ("ELECTRIC", "ELÉCTRIC", "ILUMINAC", "UNIFILAR")
+
+
+def _page_allowed_types(page) -> set:
+    """Tipos de elemento permitidos en la página según su rótulo.
+
+    Estructura, techos, pluvial, agua, gas, solados y planillas no tienen
+    extracción propia y su arquitectura es solo fondo → devuelven set vacío
+    (la página no aporta nada). Una lámina puede combinar disciplinas
+    (ej: "PLANTA GENERAL E INSTALACION ELECTRICA Y SANITARIA").
+    """
+    up = (page.get_text() or "").upper()
+    allowed: set = set()
+    if any(k in up for k in _ARCH_LEGEND):
+        allowed |= {"wall", "opening", "escalera"}
+    if any(k in up for k in _CLOACA_LEGEND):
+        allowed.add("cloaca")
+    if any(k in up for k in _ELEC_LEGEND):
+        allowed.add("electricidad")
+    return allowed
+
+
 def _classify_layer(name: str) -> Optional[str]:
     up = name.upper()
     if any(k in up for k in _EXCLUDE_KEYS):
@@ -371,6 +400,11 @@ def _vector_import(plan_id: int) -> None:
 
             res = _rotate(_extract_page(page, px_per_m, pt2px), page, pt2px)
 
+            # Gate por disciplina: cada lámina aporta solo los tipos de su
+            # rótulo. Los muros de una lámina de cloaca/vigas/techos son xref
+            # de fondo (duplicados de la arquitectura) y se descartan.
+            allowed = _page_allowed_types(page)
+
             opening_els = [
                 DetectedElement(
                     plan_id=plan.id, page=pageno, type="opening",
@@ -378,7 +412,7 @@ def _vector_import(plan_id: int) -> None:
                     source="dxf",
                 )
                 for pts, sub, _ in res.get("opening", [])
-            ]
+            ] if "opening" in allowed else []
 
             walls = [
                 DetectedElement(
@@ -387,7 +421,7 @@ def _vector_import(plan_id: int) -> None:
                     length_m=round(length_m, 3), height_m=2.8, source="dxf",
                 )
                 for pts, _, length_m in res.get("wall_seg", [])
-            ]
+            ] if "wall" in allowed else []
             merged = _merge_segments(walls, px_per_m)
             # Muro continuo sobre cada vano con abertura; el cómputo resta
             # las medidas de la abertura después (dintel/antepecho incluidos).
@@ -401,6 +435,8 @@ def _vector_import(plan_id: int) -> None:
             totals["opening"] += len(opening_els)
 
             for typ in ("cloaca", "electricidad"):
+                if typ not in allowed:
+                    continue
                 for flat, _, length_m in res.get(typ, []):
                     db.add(DetectedElement(
                         plan_id=plan.id, page=pageno, type=typ,
@@ -409,13 +445,14 @@ def _vector_import(plan_id: int) -> None:
                     ))
                     totals[typ] += 1
 
-            for flat, _, area in res.get("escalera", []):
-                db.add(DetectedElement(
-                    plan_id=plan.id, page=pageno, type="escalera",
-                    geometry={"points": [round(v, 2) for v in flat]},
-                    area_m2=round(area, 2), height_m=2.8, source="dxf",
-                ))
-                totals["escalera"] += 1
+            if "escalera" in allowed:
+                for flat, _, area in res.get("escalera", []):
+                    db.add(DetectedElement(
+                        plan_id=plan.id, page=pageno, type="escalera",
+                        geometry={"points": [round(v, 2) for v in flat]},
+                        area_m2=round(area, 2), height_m=2.8, source="dxf",
+                    ))
+                    totals["escalera"] += 1
 
         plan.page_scales = page_scales
         plan.scale_px_per_m = page_scales.get("1")
