@@ -22,6 +22,7 @@ Decisiones de precisión (no simplificar sin entender):
 
 import hashlib
 import json
+import logging
 import math
 import os
 import shutil
@@ -43,6 +44,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.detected_element import DetectedElement
 from app.models.plan import Plan
+
+logger = logging.getLogger(__name__)
 
 # Palabras clave para sugerir tipo automáticamente a partir del nombre de capa.
 _LAYER_SUGGESTIONS: list[tuple[tuple[str, ...], str]] = [
