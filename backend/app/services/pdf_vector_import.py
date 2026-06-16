@@ -29,12 +29,26 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Palabras clave (en mayúsculas) para clasificar capas por nombre.
-_WALL_KEYS = ("MURO", "WALL", "PARED")
-_OPENING_KEYS = ("ABERTURA", "CARPINTERIA", "PUERTA", "VENTANA", "DOOR", "WINDOW")
-_CLOACA_KEYS = ("CLOACA", "CLOACAL", "DESAGUE")
-_ELEC_KEYS = ("ELECTRIC", "ELÉCTRIC", "BOCAS", "TOMAS", "IE-BARRAS")
-_STAIR_KEYS = ("ESCALERA", "STAIR")
+# Palabras clave (en mayúsculas) para clasificar capas por nombre. Sinónimos
+# amplios ES/EN: distintos estudios nombran distinto la misma cosa (muro/pared/
+# tabique/mampostería). El substring matchea variantes (CARPINTER → carpintería/
+# carpinterias). Lo que ninguna keyword reconozca queda sin clasificar (y, a
+# futuro, lo resuelve el fallback LLM semántico).
+_WALL_KEYS = ("MURO", "PARED", "WALL", "TABIQUE", "MAMPOSTER")
+_OPENING_KEYS = (
+    "ABERTURA", "CARPINTER", "PUERTA", "VENTANA", "DOOR", "WINDOW", "VANO",
+)
+# Cloaca = desagüe SANITARIO (cloacal/primario/secundario, aguas servidas).
+# Pluvial se excluye aparte (_PLUVIAL_KEYS) porque es otro sistema.
+_CLOACA_KEYS = (
+    "CLOACA", "CLOACAL", "SANITARI", "DESAGUE", "DESAGÜE",
+    "AGUAS NEGRAS", "AGUAS SERVIDAS", "AGUAS RESIDUALES", "SEWER",
+)
+_ELEC_KEYS = (
+    "ELECTRIC", "ELÉCTRIC", "ILUMINAC", "TABLERO", "TOMACORRIENTE",
+    "BOCAS", "TOMAS", "UNIFILAR", "IE-", "IE_",
+)
+_STAIR_KEYS = ("ESCALERA", "STAIR", "ESCALON", "ESCALÓN")
 _SCALE_KEYS = ("COTA",)
 
 # Capas que NUNCA son elementos aunque matcheen (hatches del plotter, etc.)
@@ -58,9 +72,9 @@ _OPENING_CLUSTER_GAP_M = 0.12
 # los muros/aberturas se duplicaban en cada página (cloacas, vigas, techos,
 # electricidad). Cada página aporta SOLO los tipos de su disciplina; los
 # recintos se derivan de los muros y caen solos donde están los muros.
-_ARCH_LEGEND = ("ARQUITECT", "ALBAÑIL", "ALBANIL")
-_CLOACA_LEGEND = ("CLOACA", "CLOACAL", "SANITARI")
-_ELEC_LEGEND = ("ELECTRIC", "ELÉCTRIC", "ILUMINAC", "UNIFILAR")
+_ARCH_LEGEND = ("ARQUITECT", "ALBAÑIL", "ALBANIL", "MAMPOSTER", "DISTRIBUCION", "DISTRIBUCIÓN")
+_CLOACA_LEGEND = ("CLOACA", "CLOACAL", "SANITARI", "AGUAS NEGRAS", "AGUAS SERVIDAS")
+_ELEC_LEGEND = ("ELECTRIC", "ELÉCTRIC", "ILUMINAC", "UNIFILAR", "TABLERO")
 
 
 def _page_allowed_types(page) -> set:

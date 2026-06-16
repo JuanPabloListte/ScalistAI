@@ -49,18 +49,18 @@ logger = logging.getLogger(__name__)
 
 # Palabras clave para sugerir tipo automáticamente a partir del nombre de capa.
 _LAYER_SUGGESTIONS: list[tuple[tuple[str, ...], str]] = [
-    (("MURO", "WALL", "PARED"),                   "wall"),
-    (("PUERTA", "DOOR"),                           "opening"),
-    (("VENTANA", "WINDOW"),                        "opening"),
-    (("ABERTURA", "CARPINTERIA"),                  "opening"),
-    (("HABITACION", "ROOM", "RECINTO", "CUARTO"),  "room"),
-    (("VIGA", "BEAM"),                             "beam"),
-    (("COLUMNA", "COLUMN", "PILAR"),               "column"),
-    (("LOSA", "TECHO", "ROOF", "SLAB", "CUBIERTA"),"roof"),
-    (("CLOACA", "CLOACAL", "SANITARI", "DESAGUE"), "cloaca"),
-    (("ELECTRIC", "ILUMINAC", "TOMA", "TABLERO"),  "electricidad"),
-    (("ESCALERA", "STAIR"),                        "escalera"),
-    (("RIOSTRA", "ENCADENADO", "FUNDACION", "ZAPATA"), "riostra"),
+    (("MURO", "WALL", "PARED", "TABIQUE", "MAMPOSTER"),  "wall"),
+    (("PUERTA", "DOOR"),                                  "opening"),
+    (("VENTANA", "WINDOW"),                               "opening"),
+    (("ABERTURA", "CARPINTER", "VANO"),                   "opening"),
+    (("HABITACION", "ROOM", "RECINTO", "CUARTO", "AMBIENTE", "LOCAL"), "room"),
+    (("VIGA", "BEAM", "DINTEL"),                          "beam"),
+    (("COLUMNA", "COLUMN", "PILAR", "PILOTE"),            "column"),
+    (("LOSA", "TECHO", "ROOF", "SLAB", "CUBIERTA", "AZOTEA"), "roof"),
+    (("CLOACA", "CLOACAL", "SANITARI", "DESAGUE", "DESAGÜE", "AGUAS NEGRAS", "AGUAS SERVIDAS"), "cloaca"),
+    (("ELECTRIC", "ILUMINAC", "TOMA", "TABLERO", "UNIFILAR", "TOMACORRIENTE"), "electricidad"),
+    (("ESCALERA", "STAIR", "ESCALON"),                    "escalera"),
+    (("RIOSTRA", "ENCADENADO", "FUNDACION", "ZAPATA", "VIGA DE FUNDACION"), "riostra"),
 ]
 
 # Valor especial del mapeo: la capa se ve en el fondo pero no genera elementos.
