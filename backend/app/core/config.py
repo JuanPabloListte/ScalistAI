@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # las variaciones sintéticas generadas a partir de los planos del usuario.
     # Si el archivo no existe el detector ML queda deshabilitado y el sistema
     # usa solo la detección clásica.
-    ML_MODEL_PATH: str = "./backend/models/muroai_seg_v1.pt"
+    ML_MODEL_PATH: str = "./storage/models/scalistai_seg_v1.pt"
     # Encender / apagar el detector ML aunque el modelo esté presente.
     ENABLE_ML_DETECTION: bool = True
     # Device para PyTorch: "auto" detecta CUDA si está, sino CPU.
