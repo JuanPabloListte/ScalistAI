@@ -49,6 +49,12 @@ _ELEC_KEYS = (
     "BOCAS", "TOMAS", "UNIFILAR", "IE-", "IE_",
 )
 _STAIR_KEYS = ("ESCALERA", "STAIR", "ESCALON", "ESCALÓN")
+_COLUMN_KEYS = ("COLUMNA", "COLUMN", "PILAR", "PILOTE")
+# Pozo = excavación donde va la zapata/cimiento (mucho hormigón). NO es clase
+# del modelo de IA todavía — se extrae como elemento para cómputo de material.
+# Estos PDFs no traen capa de pozos (el pozo está en hatching), así que el
+# enchufe queda listo para cuando llegue un plano de fundación bien rotulado.
+_POZO_KEYS = ("POZO", "ZAPATA", "CIMIENTO", "DADO", "BASE AISLADA")
 _SCALE_KEYS = ("COTA",)
 
 # Capas que NUNCA son elementos aunque matcheen (hatches del plotter, etc.)
@@ -75,6 +81,11 @@ _OPENING_CLUSTER_GAP_M = 0.12
 _ARCH_LEGEND = ("ARQUITECT", "ALBAÑIL", "ALBANIL", "MAMPOSTER", "DISTRIBUCION", "DISTRIBUCIÓN")
 _CLOACA_LEGEND = ("CLOACA", "CLOACAL", "SANITARI", "AGUAS NEGRAS", "AGUAS SERVIDAS")
 _ELEC_LEGEND = ("ELECTRIC", "ELÉCTRIC", "ILUMINAC", "UNIFILAR", "TABLERO")
+# Columnas: SOLO desde la lámina de replanteo de columnas. La capa COLUMNAS
+# aparece como xref en toda lámina estructural (vigas, losas) → sin este gate
+# se duplicarían. Pozos: lámina de fundación (replanteo de pozos/zapatas).
+_COLUMN_LEGEND = ("REPLANTEO DE COLUMNA", "PLANTA DE COLUMNA", "PLANO DE COLUMNA")
+_POZO_LEGEND = ("REPLANTEO DE POZO", "PLANO DE POZO", "ZAPATA", "CIMIENTO", "FUNDACION", "FUNDACIÓN")
 
 
 def _page_allowed_types(page) -> set:
@@ -93,6 +104,10 @@ def _page_allowed_types(page) -> set:
         allowed.add("cloaca")
     if any(k in up for k in _ELEC_LEGEND):
         allowed.add("electricidad")
+    if any(k in up for k in _COLUMN_LEGEND):
+        allowed.add("column")
+    if any(k in up for k in _POZO_LEGEND):
+        allowed.add("pozo")
     return allowed
 
 
@@ -112,6 +127,10 @@ def _classify_layer(name: str) -> Optional[str]:
         return "electricidad"
     if any(k in up for k in _STAIR_KEYS):
         return "escalera"
+    if any(k in up for k in _COLUMN_KEYS):
+        return "column"
+    if any(k in up for k in _POZO_KEYS):
+        return "pozo"
     return None
 
 
@@ -223,6 +242,8 @@ def _extract_page(page, px_per_m: float, pt2px: float) -> dict[str, list]:
     out: dict[str, list] = defaultdict(list)
     opening_paths = []
     stair_paths = []
+    column_paths = []
+    pozo_paths = []
 
     for d in page.get_drawings():
         typ = _classify_layer(d.get("layer") or "")
@@ -233,6 +254,12 @@ def _extract_page(page, px_per_m: float, pt2px: float) -> dict[str, list]:
             continue
         if typ == "escalera":
             stair_paths.append(d)
+            continue
+        if typ == "column":
+            column_paths.append(d)
+            continue
+        if typ == "pozo":
+            pozo_paths.append(d)
             continue
         for poly in _path_polylines(d):
             if typ == "wall":
@@ -330,6 +357,48 @@ def _extract_page(page, px_per_m: float, pt2px: float) -> dict[str, list]:
             [x0, y0, x1, y0, x1, y1, x0, y1], None, area,
         ))
 
+    # Columnas y pozos: secciones rellenas (cuadrados/círculos) en su capa.
+    # Se clusterizan los trazos cercanos en un bbox y se filtra por tamaño
+    # real. Columna ~0.12-0.9 m; pozo/zapata ~0.4-3 m (excavación de cimiento).
+    def _blob_clusters(paths, gap_m, min_m, max_m):
+        tol = gap_m * px_per_m / pt2px
+        its = [(d["rect"].x0, d["rect"].y0, d["rect"].x1, d["rect"].y1) for d in paths]
+        par = list(range(len(its)))
+
+        def f(i):
+            while par[i] != i:
+                par[i] = par[par[i]]
+                i = par[i]
+            return i
+
+        for i in range(len(its)):
+            for j in range(i + 1, len(its)):
+                a, b = its[i], its[j]
+                if (a[0] - tol <= b[2] and b[0] - tol <= a[2]
+                        and a[1] - tol <= b[3] and b[1] - tol <= a[3]):
+                    par[f(i)] = f(j)
+        cl: dict[int, list] = defaultdict(list)
+        for i in range(len(its)):
+            cl[f(i)].append(its[i])
+        res = []
+        for members in cl.values():
+            x0 = min(m[0] for m in members) * pt2px
+            y0 = min(m[1] for m in members) * pt2px
+            x1 = max(m[2] for m in members) * pt2px
+            y1 = max(m[3] for m in members) * pt2px
+            w_m, h_m = (x1 - x0) / px_per_m, (y1 - y0) / px_per_m
+            major = max(w_m, h_m)
+            if major < min_m or major > max_m:
+                continue
+            # descarta tiras alargadas (cotas/ejes): la sección es ~cuadrada
+            if min(w_m, h_m) < major * 0.35:
+                continue
+            res.append(([x0, y0, x1, y0, x1, y1, x0, y1], None, round(w_m * h_m, 3)))
+        return res
+
+    out["column"] = _blob_clusters(column_paths, 0.05, 0.12, 0.9)
+    out["pozo"] = _blob_clusters(pozo_paths, 0.10, 0.4, 3.0)
+
     return out
 
 
@@ -403,7 +472,8 @@ def _vector_import(plan_id: int) -> None:
             return
 
         page_scales = dict(plan.page_scales or {})
-        totals = {"wall": 0, "opening": 0, "cloaca": 0, "electricidad": 0, "escalera": 0}
+        totals = {"wall": 0, "opening": 0, "cloaca": 0, "electricidad": 0,
+                  "escalera": 0, "column": 0, "pozo": 0}
 
         for i in range(doc.page_count):
             pageno = i + 1
@@ -467,6 +537,20 @@ def _vector_import(plan_id: int) -> None:
                         area_m2=round(area, 2), height_m=2.8, source="dxf",
                     ))
                     totals["escalera"] += 1
+
+            # Columnas y pozos: polígonos de sección. Pozo lleva height_m de
+            # excavación típica (1.0 m) para el cómputo de hormigón.
+            for typ, h in (("column", 2.8), ("pozo", 1.0)):
+                if typ not in allowed:
+                    continue
+                for flat, _, area in res.get(typ, []):
+                    db.add(DetectedElement(
+                        plan_id=plan.id, page=pageno, type=typ,
+                        geometry={"points": [round(v, 2) for v in flat]},
+                        area_m2=round(area, 2) if area else None,
+                        height_m=h, source="dxf",
+                    ))
+                    totals[typ] = totals.get(typ, 0) + 1
 
         plan.page_scales = page_scales
         plan.scale_px_per_m = page_scales.get("1")
