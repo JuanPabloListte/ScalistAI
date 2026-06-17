@@ -16,7 +16,10 @@ class ElementSource(str, Enum):
 
 class DetectedElementBase(BaseModel):
     page: int = Field(default=1, ge=1)
-    type: str = Field(..., pattern="^(wall|room|opening|beam|roof|column|riostra|cloaca|electricidad|escalera)$")
+    # `pozo` es tipo extraíble para cómputo de hormigón (cimientos); NO es clase
+    # del modelo de IA (no está en scripts._common.CLASS_NAMES) — el generador de
+    # sintéticos lo saltea y solo se usa para materiales.
+    type: str = Field(..., pattern="^(wall|room|opening|beam|roof|column|riostra|cloaca|electricidad|escalera|pozo)$")
     geometry: dict = Field(..., description="Coordenadas y geometría en píxeles de la página")
     length_m: float | None = Field(None, ge=0)
     area_m2: float | None = Field(None, ge=0)
