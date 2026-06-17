@@ -19,7 +19,10 @@ def _active_model_architecture_changed() -> tuple[bool, str | None]:
     devuelve (True, motivo) — preferimos un re-entrenamiento limpio antes que
     intentar finetune sobre un activo dudoso.
     """
-    active_json = Path("backend/models/active.json")
+    try:
+        from scripts._common import ACTIVE_MODEL_FILE as active_json
+    except Exception:  # noqa: BLE001
+        active_json = Path("storage/models/active.json")
     if not active_json.exists():
         return True, "sin active.json — primer entrenamiento"
     try:

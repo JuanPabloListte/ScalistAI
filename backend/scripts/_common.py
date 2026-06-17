@@ -46,7 +46,7 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0, 2.0, 7.0, 7.0, 1.5]
 
 # Paths convencionales
-MODELS_DIR = Path("backend/models")
+MODELS_DIR = Path("storage/models")
 ACTIVE_MODEL_FILE = MODELS_DIR / "active.json"
 HOLDOUT_FILE = MODELS_DIR / "holdout.json"
 
@@ -285,9 +285,14 @@ def read_active_model() -> ActiveModelInfo | None:
 
 
 def write_active_model(info: ActiveModelInfo) -> None:
-    """Persiste el pointer al modelo activo."""
+    """Persiste el pointer al modelo activo y un backup inmutable del checkpoint.
+
+    El backup (storage/models_backups/v{N}/) es la red de seguridad: aunque
+    se corrompa o borre el modelo activo, cada versión promovida queda copiada
+    aparte. Best-effort: si el copiado falla, NO bloquea la promoción.
+    """
     ACTIVE_MODEL_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ACTIVE_MODEL_FILE.write_text(json.dumps({
+    payload = {
         "path": info.path,
         "version": info.version,
         "holdout_miou": info.holdout_miou,
@@ -295,7 +300,20 @@ def write_active_model(info: ActiveModelInfo) -> None:
         "notes": info.notes,
         "num_classes": info.num_classes,
         "class_names": info.class_names or _LEGACY_CLASS_NAMES,
-    }, indent=2))
+    }
+    ACTIVE_MODEL_FILE.write_text(json.dumps(payload, indent=2))
+
+    try:
+        import shutil
+
+        backup_dir = MODELS_DIR.parent / "models_backups" / f"v{info.version}"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        (backup_dir / "active.json").write_text(json.dumps(payload, indent=2))
+        ckpt = Path(info.path)
+        if ckpt.exists():
+            shutil.copy2(ckpt, backup_dir / ckpt.name)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[backup] AVISO: no se pudo respaldar v{info.version}: {exc}")
 
 
 def next_version() -> int:
