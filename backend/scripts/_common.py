@@ -38,12 +38,16 @@ INPUT_SIZE = 512
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
-# Pesos por clase para CrossEntropy. Vigas y columnas pesan más porque
-# son raras y de pocos pixeles. El orden DEBE matchear CLASS_NAMES.
-# Cloaca/electricidad pesan 7.0: son trazos finos con ~0.2-0.5% de los
-# píxeles (desbalance ~500:1 vs fondo); con 2.0 la red aprendía a no
-# predecirlas nunca (IoU 0.0 en v11).
-CLASS_WEIGHTS = [0.1, 1.0, 1.0, 3.0, 3.0, 3.0, 1.5, 1.8, 1.0, 2.0, 7.0, 7.0, 1.5]
+# Pesos por clase para CrossEntropy. El orden DEBE matchear CLASS_NAMES.
+# Rebalanceados a la distribución real del dataset (jun 2026): tras importar
+# PDFs de instalaciones, cloaca (2134) y electricidad (7702) pasaron de
+# escasas a abundantes → bajan de 7.0 a 2.0/1.5 para no sobre-predecirlas.
+# Las verdaderas escasas ahora son roof (13), escalera (33) y riostra (53):
+# suben para que el modelo les preste atención. Los pesos enfocan, no inventan
+# datos — roof/escalera seguirán flojas hasta sumar más planos.
+# Orden: bg, wall, room, door, window, sliding_door, beam, column, roof,
+#        riostra, cloaca, electricidad, escalera
+CLASS_WEIGHTS = [0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 2.5, 2.5, 5.0, 4.0, 2.0, 1.5, 5.0]
 
 # Paths convencionales
 MODELS_DIR = Path("storage/models")
