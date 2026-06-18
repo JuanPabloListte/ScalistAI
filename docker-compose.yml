@@ -22,6 +22,18 @@ services:
     volumes:
       - redis_data:/data
 
+  # LLM local para clasificar nombres de capa que ningún keyword reconoce
+  # (cada estudio nombra distinto: TUONG, S-COLS, A-MURO...). Corre en CPU a
+  # propósito: NO reserva GPU, así nunca compite con el entrenamiento. La
+  # clasificación es texto corto → unos segundos en CPU es de sobra.
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -33,6 +45,8 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      OLLAMA_HOST: ollama
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -72,3 +86,4 @@ volumes:
   redis_data:
   frontend_node_modules:
   frontend_next:
+  ollama_data:

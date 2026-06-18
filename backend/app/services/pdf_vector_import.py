@@ -21,6 +21,7 @@ flujo normal (IA + dibujo manual) sigue intacto.
 
 import logging
 import math
+import os
 import re
 import statistics
 from collections import defaultdict
@@ -111,7 +112,7 @@ def _page_allowed_types(page) -> set:
     return allowed
 
 
-def _classify_layer(name: str) -> Optional[str]:
+def _classify_layer(name: str, extra: Optional[dict] = None) -> Optional[str]:
     up = name.upper()
     if any(k in up for k in _EXCLUDE_KEYS):
         return None
@@ -131,6 +132,10 @@ def _classify_layer(name: str) -> Optional[str]:
         return "column"
     if any(k in up for k in _POZO_KEYS):
         return "pozo"
+    # Fallback semántico: lo que ningún keyword reconoció lo resolvió el LLM
+    # (mapa nombre→tipo precalculado por capa para todo el plano).
+    if extra:
+        return extra.get(name) or extra.get(name.strip())
     return None
 
 
@@ -237,7 +242,8 @@ def page_scale_pt_per_m(page) -> Optional[float]:
     return med
 
 
-def _extract_page(page, px_per_m: float, pt2px: float) -> dict[str, list]:
+def _extract_page(page, px_per_m: float, pt2px: float,
+                  llm_map: Optional[dict] = None) -> dict[str, list]:
     """type -> lista de (points_px, subtype|None, length_m|None), espacio sin rotar."""
     out: dict[str, list] = defaultdict(list)
     opening_paths = []
@@ -246,7 +252,7 @@ def _extract_page(page, px_per_m: float, pt2px: float) -> dict[str, list]:
     pozo_paths = []
 
     for d in page.get_drawings():
-        typ = _classify_layer(d.get("layer") or "")
+        typ = _classify_layer(d.get("layer") or "", llm_map)
         if typ is None:
             continue
         if typ == "opening":
@@ -449,11 +455,43 @@ def _vector_import(plan_id: int) -> None:
 
         doc = fitz.open(str(pdf_path))
 
+        # Fallback LLM semántico: las capas con geometría real que ningún
+        # keyword reconoce (S-COLS, A-WALL, cerramiento...) se le pasan al LLM
+        # local en UNA llamada batch cacheada. Las de poca geometría o de ruido
+        # (cotas, hatch, pluvial) no se consultan. Si Ollama no está, llm_map
+        # queda vacío y el import sigue solo con keywords.
+        layer_counts: dict[str, int] = defaultdict(int)
+        for page in doc:
+            for d in page.get_drawings():
+                lyr = (d.get("layer") or "").strip()
+                if lyr:
+                    layer_counts[lyr] += 1
+        # Apagado por defecto (LAYER_LLM_ENABLED). El LLM clasifica capas que
+        # los keywords no reconocen, pero auto-inyectar sus decisiones a ground
+        # truth es riesgoso (ver layer_llm.py): el uso seguro es rutearlas como
+        # candidatos para revisión. Queda como base para esa integración futura.
+        _llm_on = os.environ.get("LAYER_LLM_ENABLED", "").lower() in ("1", "true", "yes")
+        unknown = [
+            name for name, cnt in layer_counts.items()
+            if cnt >= 30 and _classify_layer(name) is None
+            and not any(k in name.upper() for k in _EXCLUDE_KEYS + _PLUVIAL_KEYS)
+        ] if _llm_on else []
+        llm_map: dict = {}
+        if unknown:
+            try:
+                from app.services.layer_llm import classify_layers
+                llm_map = {k: v for k, v in classify_layers(unknown).items() if v}
+                if llm_map:
+                    logger.info("vector import plan=%s: LLM resolvió %d capas: %s",
+                                plan_id, len(llm_map), llm_map)
+            except Exception:  # noqa: BLE001
+                logger.exception("vector import plan=%s: fallback LLM falló (sigo)", plan_id)
+
         # ¿Hay capas de muros reconocibles? Si no, no es un PDF vectorial útil.
         wall_paths = 0
         for page in doc:
             for d in page.get_drawings():
-                if _classify_layer(d.get("layer") or "") == "wall":
+                if _classify_layer(d.get("layer") or "", llm_map) == "wall":
                     wall_paths += 1
             if wall_paths >= 20:
                 break
@@ -482,7 +520,7 @@ def _vector_import(plan_id: int) -> None:
             px_per_m = round(ptm * pt2px, 4)
             page_scales[str(pageno)] = px_per_m
 
-            res = _rotate(_extract_page(page, px_per_m, pt2px), page, pt2px)
+            res = _rotate(_extract_page(page, px_per_m, pt2px, llm_map), page, pt2px)
 
             # Gate por disciplina: cada lámina aporta solo los tipos de su
             # rótulo. Los muros de una lámina de cloaca/vigas/techos son xref
