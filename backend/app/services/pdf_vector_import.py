@@ -49,7 +49,7 @@ _ELEC_KEYS = (
     "BOCAS", "TOMAS", "UNIFILAR", "IE-", "IE_",
 )
 _STAIR_KEYS = ("ESCALERA", "STAIR", "ESCALON", "ESCALÓN")
-_COLUMN_KEYS = ("COLUMNA", "COLUMN", "PILAR", "PILOTE")
+_COLUMN_KEYS = ("COLUMNA", "COLUMN", "PILAR", "PILOTE", "S-COL")  # S-COL: estándar AECO inglés
 # Pozo = excavación donde va la zapata/cimiento (mucho hormigón). NO es clase
 # del modelo de IA todavía — se extrae como elemento para cómputo de material.
 # Estos PDFs no traen capa de pozos (el pozo está en hatching), así que el
