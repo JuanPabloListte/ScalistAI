@@ -1924,6 +1924,27 @@ export default function PlanViewerInner({
     }
   }
 
+  // Asigna el sistema a TODOS los elementos del plano cuyo tipo aplica (sin
+  // tener que seleccionarlos uno por uno).
+  async function applyAssignAllByType(assemblyId: number) {
+    setBulkBusy(true);
+    try {
+      const res = await api.assignAllByType(planId, assemblyId);
+      const fresh = await api.listElements(planId);
+      setElements(fresh);
+      setBulkAssignOpen(false);
+      setDrawError(
+        res.assigned > 0
+          ? `Sistema asignado a ${res.assigned} elemento${res.assigned === 1 ? "" : "s"} del plano.`
+          : "Todos los elementos de ese tipo ya tenían el sistema.",
+      );
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al asignar a todos");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   async function downloadXlsx() {
     setExporting(true);
     try {
@@ -4181,17 +4202,6 @@ export default function PlanViewerInner({
                     <MinusIcon />
                   </ToolbarIconButton>
 
-                  <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
-
-                  <ToolbarIconButton
-                    onClick={() => setShow3D(true)}
-                    disabled={drawingDisabled}
-                    title={drawingDisabled ? "Vista 3D — calibrá la página primero" : "Vista 3D"}
-                    ariaLabel="Cambiar a vista 3D"
-                  >
-                    <CubeIcon />
-                  </ToolbarIconButton>
-
                   <ToolbarIconButton
                     onClick={() => setIsMaximized((v) => !v)}
                     title={isMaximized ? "Salir de pantalla completa (Esc)" : "Pantalla completa"}
@@ -4889,7 +4899,7 @@ export default function PlanViewerInner({
                 </label>
               )}
 
-              <div className="mt-2 flex justify-end gap-2">
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setBulkAssignOpen(false)}
@@ -4899,11 +4909,20 @@ export default function PlanViewerInner({
                   Cancelar
                 </button>
                 <button
+                  type="button"
+                  onClick={() => bulkAssignMaterialId != null && applyAssignAllByType(bulkAssignMaterialId)}
+                  disabled={bulkBusy || bulkAssignMaterialId == null || bulkApplicable.length === 0}
+                  title="Asigna el sistema a TODOS los elementos de su tipo en el plano, sin tener que seleccionarlos"
+                  className="rounded-md border border-brand-400 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300"
+                >
+                  {bulkBusy ? "Asignando…" : "A todo el plano"}
+                </button>
+                <button
                   type="submit"
                   disabled={bulkBusy || bulkAssignMaterialId == null || bulkApplicable.length === 0}
                   className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
                 >
-                  {bulkBusy ? "Asignando..." : "Asignar"}
+                  {bulkBusy ? "Asignando..." : `A la selección (${selectedIds.size})`}
                 </button>
               </div>
             </form>
