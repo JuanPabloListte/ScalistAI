@@ -770,6 +770,14 @@ export const api = {
     return res.json() as Promise<DetectedElement>;
   },
 
+  // Asigna el sistema a TODOS los elementos del plano cuyo tipo aplica
+  // (ej: "Muro Ladrillo" → todos los muros). Un solo click.
+  assignAllByType: (planId: number, assemblyId: number) =>
+    request<{ assigned: number; types: string[] }>(
+      `/api/v1/plans/${planId}/assemblies/${assemblyId}/assign-all`,
+      { method: "POST" },
+    ),
+
   bulkAssignAssembly: (planId: number, elementIds: number[], assemblyId: number) =>
     request<DetectedElement[]>(
       `/api/v1/plans/${planId}/elements/bulk/assemblies`,

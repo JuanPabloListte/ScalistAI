@@ -313,3 +313,125 @@ def create_openings_bulk(
             db.refresh(el)
 
     return created
+
+
+# ---------------------------------------------------------------------------
+# Asignación elemento ↔ sistema constructivo (assembly)
+# ---------------------------------------------------------------------------
+from app.models.material import Assembly  # noqa: E402
+from app.schemas.assembly import (  # noqa: E402
+    AssemblyAssignRequest,
+    AssemblyBulkAssignRequest,
+)
+
+# applies_to del assembly → tipos de elemento a los que aplica. Permite
+# "asignar a todos los muros" de un toque.
+_APPLIES_TO_TYPES: dict[str, set[str]] = {
+    "wall": {"wall"},
+    "room_floor": {"room"}, "room_wall": {"room"}, "room_perimeter": {"room"},
+    "opening": {"opening"}, "opening_perimeter": {"opening"},
+    "beam": {"beam"}, "column": {"column"}, "roof": {"roof"},
+    "riostra": {"riostra"}, "cloaca": {"cloaca"},
+    "electricidad": {"electricidad"}, "escalera": {"escalera"},
+}
+
+
+def _plan_owned(plan_id: int, db: Session, user: User) -> Plan:
+    plan = db.get(Plan, plan_id)
+    if plan is None or plan.project.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    return plan
+
+
+def _assembly_owned(assembly_id: int, db: Session, user: User) -> Assembly:
+    asm = db.get(Assembly, assembly_id)
+    if asm is None or asm.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Sistema constructivo no encontrado")
+    return asm
+
+
+@router.post(
+    "/plans/{plan_id}/elements/{element_id}/assemblies",
+    response_model=DetectedElementRead,
+)
+def assign_assembly(
+    plan_id: int, element_id: int, payload: AssemblyAssignRequest,
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> DetectedElement:
+    _plan_owned(plan_id, db, user)
+    el = db.get(DetectedElement, element_id)
+    if el is None or el.plan_id != plan_id:
+        raise HTTPException(status_code=404, detail="Elemento no encontrado")
+    asm = _assembly_owned(payload.assembly_id, db, user)
+    if asm not in el.assemblies:
+        el.assemblies.append(asm)
+        db.commit()
+        db.refresh(el)
+    return el
+
+
+@router.delete(
+    "/plans/{plan_id}/elements/{element_id}/assemblies/{assembly_id}",
+    response_model=DetectedElementRead,
+)
+def remove_assembly(
+    plan_id: int, element_id: int, assembly_id: int,
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> DetectedElement:
+    _plan_owned(plan_id, db, user)
+    el = db.get(DetectedElement, element_id)
+    if el is None or el.plan_id != plan_id:
+        raise HTTPException(status_code=404, detail="Elemento no encontrado")
+    el.assemblies = [a for a in el.assemblies if a.id != assembly_id]
+    db.commit()
+    db.refresh(el)
+    return el
+
+
+@router.post(
+    "/plans/{plan_id}/elements/bulk/assemblies",
+    response_model=list[DetectedElementRead],
+)
+def bulk_assign_assembly(
+    plan_id: int, payload: AssemblyBulkAssignRequest,
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> list[DetectedElement]:
+    _plan_owned(plan_id, db, user)
+    asm = _assembly_owned(payload.assembly_id, db, user)
+    els = list(db.scalars(select(DetectedElement).where(
+        DetectedElement.id.in_(payload.element_ids),
+        DetectedElement.plan_id == plan_id,
+    )).all())
+    for el in els:
+        if asm not in el.assemblies:
+            el.assemblies.append(asm)
+    db.commit()
+    for el in els:
+        db.refresh(el)
+    return els
+
+
+@router.post("/plans/{plan_id}/assemblies/{assembly_id}/assign-all")
+def assign_assembly_to_all(
+    plan_id: int, assembly_id: int,
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Asigna el sistema a TODOS los elementos del plan cuyo tipo matchea su
+    `applies_to` (ej: "Muro Ladrillo" → todos los muros). Un solo click."""
+    _plan_owned(plan_id, db, user)
+    asm = _assembly_owned(assembly_id, db, user)
+    target_types = _APPLIES_TO_TYPES.get(asm.applies_to, set())
+    if not target_types:
+        return {"assigned": 0, "types": []}
+    els = list(db.scalars(select(DetectedElement).where(
+        DetectedElement.plan_id == plan_id,
+        DetectedElement.type.in_(target_types),
+        DetectedElement.is_candidate.is_(False),
+    )).all())
+    n = 0
+    for el in els:
+        if asm not in el.assemblies:
+            el.assemblies.append(asm)
+            n += 1
+    db.commit()
+    return {"assigned": n, "types": sorted(target_types)}
