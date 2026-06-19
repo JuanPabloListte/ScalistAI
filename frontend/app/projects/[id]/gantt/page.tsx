@@ -28,7 +28,6 @@ export default function ProjectGanttPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [schedule, setSchedule] = useState<ScheduleResponse | null>(null);
-  const [cashflow, setCashflow] = useState<CashflowPoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -36,20 +35,41 @@ export default function ProjectGanttPage() {
 
   const load = useCallback(() => {
     setLoading(true);
+    // Una sola llamada: la curva de inversión se deriva del cronograma en el
+    // cliente (evita recomputar el schedule en el backend → más rápido).
     Promise.all([
       api.getProject(projectId),
       api.getSchedule(projectId, { startDate, crews }),
-      api.getCashflow(projectId, { startDate, crews }),
     ])
-      .then(([proj, sched, cf]) => {
+      .then(([proj, sched]) => {
         setProject(proj);
         setSchedule(sched);
-        setCashflow(cf);
       })
       .finally(() => setLoading(false));
   }, [projectId, startDate, crews]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Curva de inversión: distribuye el costo de cada tarea en sus días y agrega
+  // por mes (misma lógica que el backend, pero sin una segunda llamada).
+  const cashflow = useMemo<CashflowPoint[]>(() => {
+    if (!schedule) return [];
+    const monthly = new Map<string, number>();
+    for (const t of schedule.tasks) {
+      const start = new Date(t.start_date + "T00:00:00");
+      const perDay = t.cost / Math.max(1, t.duration_days);
+      for (let i = 0; i < t.duration_days; i++) {
+        const d = new Date(start.getTime() + i * 86400000);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        monthly.set(key, (monthly.get(key) || 0) + perDay);
+      }
+    }
+    let acc = 0;
+    return [...monthly.keys()].sort().map((month) => {
+      acc += monthly.get(month)!;
+      return { month, amount: monthly.get(month)!, accumulated: acc };
+    });
+  }, [schedule]);
 
   const totalDays = schedule?.total_days || 1;
   const projStart = schedule ? new Date(schedule.start_date + "T00:00:00").getTime() : 0;

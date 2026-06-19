@@ -196,12 +196,22 @@ export default function ProjectsPage() {
                 </Link>
 
                 {!isDraft && (
-                  <Link
-                    href={`/projects/new?id=${p.id}&edit=1`}
-                    className="mt-1.5 inline-block text-[11px] font-medium text-slate-500 hover:text-brand-600 hover:underline dark:text-slate-400 dark:hover:text-brand-400"
-                  >
-                    Editar datos del proyecto
-                  </Link>
+                  <div className="mt-1.5 flex items-center gap-3">
+                    <Link
+                      href={`/projects/${p.id}/gantt`}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></svg>
+                      Cronograma
+                    </Link>
+                    <span className="text-slate-300 dark:text-slate-600">·</span>
+                    <Link
+                      href={`/projects/new?id=${p.id}&edit=1`}
+                      className="text-[11px] font-medium text-slate-500 hover:text-brand-600 hover:underline dark:text-slate-400 dark:hover:text-brand-400"
+                    >
+                      Editar datos
+                    </Link>
+                  </div>
                 )}
               </li>
             );
