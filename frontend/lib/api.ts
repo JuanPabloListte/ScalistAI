@@ -273,6 +273,43 @@ export type MaterialSummaryItem = {
   subtotal: number;
 };
 
+// ---- Cronograma + curva de inversión ----
+
+export type ScheduleTask = {
+  assembly: string;
+  stage: string;
+  stage_order: number;
+  quantity: number;
+  unit: string;
+  duration_days: number;
+  cost: number;
+  start_date: string;
+  end_date: string;
+};
+
+export type ScheduleStage = {
+  stage: string;
+  stage_order: number;
+  start_date: string;
+  end_date: string;
+  cost: number;
+};
+
+export type ScheduleResponse = {
+  start_date: string;
+  end_date: string;
+  total_days: number;
+  total_cost: number;
+  stages: ScheduleStage[];
+  tasks: ScheduleTask[];
+};
+
+export type CashflowPoint = {
+  month: string;
+  amount: number;
+  accumulated: number;
+};
+
 // ---- Admin / Team ----
 
 export type OrgUser = {
@@ -757,6 +794,25 @@ export const api = {
     return request<MaterialSummaryItem[]>(
       `/api/v1/plans/${planId}/materials-summary${qs}`,
     );
+  },
+
+  // ----- Cronograma (Gantt) + curva de inversión -----
+  getSchedule: (projectId: number, opts?: { startDate?: string; crews?: number; overlapPct?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.startDate) q.set("start_date", opts.startDate);
+    if (opts?.crews) q.set("crews", String(opts.crews));
+    if (opts?.overlapPct) q.set("overlap_pct", String(opts.overlapPct));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request<ScheduleResponse>(`/api/v1/projects/${projectId}/schedule${qs}`);
+  },
+
+  getCashflow: (projectId: number, opts?: { startDate?: string; crews?: number; overlapPct?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.startDate) q.set("start_date", opts.startDate);
+    if (opts?.crews) q.set("crews", String(opts.crews));
+    if (opts?.overlapPct) q.set("overlap_pct", String(opts.overlapPct));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request<CashflowPoint[]>(`/api/v1/projects/${projectId}/cashflow${qs}`);
   },
 
   detectWalls: (planId: number, page: number) =>
