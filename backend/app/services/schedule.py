@@ -17,10 +17,11 @@ import math
 from collections import defaultdict
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.plans._export import _opening_overlaps_wall
 from app.models.detected_element import DetectedElement
+from app.models.material import Assembly, AssemblyMaterial
 from app.models.plan import Plan
 from app.models.project import Project
 
@@ -88,10 +89,21 @@ def compute_schedule(project_id: int, db: Session,
     for p in db.scalars(select(Plan).where(Plan.project_id == project_id)).all():
         page_scales.update(p.page_scales or {})
 
-    elements = list(db.scalars(select(DetectedElement).where(
-        DetectedElement.plan_id.in_(plan_ids),
-        DetectedElement.is_candidate.is_(False),
-    )).all()) if plan_ids else []
+    # Eager loading: sin esto, leer el.assemblies → assembly_materials →
+    # material dispara una query por elemento (N+1) → lentísimo en proyectos
+    # pesados. selectinload colapsa todo en unas pocas queries.
+    elements = list(db.scalars(
+        select(DetectedElement)
+        .where(
+            DetectedElement.plan_id.in_(plan_ids),
+            DetectedElement.is_candidate.is_(False),
+        )
+        .options(
+            selectinload(DetectedElement.assemblies)
+            .selectinload(Assembly.assembly_materials)
+            .selectinload(AssemblyMaterial.material)
+        )
+    ).all()) if plan_ids else []
 
     openings_by_page: dict[int, list] = defaultdict(list)
     for el in elements:
