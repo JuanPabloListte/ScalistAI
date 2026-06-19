@@ -1945,6 +1945,36 @@ export default function PlanViewerInner({
     }
   }
 
+  // Resumen por tipo de elemento presente en el plano: cantidad, sistemas ya
+  // asignados, y sistemas aplicables (filtrados por applies_to → no deja, ej,
+  // un piso en un muro). Alimenta el panel "Sistemas por tipo".
+  const typesSummary = useMemo(() => {
+    const labels: Record<string, string> = {
+      wall: "Muros", room: "Recintos", column: "Columnas", opening: "Aberturas",
+      beam: "Vigas", roof: "Techos", riostra: "Riostras", cloaca: "Cloacas",
+      electricidad: "Electricidad", escalera: "Escaleras",
+    };
+    const order = ["wall", "column", "beam", "riostra", "room", "opening", "roof", "cloaca", "electricidad", "escalera"];
+    const byType = new Map<string, { count: number; assignedIds: Set<number>; assigned: Set<string> }>();
+    for (const el of elements) {
+      if (el.is_candidate) continue;
+      let e = byType.get(el.type);
+      if (!e) { e = { count: 0, assignedIds: new Set(), assigned: new Set() }; byType.set(el.type, e); }
+      e.count++;
+      for (const a of el.assemblies ?? []) { e.assignedIds.add(a.id); e.assigned.add(a.name); }
+    }
+    return order
+      .filter((t) => byType.has(t))
+      .map((t) => {
+        const e = byType.get(t)!;
+        return {
+          type: t as ElementType, label: labels[t] ?? t, count: e.count,
+          assignedIds: e.assignedIds, assigned: [...e.assigned],
+          applicable: applicableAssemblies(t as ElementType, assembliesList),
+        };
+      });
+  }, [elements, assembliesList]);
+
   async function downloadXlsx() {
     setExporting(true);
     try {
@@ -4494,6 +4524,45 @@ export default function PlanViewerInner({
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             Página {page} · cantidades por material
           </p>
+
+          {/* Sistemas por tipo: asignar un sistema a TODOS los elementos de un
+              tipo de una, sin seleccionarlos. El dropdown solo ofrece sistemas
+              aplicables a ese tipo (no deja un piso en un muro). */}
+          {typesSummary.length > 0 && (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/40 p-2 dark:border-slate-800 dark:bg-slate-950/30">
+              <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Sistemas por tipo
+              </p>
+              <div className="space-y-1.5">
+                {typesSummary.map((t) => (
+                  <div key={t.type} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t.label}</span>
+                      <span className="ml-1 text-[10px] text-slate-400">({t.count})</span>
+                      {t.assigned.length > 0 && (
+                        <div className="truncate text-[10px] text-emerald-600 dark:text-emerald-400" title={t.assigned.join(", ")}>
+                          ✓ {t.assigned.join(", ")}
+                        </div>
+                      )}
+                    </div>
+                    <select
+                      value=""
+                      disabled={bulkBusy || t.applicable.length === 0}
+                      onChange={(e) => { const id = Number(e.target.value); if (id) applyAssignAllByType(id); }}
+                      className="w-32 shrink-0 rounded border border-slate-300 px-1.5 py-1 text-[11px] disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    >
+                      <option value="">{t.applicable.length ? "+ Asignar a todos…" : "sin sistema"}</option>
+                      {t.applicable
+                        .filter((a) => !t.assignedIds.has(a.id))
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {summaryLoading ? (
             <p className="py-4 text-center text-xs text-slate-400">Calculando...</p>
