@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, type Project, type ScheduleResponse, type CashflowPoint } from "@/lib/api";
@@ -24,6 +24,7 @@ function fmtDate(iso: string): string {
 
 export default function ProjectGanttPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const projectId = Number(params.id);
 
   const [project, setProject] = useState<Project | null>(null);
@@ -97,10 +98,10 @@ export default function ProjectGanttPage() {
   return (
     <main className="mx-auto max-w-7xl px-6 py-10">
       <header className="mb-6">
-        <Link href={`/projects/${project.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition hover:text-brand-600 dark:text-slate-400">
+        <button onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition hover:text-brand-600 dark:text-slate-400">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          Volver al proyecto
-        </Link>
+          Volver
+        </button>
         <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">Cronograma de obra</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Calculado de los cómputos y el rendimiento (rendimiento diario) de cada sistema constructivo.
