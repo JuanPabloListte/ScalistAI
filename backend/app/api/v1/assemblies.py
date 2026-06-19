@@ -43,6 +43,8 @@ def create_assembly(
         name=payload.name,
         applies_to=payload.applies_to,
         daily_yield=payload.daily_yield or 0.0,
+        stage=payload.stage,
+        stage_order=payload.stage_order or 0,
     )
     db.add(assembly)
     db.flush()
@@ -101,6 +103,11 @@ def update_assembly(
         
     if payload.daily_yield is not None:
         assembly.daily_yield = payload.daily_yield
+
+    if payload.stage is not None:
+        assembly.stage = payload.stage
+    if payload.stage_order is not None:
+        assembly.stage_order = payload.stage_order
 
     if payload.materials is not None:
         for old_am in assembly.assembly_materials:

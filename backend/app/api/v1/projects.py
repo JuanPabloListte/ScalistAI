@@ -387,3 +387,48 @@ def delete_project(
 
     db.delete(project)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Cronograma de obra (Gantt) + curva de inversión
+# ---------------------------------------------------------------------------
+@router.get("/{project_id}/schedule")
+def get_schedule(
+    project_id: int,
+    start_date: str | None = None,
+    crews: int = 1,
+    overlap_pct: float = 0.0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Cronograma: tareas (assemblies) con duración, fechas y costo, por etapa."""
+    import datetime as _dt
+
+    from app.services.schedule import compute_schedule
+
+    project = db.get(Project, project_id)
+    if project is None or project.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    sd = _dt.date.fromisoformat(start_date) if start_date else None
+    return compute_schedule(project_id, db, sd, max(1, crews), overlap_pct)
+
+
+@router.get("/{project_id}/cashflow")
+def get_cashflow(
+    project_id: int,
+    start_date: str | None = None,
+    crews: int = 1,
+    overlap_pct: float = 0.0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Curva de inversión mensual (flujo de fondos) derivada del cronograma."""
+    import datetime as _dt
+
+    from app.services.schedule import compute_cashflow
+
+    project = db.get(Project, project_id)
+    if project is None or project.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    sd = _dt.date.fromisoformat(start_date) if start_date else None
+    return compute_cashflow(project_id, db, sd, max(1, crews), overlap_pct)
