@@ -435,3 +435,28 @@ def assign_assembly_to_all(
             n += 1
     db.commit()
     return {"assigned": n, "types": sorted(target_types)}
+
+
+@router.post("/plans/{plan_id}/assemblies/{assembly_id}/unassign-all")
+def unassign_assembly_from_all(
+    plan_id: int, assembly_id: int,
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Inverso de assign-all: quita el sistema de TODOS los elementos del plano
+    cuyo tipo matchea su applies_to. Para deshacer una asignación masiva."""
+    _plan_owned(plan_id, db, user)
+    asm = _assembly_owned(assembly_id, db, user)
+    target_types = _APPLIES_TO_TYPES.get(asm.applies_to, set())
+    if not target_types:
+        return {"removed": 0}
+    els = list(db.scalars(select(DetectedElement).where(
+        DetectedElement.plan_id == plan_id,
+        DetectedElement.type.in_(target_types),
+    )).all())
+    n = 0
+    for el in els:
+        if any(a.id == assembly_id for a in el.assemblies):
+            el.assemblies = [a for a in el.assemblies if a.id != assembly_id]
+            n += 1
+    db.commit()
+    return {"removed": n}

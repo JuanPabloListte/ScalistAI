@@ -778,6 +778,13 @@ export const api = {
       { method: "POST" },
     ),
 
+  // Inverso: quita el sistema de todos los elementos de su tipo (para deshacer).
+  unassignAllByType: (planId: number, assemblyId: number) =>
+    request<{ removed: number }>(
+      `/api/v1/plans/${planId}/assemblies/${assemblyId}/unassign-all`,
+      { method: "POST" },
+    ),
+
   bulkAssignAssembly: (planId: number, elementIds: number[], assemblyId: number) =>
     request<DetectedElement[]>(
       `/api/v1/plans/${planId}/elements/bulk/assemblies`,
