@@ -1929,17 +1929,26 @@ export default function PlanViewerInner({
   async function applyAssignAllByType(assemblyId: number) {
     setBulkBusy(true);
     try {
-      const res = await api.assignAllByType(planId, assemblyId);
+      await api.assignAllByType(planId, assemblyId);
       const fresh = await api.listElements(planId);
       setElements(fresh);
       setBulkAssignOpen(false);
-      setDrawError(
-        res.assigned > 0
-          ? `Sistema asignado a ${res.assigned} elemento${res.assigned === 1 ? "" : "s"} del plano.`
-          : "Todos los elementos de ese tipo ya tenían el sistema.",
-      );
     } catch (err) {
       setDrawError(err instanceof Error ? err.message : "Error al asignar a todos");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Quita el sistema de todos los elementos de su tipo (deshacer).
+  async function applyUnassignAllByType(assemblyId: number) {
+    setBulkBusy(true);
+    try {
+      await api.unassignAllByType(planId, assemblyId);
+      const fresh = await api.listElements(planId);
+      setElements(fresh);
+    } catch (err) {
+      setDrawError(err instanceof Error ? err.message : "Error al quitar");
     } finally {
       setBulkBusy(false);
     }
@@ -4533,31 +4542,41 @@ export default function PlanViewerInner({
               <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Sistemas por tipo
               </p>
-              <div className="space-y-1.5">
+              <p className="mb-1.5 text-[10px] text-slate-400">
+                Clic en un sistema para asignarlo a todos los de ese tipo. Clic de nuevo para quitarlo.
+              </p>
+              <div className="space-y-2">
                 {typesSummary.map((t) => (
-                  <div key={t.type} className="flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t.label}</span>
-                      <span className="ml-1 text-[10px] text-slate-400">({t.count})</span>
-                      {t.assigned.length > 0 && (
-                        <div className="truncate text-[10px] text-emerald-600 dark:text-emerald-400" title={t.assigned.join(", ")}>
-                          ✓ {t.assigned.join(", ")}
-                        </div>
+                  <div key={t.type}>
+                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {t.label} <span className="text-[10px] font-normal text-slate-400">({t.count})</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {t.applicable.length === 0 ? (
+                        <span className="text-[10px] italic text-slate-400">No hay sistemas para este tipo todavía.</span>
+                      ) : (
+                        t.applicable.map((a) => {
+                          const on = t.assignedIds.has(a.id);
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              disabled={bulkBusy}
+                              onClick={() => (on ? applyUnassignAllByType(a.id) : applyAssignAllByType(a.id))}
+                              title={on ? "Asignado a todos — clic para quitar" : "Clic para asignar a todos"}
+                              className={
+                                "rounded-full border px-2 py-0.5 text-[11px] font-medium transition disabled:opacity-50 " +
+                                (on
+                                  ? "border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                                  : "border-slate-300 bg-white text-slate-600 hover:border-brand-400 hover:text-brand-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300")
+                              }
+                            >
+                              {on ? "✓ " : "+ "}{a.name}
+                            </button>
+                          );
+                        })
                       )}
                     </div>
-                    <select
-                      value=""
-                      disabled={bulkBusy || t.applicable.length === 0}
-                      onChange={(e) => { const id = Number(e.target.value); if (id) applyAssignAllByType(id); }}
-                      className="w-32 shrink-0 rounded border border-slate-300 px-1.5 py-1 text-[11px] disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    >
-                      <option value="">{t.applicable.length ? "+ Asignar a todos…" : "sin sistema"}</option>
-                      {t.applicable
-                        .filter((a) => !t.assignedIds.has(a.id))
-                        .map((a) => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
-                    </select>
                   </div>
                 ))}
               </div>
