@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING
-from sqlalchemy import Column, ForeignKey, String, Float, Table
+from sqlalchemy import Column, ForeignKey, Integer, String, Float, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -37,9 +37,14 @@ class Assembly(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     # Define a qué se aplica (ej: "wall", "room_floor", "room_wall", "room_perimeter", "opening", "beam", "column", "roof")
-    applies_to: Mapped[str] = mapped_column(String(32), nullable=False) 
+    applies_to: Mapped[str] = mapped_column(String(32), nullable=False)
     # Rendimiento diario de este sistema (ej: m2 por día). Usado para Gantt.
     daily_yield: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
+    # Rubro / etapa de obra (ej: "Fundación", "Estructura", "Mampostería",
+    # "Instalaciones", "Terminaciones") y su orden. Agrupan el cómputo para el
+    # cronograma (Gantt) y la certificación de avance.
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stage_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
 
     assembly_materials: Mapped[list["AssemblyMaterial"]] = relationship(
         "AssemblyMaterial", back_populates="assembly", cascade="all, delete-orphan"
