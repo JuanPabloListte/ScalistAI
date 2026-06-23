@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { api, type Project } from "@/lib/api";
@@ -19,11 +20,15 @@ export function Step5Review({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowTraining, setAllowTraining] = useState(true);
 
   async function handleActivate() {
     setError(null);
     setSubmitting(true);
     try {
+      if (!allowTraining) {
+        await api.setTrainingConsent(project.id, false);
+      }
       const activated = await api.activateProject(project.id);
       onActivate(activated);
     } catch (err) {
@@ -83,7 +88,30 @@ export function Step5Review({
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      <div className="mt-2 flex items-center justify-between">
+      <div className="mt-2 flex items-start gap-3 rounded-md bg-slate-50 p-4 dark:bg-slate-800/50">
+        <div className="flex h-5 items-center">
+          <input
+            id="allow-training"
+            type="checkbox"
+            checked={allowTraining}
+            onChange={(e) => setAllowTraining(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand dark:border-slate-600 dark:bg-slate-900"
+          />
+        </div>
+        <div className="text-sm">
+          <label htmlFor="allow-training" className="font-medium text-slate-700 dark:text-slate-200">
+            Acepto compartir estos planos anonimizados para entrenar el modelo
+          </label>
+          <p className="text-slate-500 dark:text-slate-400">
+            Al marcar esta casilla, permitís que los datos de este proyecto se usen de forma segura y anónima para mejorar ScalistAI. Podés leer más en los{" "}
+            <Link href="/legal/terms" target="_blank" className="font-semibold text-brand hover:underline dark:text-sky-400">
+              Términos y Condiciones
+            </Link>.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
         <button
           type="button"
           onClick={onBack}

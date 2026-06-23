@@ -242,6 +242,7 @@ export default function PlanViewerInner({
   }, [selectedIds, elements]);
 
   const [hideAiElements, setHideAiElements] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
   const visibleElements = useMemo(() => {
     if (hideAiElements) {
       return elements.filter((e) => e.source !== "ai");
@@ -2177,13 +2178,13 @@ export default function PlanViewerInner({
         style={isMaximized ? undefined : { minHeight: height + 80 }}
       >
         {/* PANEL IZQUIERDO — Elementos */}
-        <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
+        <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-80${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
               Elementos
             </h3>
             {displayElements.length > 0 && (
-              <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 select-none">
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 select-none">
                 <input
                   type="checkbox"
                   checked={selectedIds.size === displayElements.length && displayElements.length > 0}
@@ -2200,47 +2201,47 @@ export default function PlanViewerInner({
               </label>
             )}
           </div>
-          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
             Página {page} · {displayElements.length} dibujado{displayElements.length === 1 ? "" : "s"}
           </p>
 
           {/* Totales */}
-          <div className="mb-3 grid grid-cols-3 gap-x-2 gap-y-2 rounded-lg border border-slate-100 bg-slate-50/50 p-2 text-center text-[10px] dark:border-slate-800 dark:bg-slate-950/40">
+          <div className="mb-4 grid grid-cols-3 gap-x-2 gap-y-2 rounded-lg border border-slate-100 bg-slate-50/50 p-3 text-center text-xs dark:border-slate-800 dark:bg-slate-950/40">
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalWallM.toFixed(1)} m
               </div>
-              <div className="text-[9px] text-slate-400">Muros</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Muros</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalRoomM2.toFixed(1)} m²
               </div>
-              <div className="text-[9px] text-slate-400">Recintos</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Recintos</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalOpenings}
               </div>
-              <div className="text-[9px] text-slate-400">Abert.</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Abert.</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalBeamsM.toFixed(1)} m
               </div>
-              <div className="text-[9px] text-slate-400">Vigas</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Vigas</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalRoofsM2.toFixed(1)} m²
               </div>
-              <div className="text-[9px] text-slate-400">Techos</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Techos</div>
             </div>
             <div>
               <div className="font-semibold text-slate-700 dark:text-slate-200">
                 {totalColumns}
               </div>
-              <div className="text-[9px] text-slate-400">Cols.</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Cols.</div>
             </div>
           </div>
 
@@ -2427,14 +2428,14 @@ export default function PlanViewerInner({
                               {el.geometry.label ?? labelFor(el.type, idx + 1)}
                             </p>
                             {el.type === "opening" && (
-                              <span className="shrink-0 rounded-sm bg-amber-100 px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                              <span className="shrink-0 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
                                 {OPENING_SUBTYPES.find(
                                   (s) => s.value === (el.geometry.subtype ?? DEFAULT_OPENING_SUBTYPE),
                                 )?.label ?? "Puerta"}
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-slate-400">
+                          <p className="text-xs text-slate-500 mt-0.5">
                             {el.type === "wall" && `${el.length_m?.toFixed(2)} m · alt ${(el.height_m ?? 2.8).toFixed(2)} m`}
                             {el.type === "room" && `${el.area_m2?.toFixed(2)} m² · perím ${el.length_m?.toFixed(2)} m`}
                             {el.type === "opening" && `${el.length_m?.toFixed(2)} m ancho · alt ${(el.height_m ?? 2.1).toFixed(2)} m`}
@@ -2742,7 +2743,7 @@ export default function PlanViewerInner({
 
               {/* Overlay SVG: elementos + preview + calibración */}
               {natural && (
-                <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                <svg className="scalistai-svg-overlay pointer-events-none absolute inset-0 h-full w-full">
                   <defs>
                     <filter id="shadow-glow" x="-20%" y="-20%" width="140%" height="140%">
                       <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="rgba(0,0,0,0.25)" />
@@ -2775,6 +2776,12 @@ export default function PlanViewerInner({
                       .scalistai-pulse { animation: scalistai-pulse 1.6s ease-in-out infinite; }
                       .scalistai-dash { animation: scalistai-dash 1.4s linear infinite; }
                     `}</style>
+                    {!showLabels && (
+                      <style>{`
+                        .scalistai-svg-overlay text { display: none !important; }
+                        .scalistai-svg-overlay rect[rx="13"], .scalistai-svg-overlay rect[rx="12"] { display: none !important; }
+                      `}</style>
+                    )}
                   </defs>
                   <g
                     transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
@@ -3105,42 +3112,44 @@ export default function PlanViewerInner({
                                 />
                               </>
                             )}
-                            <g
-                              transform={`translate(${centroid.x}, ${centroid.y}) scale(${1 / scale})`}
-                              className="pointer-events-none transition-all duration-200"
-                            >
-                              <rect
-                                x={-pillW / 2 - 1}
-                                y={-13}
-                                width={pillW + 2}
-                                height={26}
-                                rx={13}
-                                fill="#FFFFFF"
-                                opacity={0.35}
-                              />
-                              <rect
-                                x={-pillW / 2}
-                                y={-12}
-                                width={pillW}
-                                height={24}
-                                rx={12}
-                                fill={sel ? "#BE123C" : "#9F1239"}
-                                opacity={sel || hovered ? 0.96 : 0.82}
-                                filter="url(#shadow-glow-sm)"
-                              />
-                              <text
-                                x={0}
-                                y={4}
-                                fill="#FFFFFF"
-                                fontSize={10.5}
-                                fontWeight="700"
-                                textAnchor="middle"
-                                style={{ letterSpacing: "0.04em" }}
-                                className="font-sans"
+                            {showLabels && (
+                              <g
+                                transform={`translate(${centroid.x}, ${centroid.y}) scale(${1 / scale})`}
+                                className="pointer-events-none transition-all duration-200"
                               >
-                                {pillText}
-                              </text>
-                            </g>
+                                <rect
+                                  x={-pillW / 2 - 1}
+                                  y={-13}
+                                  width={pillW + 2}
+                                  height={26}
+                                  rx={13}
+                                  fill="#FFFFFF"
+                                  opacity={0.35}
+                                />
+                                <rect
+                                  x={-pillW / 2}
+                                  y={-12}
+                                  width={pillW}
+                                  height={24}
+                                  rx={12}
+                                  fill={sel ? "#BE123C" : "#9F1239"}
+                                  opacity={sel || hovered ? 0.96 : 0.82}
+                                  filter="url(#shadow-glow-sm)"
+                                />
+                                <text
+                                  x={0}
+                                  y={4}
+                                  fill="#FFFFFF"
+                                  fontSize={10.5}
+                                  fontWeight="700"
+                                  textAnchor="middle"
+                                  style={{ letterSpacing: "0.04em" }}
+                                  className="font-sans"
+                                >
+                                  {pillText}
+                                </text>
+                              </g>
+                            )}
                           </g>
                         );
                       })}
@@ -4129,23 +4138,6 @@ export default function PlanViewerInner({
                     )}
                   </g>
 
-                  {/* Barra de escala — coords de pantalla, fuera del transform */}
-                  {currentPageScale && dims.w > 100 && (() => {
-                    const m = niceScaleBarM(currentPageScale, scale);
-                    const barPx = m * currentPageScale * scale;
-                    const bx = 16, by = dims.h - 32;
-                    return (
-                      <g>
-                        <rect x={bx} y={by} width={barPx} height={5} fill="white" stroke="#666" strokeWidth={1.2} rx={1} />
-                        <line x1={bx} y1={by} x2={bx} y2={by + 5} stroke="#666" strokeWidth={1.2} />
-                        <line x1={bx + barPx} y1={by} x2={bx + barPx} y2={by + 5} stroke="#666" strokeWidth={1.2} />
-                        <text x={bx + barPx / 2} y={by - 4} textAnchor="middle" fontSize="11"
-                          fill="white" stroke="black" strokeWidth="3" paintOrder="stroke" fontWeight="600">
-                          {m >= 1 ? `${m} m` : `${(m * 100).toFixed(0)} cm`}
-                        </text>
-                      </g>
-                    );
-                  })()}
 
                   {/* Lasso de selección (Ctrl+drag) */}
                   {lasso && lasso.w > 4 && lasso.h > 4 && (
@@ -4255,6 +4247,23 @@ export default function PlanViewerInner({
                         <path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>
                       </svg>
                     )}
+                  </ToolbarIconButton>
+                  
+                  <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
+                  
+                  <ToolbarIconButton
+                    onClick={() => setShowLabels((v) => !v)}
+                    title={showLabels ? "Ocultar etiquetas de áreas" : "Mostrar etiquetas de áreas"}
+                    ariaLabel={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      {showLabels ? (
+                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                      ) : (
+                        <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61M2 2l20 20" />
+                      )}
+                      {showLabels && <circle cx="12" cy="12" r="3" />}
+                    </svg>
                   </ToolbarIconButton>
 
                   <span className="mx-0.5 h-6 w-px bg-slate-200 dark:bg-slate-700" />
@@ -4515,9 +4524,9 @@ export default function PlanViewerInner({
         </div>
 
         {/* PANEL DERECHO — Cómputo */}
-        <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-72${isMaximized ? " hidden" : " flex"}`}>
+        <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-80${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
               Cómputo
             </h3>
             <button
@@ -4525,12 +4534,12 @@ export default function PlanViewerInner({
               onClick={downloadXlsx}
               disabled={exporting || summary.length === 0}
               title="Exportar a Excel"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               {exporting ? "..." : "XLSX"}
             </button>
           </div>
-          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
             Página {page} · cantidades por material
           </p>
 
@@ -4538,22 +4547,22 @@ export default function PlanViewerInner({
               tipo de una, sin seleccionarlos. El dropdown solo ofrece sistemas
               aplicables a ese tipo (no deja un piso en un muro). */}
           {typesSummary.length > 0 && (
-            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/40 p-2 dark:border-slate-800 dark:bg-slate-950/30">
-              <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/40 p-3 dark:border-slate-800 dark:bg-slate-950/30">
+              <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Sistemas por tipo
               </p>
-              <p className="mb-1.5 text-[10px] text-slate-400">
+              <p className="mb-2.5 text-xs text-slate-500 dark:text-slate-400">
                 Clic en un sistema para asignarlo a todos los de ese tipo. Clic de nuevo para quitarlo.
               </p>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {typesSummary.map((t) => (
                   <div key={t.type}>
-                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                      {t.label} <span className="text-[10px] font-normal text-slate-400">({t.count})</span>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      {t.label} <span className="ml-1 text-xs font-normal text-slate-400">({t.count})</span>
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {t.applicable.length === 0 ? (
-                        <span className="text-[10px] italic text-slate-400">No hay sistemas para este tipo todavía.</span>
+                        <span className="text-xs italic text-slate-400">No hay sistemas para este tipo todavía.</span>
                       ) : (
                         t.applicable.map((a) => {
                           const on = t.assignedIds.has(a.id);
@@ -4565,7 +4574,7 @@ export default function PlanViewerInner({
                               onClick={() => (on ? applyUnassignAllByType(a.id) : applyAssignAllByType(a.id))}
                               title={on ? "Asignado a todos — clic para quitar" : "Clic para asignar a todos"}
                               className={
-                                "rounded-full border px-2 py-0.5 text-[11px] font-medium transition disabled:opacity-50 " +
+                                "rounded-full border px-2.5 py-1 text-xs font-medium transition disabled:opacity-50 " +
                                 (on
                                   ? "border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
                                   : "border-slate-300 bg-white text-slate-600 hover:border-brand-400 hover:text-brand-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300")
@@ -4596,18 +4605,18 @@ export default function PlanViewerInner({
             </div>
           ) : (
             <>
-              <div className="max-h-[420px] flex-1 space-y-1.5 overflow-y-auto pr-1">
+              <div className="max-h-[420px] flex-1 space-y-2 overflow-y-auto pr-1">
                 {summary.map((item) => (
                   <div
                     key={item.material.id}
-                    className="rounded-md border border-slate-100 bg-slate-50/30 px-2 py-1.5 dark:border-slate-800 dark:bg-slate-950/30"
+                    className="rounded-md border border-slate-100 bg-slate-50/30 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/30"
                   >
-                    <div className="flex items-start justify-between gap-2 text-xs">
+                    <div className="flex items-start justify-between gap-3 text-sm">
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
                           {item.material.name}
                         </p>
-                        <p className="text-[10px] text-slate-400">{item.material.category}</p>
+                        <p className="text-xs text-slate-400">{item.material.category}</p>
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="font-bold text-brand dark:text-sky-400">
@@ -4615,12 +4624,12 @@ export default function PlanViewerInner({
                             minimumFractionDigits: 1,
                             maximumFractionDigits: 2,
                           })}
-                          <span className="ml-1 text-[10px] font-semibold text-slate-500">
+                          <span className="ml-1 text-xs font-semibold text-slate-500">
                             {item.unit}
                           </span>
                         </p>
                         {item.subtotal > 0 && (
-                          <p className="text-[10px] text-slate-500">
+                          <p className="text-xs font-medium text-slate-500">
                             ${item.subtotal.toLocaleString(undefined, {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
@@ -4633,7 +4642,7 @@ export default function PlanViewerInner({
                 ))}
               </div>
               {summary.some((s) => s.subtotal > 0) && (
-                <div className="mt-2 flex items-center justify-between rounded-md border border-brand/30 bg-sky-50/60 px-2 py-1.5 text-xs font-bold dark:border-sky-800 dark:bg-sky-950/30">
+                <div className="mt-3 flex items-center justify-between rounded-md border border-brand/30 bg-sky-50/60 px-3 py-2.5 text-sm font-bold dark:border-sky-800 dark:bg-sky-950/30">
                   <span className="text-slate-700 dark:text-slate-200">Total estimado</span>
                   <span className="text-brand dark:text-sky-300">
                     ${summary.reduce((a, s) => a + s.subtotal, 0).toLocaleString(undefined, {

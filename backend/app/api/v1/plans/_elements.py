@@ -423,18 +423,28 @@ def assign_assembly_to_all(
     target_types = _APPLIES_TO_TYPES.get(asm.applies_to, set())
     if not target_types:
         return {"assigned": 0, "types": []}
-    els = list(db.scalars(select(DetectedElement).where(
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models.material import element_assemblies
+
+    # Obtener los IDs de los elementos aplicables
+    valid_elements = db.scalars(select(DetectedElement.id).where(
         DetectedElement.plan_id == plan_id,
         DetectedElement.type.in_(target_types),
         DetectedElement.is_candidate.is_(False),
-    )).all())
-    n = 0
-    for el in els:
-        if asm not in el.assemblies:
-            el.assemblies.append(asm)
-            n += 1
+    )).all()
+
+    if not valid_elements:
+        return {"assigned": 0, "types": sorted(target_types)}
+
+    # Bulk Insert con ON CONFLICT DO NOTHING para ignorar duplicados
+    stmt = pg_insert(element_assemblies).values(
+        [{"element_id": eid, "assembly_id": assembly_id} for eid in valid_elements]
+    ).on_conflict_do_nothing()
+
+    result = db.execute(stmt)
     db.commit()
-    return {"assigned": n, "types": sorted(target_types)}
+    return {"assigned": result.rowcount, "types": sorted(target_types)}
 
 
 @router.post("/plans/{plan_id}/assemblies/{assembly_id}/unassign-all")
@@ -449,14 +459,21 @@ def unassign_assembly_from_all(
     target_types = _APPLIES_TO_TYPES.get(asm.applies_to, set())
     if not target_types:
         return {"removed": 0}
-    els = list(db.scalars(select(DetectedElement).where(
-        DetectedElement.plan_id == plan_id,
-        DetectedElement.type.in_(target_types),
-    )).all())
-    n = 0
-    for el in els:
-        if any(a.id == assembly_id for a in el.assemblies):
-            el.assemblies = [a for a in el.assemblies if a.id != assembly_id]
-            n += 1
+
+    from sqlalchemy import delete
+    from app.models.material import element_assemblies
+
+    # Solo borramos de la tabla intermedia aquellos que pertenecen al plano
+    stmt = delete(element_assemblies).where(
+        element_assemblies.c.assembly_id == assembly_id,
+        element_assemblies.c.element_id.in_(
+            select(DetectedElement.id).where(
+                DetectedElement.plan_id == plan_id,
+                DetectedElement.type.in_(target_types)
+            )
+        )
+    )
+
+    result = db.execute(stmt)
     db.commit()
-    return {"removed": n}
+    return {"removed": result.rowcount}
