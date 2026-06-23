@@ -88,25 +88,34 @@ class MLDetectionResult:
 
 
 def _resolve_active_model_path(default_path: str) -> tuple[Path, dict | None]:
-    """Devuelve (path, active_info) leyendo `backend/models/active.json` si existe.
+    """Devuelve (path, active_info) leyendo `active.json` si existe.
 
     Sprint 5: `train_model.py` y `finetune_model.py` mantienen `active.json`
     apuntando a la versión productiva. Cuando no existe (ambiente fresh,
     o se borró), caemos al `settings.ML_MODEL_PATH` legacy.
     """
-    active_file = Path("models/active.json")
-    if not active_file.exists():
-        active_file = Path("backend/models/active.json")
-        
-    if active_file.exists():
+    possible_paths = [
+        Path("storage/models/active.json"),
+        Path("models/active.json"),
+        Path("backend/models/active.json")
+    ]
+    
+    active_file = None
+    for p in possible_paths:
+        if p.exists():
+            active_file = p
+            break
+            
+    if active_file:
         try:
             data = json.loads(active_file.read_text())
             p_str = str(data.get("path", ""))
             
-            # Ajuste dinámico: Si active.json se generó en el host dice "backend/models/..."
-            # Pero si estamos corriendo en Docker, nuestro cwd es /app y el folder se llama "models/"
+            # Ajuste dinámico de rutas legacy/docker
             if p_str.startswith("backend/models/") and not Path(p_str).exists():
-                p_str = p_str.replace("backend/models/", "models/", 1)
+                p_str = p_str.replace("backend/models/", "storage/models/", 1)
+            if p_str.startswith("models/") and not Path(p_str).exists():
+                p_str = p_str.replace("models/", "storage/models/", 1)
                 
             p = Path(p_str)
             if p.exists():
