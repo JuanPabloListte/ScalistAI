@@ -1,10 +1,11 @@
 from typing import TYPE_CHECKING
-from sqlalchemy import Column, ForeignKey, Integer, String, Float, Table
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.detected_element import DetectedElement
+    from app.models.construction_entity import ConstructionEntity
 
 # Material en crudo (ej: "Ladrillo hueco 15cm", "Cemento portland", "Arena")
 class Material(Base):
@@ -45,6 +46,19 @@ class Assembly(Base):
     # cronograma (Gantt) y la certificación de avance.
     stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     stage_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+
+    # Entidad constructiva a la que esta receta pertenece como alternativa
+    # (ej. Muro → este Assembly = opción "Ladrillo"). Nullable para no romper
+    # assemblies existentes; el seed la backfillea desde applies_to.
+    construction_entity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("construction_entities.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_default_alternative: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
+    construction_entity: Mapped["ConstructionEntity | None"] = relationship(
+        "ConstructionEntity", back_populates="recipes"
+    )
 
     assembly_materials: Mapped[list["AssemblyMaterial"]] = relationship(
         "AssemblyMaterial", back_populates="assembly", cascade="all, delete-orphan"
