@@ -51,6 +51,14 @@ _ELEC_KEYS = (
 )
 _STAIR_KEYS = ("ESCALERA", "STAIR", "ESCALON", "ESCALÓN")
 _COLUMN_KEYS = ("COLUMNA", "COLUMN", "PILAR", "PILOTE", "S-COL")  # S-COL: estándar AECO inglés
+# Vigas (beam) = elemento estructural lineal de entrepiso/losa. En los PDFs del
+# usuario la capa es "-V0" (vigas de un nivel); otros estudios usan VIGA/S-BEAM.
+# Riostra = viga de fundación (encadenado): clase aparte porque va a nivel
+# cimiento (otro cómputo). Riostra se chequea ANTES que beam, así una capa
+# "VIGA DE FUNDACION" cae en riostra y no en beam.
+_RIOSTRA_KEYS = ("RIOSTRA", "ENCADENADO", "VIGA DE FUNDAC", "VIGAS DE FUNDAC", "VIGA FUNDAC")
+_BEAM_KEYS = ("VIGA", "BEAM")
+_BEAM_LAYER_RE = re.compile(r"-V\d")  # "-V0", "-V1"... vigas por nivel (convención del estudio)
 # Pozo = excavación donde va la zapata/cimiento (mucho hormigón). NO es clase
 # del modelo de IA todavía — se extrae como elemento para cómputo de material.
 # Estos PDFs no traen capa de pozos (el pozo está en hatching), así que el
@@ -87,6 +95,14 @@ _ELEC_LEGEND = ("ELECTRIC", "ELÉCTRIC", "ILUMINAC", "UNIFILAR", "TABLERO")
 # se duplicarían. Pozos: lámina de fundación (replanteo de pozos/zapatas).
 _COLUMN_LEGEND = ("REPLANTEO DE COLUMNA", "PLANTA DE COLUMNA", "PLANO DE COLUMNA")
 _POZO_LEGEND = ("REPLANTEO DE POZO", "PLANO DE POZO", "ZAPATA", "CIMIENTO", "FUNDACION", "FUNDACIÓN")
+# Estructura de vigas: vigas de entrepiso/losa (beam) y vigas de fundación
+# (riostra). En estas láminas la arquitectura es xref de fondo → solo aportan
+# su estructura. "REPLANTEO DE VIGAS RIOSTRAS" matchea ambas, por eso riostra
+# tiene prioridad en el gate (se chequea primero).
+_BEAM_LEGEND = ("REPLANTEO DE VIGA", "PLANTA DE VIGA", "PLANO DE VIGA",
+                "PLANTA DE ESTRUCTURA", "PLANO DE LOSA", "PLANTA DE LOSA",
+                "PLANO DE ENTREPISO", "PLANILLA DE VIGA")
+_RIOSTRA_LEGEND = ("RIOSTRA", "VIGA DE FUNDAC", "VIGAS DE FUNDAC", "ENCADENADO")
 
 
 def _page_allowed_types(page) -> set:
@@ -109,6 +125,14 @@ def _page_allowed_types(page) -> set:
         allowed.add("column")
     if any(k in up for k in _POZO_LEGEND):
         allowed.add("pozo")
+    # Beam y riostra NO son excluyentes: extraen de capas distintas (-V0 vs
+    # RIOSTRA/FUNDAC), así que una lámina que mencione ambas (ej. el índice
+    # nombra "RIOSTRAS" pero la planta dibuja vigas -V0) aporta las dos sin
+    # doble conteo. La desambiguación real la hace el nombre de capa.
+    if any(k in up for k in _BEAM_LEGEND):
+        allowed.add("beam")
+    if any(k in up for k in _RIOSTRA_LEGEND):
+        allowed.add("riostra")
     return allowed
 
 
@@ -122,6 +146,10 @@ def _classify_layer(name: str, extra: Optional[dict] = None) -> Optional[str]:
         return "wall"
     if any(k in up for k in _OPENING_KEYS):
         return "opening"
+    if any(k in up for k in _RIOSTRA_KEYS):
+        return "riostra"
+    if any(k in up for k in _BEAM_KEYS) or _BEAM_LAYER_RE.search(up):
+        return "beam"
     if any(k in up for k in _CLOACA_KEYS):
         return "cloaca"
     if any(k in up for k in _ELEC_KEYS):
@@ -267,12 +295,15 @@ def _extract_page(page, px_per_m: float, pt2px: float,
         if typ == "pozo":
             pozo_paths.append(d)
             continue
+        # wall/beam/riostra son lineales (a doble línea): se extraen como
+        # segmentos y luego se fusionan las caras al eje (igual que los muros).
+        seg_key = {"wall": "wall_seg", "beam": "beam_seg", "riostra": "riostra_seg"}.get(typ)
         for poly in _path_polylines(d):
-            if typ == "wall":
+            if seg_key:
                 for a, b in zip(poly, poly[1:]):
                     length_m = math.hypot(b[0] - a[0], b[1] - a[1]) * pt2px / px_per_m
                     if length_m >= _MIN_WALL_SEG_M:
-                        out["wall_seg"].append((
+                        out[seg_key].append((
                             [a[0] * pt2px, a[1] * pt2px, b[0] * pt2px, b[1] * pt2px],
                             None, length_m,
                         ))
@@ -511,7 +542,7 @@ def _vector_import(plan_id: int) -> None:
 
         page_scales = dict(plan.page_scales or {})
         totals = {"wall": 0, "opening": 0, "cloaca": 0, "electricidad": 0,
-                  "escalera": 0, "column": 0, "pozo": 0}
+                  "escalera": 0, "column": 0, "pozo": 0, "beam": 0, "riostra": 0}
 
         for i in range(doc.page_count):
             pageno = i + 1
@@ -555,6 +586,26 @@ def _vector_import(plan_id: int) -> None:
 
             db.add_all(opening_els)
             totals["opening"] += len(opening_els)
+
+            # Vigas (beam) y riostras: lineales como los muros. Se fusionan las
+            # dos caras al eje con el mismo merge de muros (etiqueta temporal
+            # "wall") y se reetiquetan. height_m = canto típico de la viga.
+            for beam_type, depth in (("beam", 0.5), ("riostra", 0.4)):
+                if beam_type not in allowed:
+                    continue
+                raw = [
+                    DetectedElement(
+                        plan_id=plan.id, page=pageno, type="wall",
+                        geometry={"points": [round(v, 2) for v in pts]},
+                        length_m=round(length_m, 3), source="dxf",
+                    )
+                    for pts, _, length_m in res.get(beam_type + "_seg", [])
+                ]
+                for el in _merge_segments(raw, px_per_m):
+                    el.type = beam_type
+                    el.height_m = depth
+                    db.add(el)
+                    totals[beam_type] += 1
 
             for typ in ("cloaca", "electricidad"):
                 if typ not in allowed:
