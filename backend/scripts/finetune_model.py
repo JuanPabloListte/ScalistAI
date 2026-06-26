@@ -198,6 +198,12 @@ def finetune(args) -> int:
     best_state: dict | None = None
     best_epoch = 0
     best_metrics: dict | None = None
+    # Path del checkpoint calculado ANTES del loop para poder guardar el best a
+    # disco en cada mejora (no solo al final). Si Docker/el proceso se cae a
+    # mitad de un run largo, el mejor modelo ya quedó persistido y no se pierde.
+    new_version = active.version + 1
+    new_path = C.MODELS_DIR / f"scalistai_seg_v{new_version}.pt"
+    new_path.parent.mkdir(parents=True, exist_ok=True)
     for epoch in range(args.epochs):
         model.train()
         train_loss_sum = 0.0
@@ -234,6 +240,7 @@ def finetune(args) -> int:
             # Copia profunda del state_dict (los tensores se mueven al CPU
             # para no ocupar GPU).
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            torch.save(best_state, new_path)  # persistir best en cada mejora (anti-caída)
             log_line += "  [BEST]"
         print(log_line)
 
@@ -246,10 +253,8 @@ def finetune(args) -> int:
     delta = new_miou - old_miou
     final_history_metrics = best_metrics
 
-    # 7. Persistir el best checkpoint (no el final).
-    new_version = active.version + 1
-    new_path = C.MODELS_DIR / f"scalistai_seg_v{new_version}.pt"
-    new_path.parent.mkdir(parents=True, exist_ok=True)
+    # 7. El best ya quedó persistido en new_path durante el loop (anti-caída);
+    #    re-guardamos por las dudas y seguimos con la decisión de promoción.
     torch.save(best_state, new_path)
     print(f"[checkpoint] guardado best (epoch {best_epoch}, mIoU {best_miou:.4f})")
     history_path = new_path.with_suffix(".history.json")

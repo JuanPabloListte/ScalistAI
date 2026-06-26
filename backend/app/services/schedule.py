@@ -38,15 +38,16 @@ def _area_for_cost(el: DetectedElement, applies_to: str,
                 if _opening_overlaps_wall(op, el, scale):
                     area -= (op.length_m or 0.0) * (op.height_m or 2.1)
         return max(area, 0.0)
-    if applies_to in ("room_floor", "roof") and el.area_m2:
+    if applies_to in ("room_floor", "roof", "escalera") and el.area_m2:
         return el.area_m2
     if applies_to in ("room_wall",) and el.length_m:
         return (el.length_m or 0.0) * (el.height_m or 2.8)
-    if applies_to in ("room_perimeter", "opening_perimeter", "beam") and el.length_m:
+    if applies_to in ("room_perimeter", "opening_perimeter", "beam",
+                      "riostra", "cloaca", "electricidad") and el.length_m:
         return el.length_m
     if applies_to == "opening" and el.type == "opening":
         return (el.length_m or 0.0) * (el.height_m or 2.1)
-    if applies_to == "column" and el.type == "column":
+    if applies_to in ("column", "pozo"):
         return el.area_m2 or 0.0
     return 0.0
 
@@ -54,21 +55,23 @@ def _area_for_cost(el: DetectedElement, applies_to: str,
 def _qty_for_duration(el: DetectedElement, applies_to: str) -> float:
     """Cantidad en la unidad del rendimiento (daily_yield). Columnas y aberturas
     se cuentan por unidad; el resto por su medida (m²/ml)."""
-    if applies_to in ("column", "opening"):
+    if applies_to in ("column", "opening", "pozo"):
         return 1.0
     if applies_to == "wall":
         return (el.length_m or 0.0) * (el.height_m or 2.8)
-    if applies_to in ("room_floor", "roof"):
+    if applies_to in ("room_floor", "roof", "escalera"):
         return el.area_m2 or 0.0
-    if applies_to in ("room_perimeter", "opening_perimeter", "beam", "room_wall"):
+    if applies_to in ("room_perimeter", "opening_perimeter", "beam", "room_wall",
+                      "riostra", "cloaca", "electricidad"):
         return el.length_m or 0.0
     return 0.0
 
 
 def _unit_for(applies_to: str) -> str:
-    if applies_to in ("column", "opening"):
+    if applies_to in ("column", "opening", "pozo"):
         return "un"
-    if applies_to in ("room_perimeter", "opening_perimeter", "beam", "room_wall"):
+    if applies_to in ("room_perimeter", "opening_perimeter", "beam", "room_wall",
+                      "riostra", "cloaca", "electricidad"):
         return "ml"
     return "m²"
 
