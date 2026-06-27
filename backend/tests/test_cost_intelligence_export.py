@@ -35,11 +35,21 @@ def test_produces_valid_xlsx_with_4_sheets():
     assert _wb().sheetnames == ["Presupuesto", "Escenarios", "Proyección", "Detalle materiales"]
 
 
-def test_presupuesto_total_obra():
+def test_presupuesto_costo_directo():
     ws = _wb()["Presupuesto"]
     vals = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)}
     assert vals.get("Materiales") == 1000.0
-    assert vals.get("TOTAL OBRA") == 1500.0  # materiales + MO
+    assert vals.get("COSTO DIRECTO") == 1500.0  # materiales + MO
+
+
+def test_presupuesto_precio_venta_con_breakdown():
+    bd = {"overhead": 225.0, "profit": 172.5, "net": 1897.5, "iva": 398.48, "total": 2295.98}
+    from io import BytesIO
+    from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_workbook
+    ws = load_workbook(BytesIO(build_workbook(SIM, SCEN, PROJ, bd)))["Presupuesto"]
+    vals = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)}
+    assert vals.get("PRECIO DE VENTA") == 2295.98
+    assert vals.get("IVA") == 398.48
 
 
 def test_detalle_lista_material():

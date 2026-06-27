@@ -14,14 +14,17 @@ from app.core.deps import get_current_user
 from app.cost_intelligence.application.use_cases.compare_scenarios import CompareScenarios
 from app.cost_intelligence.application.use_cases.forecast_cost import ForecastCost
 from app.cost_intelligence.application.use_cases.run_simulation import RunSimulation
+from app.cost_intelligence.domain.pricing_breakdown import build_price
 from app.cost_intelligence.domain.value_objects import Money
 from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_workbook
 from app.cost_intelligence.infrastructure.forecasting.deterministic import DeterministicForecaster
+from app.cost_intelligence.infrastructure.persistence.cost_settings_repo import SqlCostSettingsRepo
 from app.cost_intelligence.infrastructure.persistence.macro_rate_provider import SqlMacroRateProvider
 from app.cost_intelligence.infrastructure.persistence.measurement_provider import SqlMeasurementProvider
 from app.cost_intelligence.infrastructure.persistence.recipe_catalog import SqlRecipeCatalog
 from app.cost_intelligence.infrastructure.persistence.simulation_store import SqlSimulationStore
 from app.models import Assembly, ConstructionEntity, Plan, Project, Simulation, User
+from app.schemas.cost_settings import CostSettingsRead, CostSettingsUpdate
 from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.schemas.simulation import (
     CompareRequest, CompareResponse, SimulationCreate, SimulationRead,
@@ -225,10 +228,45 @@ def export_simulation(
     scenarios = _build_scenarios(db, sim.plan_id, user.organization_id)
     projections = _build_projections(db, total)
 
-    xlsx = build_workbook(sim_data, scenarios, projections)
+    # Costo directo -> precio de venta (gastos generales + beneficio + IVA).
+    rates = SqlCostSettingsRepo(db).rates(user.organization_id)
+    bd = build_price(total, rates)
+    breakdown = {
+        "overhead": float(bd.overhead.amount), "profit": float(bd.profit.amount),
+        "net": float(bd.net.amount), "iva": float(bd.iva.amount), "total": float(bd.total.amount),
+    }
+
+    xlsx = build_workbook(sim_data, scenarios, projections, breakdown)
+    db.commit()  # persiste los cost_settings default si se crearon recién
     filename = f"presupuesto_sim_{simulation_id}.xlsx"
     return Response(
         content=xlsx,
         media_type=_XLSX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/cost-settings", response_model=CostSettingsRead)
+def get_cost_settings(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CostSettingsRead:
+    s = SqlCostSettingsRepo(db).get_or_create(user.organization_id)
+    db.commit()
+    return CostSettingsRead(overhead_pct=s.overhead_pct, profit_pct=s.profit_pct, iva_pct=s.iva_pct)
+
+
+@router.put("/cost-settings", response_model=CostSettingsRead)
+def update_cost_settings(
+    payload: CostSettingsUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CostSettingsRead:
+    s = SqlCostSettingsRepo(db).update(
+        user.organization_id,
+        overhead_pct=payload.overhead_pct,
+        profit_pct=payload.profit_pct,
+        iva_pct=payload.iva_pct,
+    )
+    db.commit()
+    return CostSettingsRead(overhead_pct=s.overhead_pct, profit_pct=s.profit_pct, iva_pct=s.iva_pct)

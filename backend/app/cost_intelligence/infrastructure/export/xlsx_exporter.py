@@ -38,7 +38,8 @@ def _autosize(ws: Worksheet, widths: list[int]) -> None:
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
-def build_workbook(sim: dict, scenarios: Iterable[dict], projections: Iterable[dict]) -> bytes:
+def build_workbook(sim: dict, scenarios: Iterable[dict], projections: Iterable[dict],
+                   breakdown: dict | None = None) -> bytes:
     wb = Workbook()
     totals = sim["totals"]
     total_obra = totals["materials"] + totals["labor_cost"]
@@ -49,20 +50,31 @@ def build_workbook(sim: dict, scenarios: Iterable[dict], projections: Iterable[d
     ws["A1"] = sim.get("name") or "Presupuesto"
     ws["A1"].font = _TITLE_FONT
     _header_row(ws, 3, ["Rubro", "Monto"])
-    data = [
-        ("Materiales", totals["materials"]),
-        ("Mano de obra", totals["labor_cost"]),
-        ("TOTAL OBRA", total_obra),
-        ("Horas hombre", totals["labor_hours"]),
-        ("Duración estimada (días)", totals["duration_days"]),
+    # Costo directo + (si hay) markup a precio de venta + métricas.
+    rows: list[tuple[str, float, str]] = [
+        ("Materiales", totals["materials"], "money"),
+        ("Mano de obra", totals["labor_cost"], "money"),
+        ("COSTO DIRECTO", total_obra, "bold"),
     ]
-    for i, (label, value) in enumerate(data, start=4):
-        ws.cell(row=i, column=1, value=label)
+    if breakdown:
+        rows += [
+            ("Gastos generales", breakdown["overhead"], "money"),
+            ("Beneficio", breakdown["profit"], "money"),
+            ("Precio neto (sin IVA)", breakdown["net"], "money"),
+            ("IVA", breakdown["iva"], "money"),
+            ("PRECIO DE VENTA", breakdown["total"], "bold"),
+        ]
+    rows += [
+        ("Horas hombre", totals["labor_hours"], "plain"),
+        ("Duración estimada (días)", totals["duration_days"], "plain"),
+    ]
+    for i, (label, value, kind) in enumerate(rows, start=4):
+        lc = ws.cell(row=i, column=1, value=label)
         c = ws.cell(row=i, column=2, value=round(value, 2))
-        if label not in ("Horas hombre", "Duración estimada (días)"):
+        if kind != "plain":
             c.number_format = _MONEY_FMT
-        if label == "TOTAL OBRA":
-            ws.cell(row=i, column=1).font = _TOTAL_FONT
+        if kind == "bold":
+            lc.font = _TOTAL_FONT
             c.font = _TOTAL_FONT
     _autosize(ws, [28, 22])
 
