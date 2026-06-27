@@ -8,5 +8,6 @@ from app.models.plan_ai_context import PlanAiContext
 from app.models.construction_entity import ConstructionEntity
 from app.models.price_history import MaterialPriceHistory
 from app.models.labor import LaborRate, LaborRateHistory
+from app.models.simulation import Simulation
 
-__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory"]
+__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation"]
