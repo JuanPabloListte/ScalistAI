@@ -3,17 +3,24 @@
 Cablea los casos de uso del bounded context (`RunSimulation`,
 `CompareScenarios`) con los adapters SQL y la auth/multi-tenancy existente.
 """
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.cost_intelligence.application.use_cases.compare_scenarios import CompareScenarios
+from app.cost_intelligence.application.use_cases.forecast_cost import ForecastCost
 from app.cost_intelligence.application.use_cases.run_simulation import RunSimulation
+from app.cost_intelligence.domain.value_objects import Money
+from app.cost_intelligence.infrastructure.forecasting.deterministic import DeterministicForecaster
+from app.cost_intelligence.infrastructure.persistence.macro_rate_provider import SqlMacroRateProvider
 from app.cost_intelligence.infrastructure.persistence.measurement_provider import SqlMeasurementProvider
 from app.cost_intelligence.infrastructure.persistence.recipe_catalog import SqlRecipeCatalog
 from app.cost_intelligence.infrastructure.persistence.simulation_store import SqlSimulationStore
 from app.models import Plan, Project, Simulation, User
+from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.schemas.simulation import (
     CompareRequest, CompareResponse, SimulationCreate, SimulationRead,
 )
@@ -100,4 +107,47 @@ def compare_scenarios(
         material_cost_difference=float(diff.material_cost_difference.amount),
         labor_cost_difference=float(diff.labor_cost_difference.amount),
         time_saved_days=float(diff.time_saved_days),
+    )
+
+
+@router.post("/forecast", response_model=ForecastResponse)
+def forecast(
+    payload: ForecastRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ForecastResponse:
+    # Costo a proyectar: una simulación persistida (materiales + MO) o un monto suelto.
+    if payload.simulation_id is not None:
+        sim = SqlSimulationStore(db).get(payload.simulation_id, user.organization_id)
+        if sim is None:
+            raise HTTPException(status_code=404, detail="Simulación no encontrada")
+        amount = Money(sim.totals["materials"]) + Money(sim.totals["labor_cost"])
+    elif payload.amount is not None:
+        amount = Money(payload.amount)
+    else:
+        raise HTTPException(status_code=400, detail="Se requiere simulation_id o amount")
+
+    # Tasa: explícita del request, o derivada del índice oficial (ICC) si está cargado.
+    if payload.monthly_rate is not None:
+        rate = Decimal(str(payload.monthly_rate))
+    else:
+        rate = SqlMacroRateProvider(db).monthly_rate(payload.indicator)
+        if rate is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No hay histórico de {payload.indicator} cargado; pasá monthly_rate",
+            )
+
+    try:
+        result = ForecastCost(DeterministicForecaster(rate)).execute(amount, payload.horizon_months)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return ForecastResponse(
+        cost_today=float(result.cost_today.amount),
+        projected_cost=float(result.projected_cost.amount),
+        variation=round(float(result.variation_pct), 2),
+        horizon_months=result.horizon_months,
+        monthly_rate=float(result.monthly_rate),
+        method=result.method,
     )
