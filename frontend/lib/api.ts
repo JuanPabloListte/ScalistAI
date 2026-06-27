@@ -404,6 +404,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// --- Motor de Inteligencia de Costos ---
+export type SimulationResult = {
+  id: number;
+  plan_id: number;
+  name: string;
+  status: string;
+  created_at: string;
+  totals: { materials: number; labor_cost: number; labor_hours: number; duration_days: number };
+  lines: { material_id: number; material_name: string; quantity: number; unit: string; unit_cost: number; total: number }[];
+};
+export type ForecastResult = {
+  cost_today: number;
+  projected_cost: number;
+  variation: number;
+  horizon_months: number;
+  monthly_rate: number;
+  method: string;
+};
+export type CostSettings = { overhead_pct: number; profit_pct: number; iva_pct: number };
+
 export const api = {
   register: (email: string, password: string) =>
     request<{ id: number; email: string }>("/api/v1/auth/register", {
@@ -536,6 +556,40 @@ export const api = {
 
   listPlans: (projectId: number) =>
     request<Plan[]>(`/api/v1/projects/${projectId}/plans`),
+
+  // Motor de Inteligencia de Costos
+  runSimulation: (planId: number, name?: string) =>
+    request<SimulationResult>("/api/v1/simulations", {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, name }),
+    }),
+  forecastCost: (simulationId: number, horizonMonths: number) =>
+    request<ForecastResult>("/api/v1/forecast", {
+      method: "POST",
+      body: JSON.stringify({ simulation_id: simulationId, horizon_months: horizonMonths }),
+    }),
+  getCostSettings: () => request<CostSettings>("/api/v1/cost-settings"),
+  updateCostSettings: (patch: Partial<CostSettings>) =>
+    request<CostSettings>("/api/v1/cost-settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  downloadSimulationXlsx: async (simulationId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/export/${simulationId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`No se pudo exportar (HTTP ${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `presupuesto_${simulationId}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 
   uploadPlan: (projectId: number, file: File) => {
     const formData = new FormData();
