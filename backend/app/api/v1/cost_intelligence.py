@@ -5,7 +5,8 @@ Cablea los casos de uso del bounded context (`RunSimulation`,
 """
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -14,16 +15,20 @@ from app.cost_intelligence.application.use_cases.compare_scenarios import Compar
 from app.cost_intelligence.application.use_cases.forecast_cost import ForecastCost
 from app.cost_intelligence.application.use_cases.run_simulation import RunSimulation
 from app.cost_intelligence.domain.value_objects import Money
+from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_workbook
 from app.cost_intelligence.infrastructure.forecasting.deterministic import DeterministicForecaster
 from app.cost_intelligence.infrastructure.persistence.macro_rate_provider import SqlMacroRateProvider
 from app.cost_intelligence.infrastructure.persistence.measurement_provider import SqlMeasurementProvider
 from app.cost_intelligence.infrastructure.persistence.recipe_catalog import SqlRecipeCatalog
 from app.cost_intelligence.infrastructure.persistence.simulation_store import SqlSimulationStore
-from app.models import Plan, Project, Simulation, User
+from app.models import Assembly, ConstructionEntity, Plan, Project, Simulation, User
 from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.schemas.simulation import (
     CompareRequest, CompareResponse, SimulationCreate, SimulationRead,
 )
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_FORECAST_HORIZONS = (3, 6, 12)
 
 router = APIRouter(tags=["cost-intelligence"])
 
@@ -150,4 +155,80 @@ def forecast(
         horizon_months=result.horizon_months,
         monthly_rate=float(result.monthly_rate),
         method=result.method,
+    )
+
+
+def _build_scenarios(db: Session, plan_id: int, org_id: int) -> list[dict]:
+    """Para cada entidad presente en el plano con >1 receta, compara la default
+    contra cada alternativa → filas de la hoja 'Escenarios'."""
+    run = RunSimulation(SqlMeasurementProvider(db), SqlRecipeCatalog(db))
+    catalog = SqlRecipeCatalog(db)
+    entity_names = {
+        e.type: e.name
+        for e in db.scalars(select(ConstructionEntity).where(
+            ConstructionEntity.organization_id == org_id))
+    }
+    present = {m.entity_type for m in SqlMeasurementProvider(db).measurements_for(plan_id)}
+
+    rows: list[dict] = []
+    for entity_type in sorted(present):
+        recipes = db.scalars(select(Assembly).where(
+            Assembly.organization_id == org_id,
+            Assembly.applies_to == entity_type,
+        )).all()
+        if len(recipes) < 2:
+            continue
+        default = next((r for r in recipes if r.is_default_alternative), recipes[0])
+        for alt in recipes:
+            if alt.id == default.id:
+                continue
+            _, _, diff = CompareScenarios(run, catalog).execute(
+                plan_id, org_id, entity_type, default.id, alt.id)
+            rows.append({
+                "entity": entity_names.get(entity_type, entity_type),
+                "base": diff.base_label,
+                "alternative": diff.alt_label,
+                "material_diff": float(diff.material_cost_difference.amount),
+                "labor_diff": float(diff.labor_cost_difference.amount),
+                "time_saved": float(diff.time_saved_days),
+            })
+    return rows
+
+
+def _build_projections(db: Session, total: Money) -> list[dict]:
+    rate = SqlMacroRateProvider(db).monthly_rate("IPC")
+    if rate is None:
+        return []
+    out = []
+    for h in _FORECAST_HORIZONS:
+        r = ForecastCost(DeterministicForecaster(rate)).execute(total, h)
+        out.append({
+            "horizon_months": h,
+            "projected_cost": float(r.projected_cost.amount),
+            "variation": float(r.variation_pct),
+        })
+    return out
+
+
+@router.get("/export/{simulation_id}")
+def export_simulation(
+    simulation_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    sim = SqlSimulationStore(db).get(simulation_id, user.organization_id)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulación no encontrada")
+
+    sim_data = {"name": sim.name, "totals": sim.totals, "lines": sim.lines}
+    total = Money(sim.totals["materials"]) + Money(sim.totals["labor_cost"])
+    scenarios = _build_scenarios(db, sim.plan_id, user.organization_id)
+    projections = _build_projections(db, total)
+
+    xlsx = build_workbook(sim_data, scenarios, projections)
+    filename = f"presupuesto_sim_{simulation_id}.xlsx"
+    return Response(
+        content=xlsx,
+        media_type=_XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
