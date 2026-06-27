@@ -13,7 +13,7 @@ class ForecastRequest(BaseModel):
     horizon_months: int
     # tasa mensual explícita (ej. 0.05 = 5%/mes). Si falta, se deriva del índice.
     monthly_rate: Optional[float] = None
-    indicator: str = "ICC"
+    indicator: str = "IPC"  # ICC discontinuado en la API pública; IPC es el proxy vigente
 
 
 class ForecastResponse(BaseModel):
