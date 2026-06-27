@@ -2,8 +2,19 @@
 
 > Evolución de ScalistAI: de **calculadora estática** de materiales a **plataforma de simulación estratégica de construcción** (presupuesto base → comparación de materiales → simulación de escenarios → proyección de costos futuros).
 
-**Estado:** diseño aprobado el enfoque *"evolucionar lo existente"*. Pendiente: elegir fase de arranque.
-**Regla:** no se escribe código de implementación hasta aprobar el diseño detallado de cada fase.
+**Estado:** **Fase 0 y Fase 1 implementadas, testeadas y commiteadas.** Próximo: Fase 2 (Simulador de Escenarios).
+**Regla:** no se escribe código de implementación de una fase hasta aprobar su diseño detallado.
+
+### Progreso
+| Fase | Estado | Commit | Entregado |
+|---|---|---|---|
+| **0 — Cimientos** | ✅ hecho | `3e5ddf8` | Bounded context, domain (`Money`/`Quantity`/`measure_for`), `ConstructionEntity` + alternativas, 14 tests |
+| **1a — Histórico de precios** | ✅ hecho | `34467e9` | Vertical slice completo (domain→app→infra), `material_price_history`, **5 precios reales ingestados** (Carignani), 6 tests |
+| **1b — Mano de obra first-class** | ✅ hecho | `3d68efa` | `labor_rates` + histórico, oficio "Ayudante" derivado, 5 tests |
+| **2 — Simulador** | ⏳ siguiente | — | comparar recetas alternativas (Ladrillo vs Durlock) |
+| **3 — Grafo** · **4 — Predictivo** · **5 — Export** | pendiente | — | — |
+
+> **Nota de datos (importante):** los precios de materiales solo entran de fuentes **reales** (cotizaciones de proveedor, ej. Carignani/2448 Córdoba). **No se ingesta data sintética** al histórico real — envenena presupuesto y forecasting. Datos sintéticos, si se usan, viven aislados como fixture de dev (`source="synthetic"`), nunca mezclados. Índices macro (ICC/IPC/dólar) entran por API oficial en Fase 4.
 
 ---
 
@@ -238,14 +249,15 @@ Todos los endpoints scoped por `organization_id` (auth actual). Cómputo pesado 
 
 Cada fase entrega: diseño · modelo de datos · migraciones · seeds · servicios · DTOs · casos de uso · tests · endpoints · diagrama de flujo · riesgos.
 
-| Fase | Qué | Reusa | Net-new | Valor entregado |
+| Fase | Estado | Qué | Reusa | Net-new |
 |---|---|---|---|---|
-| **0 — Cimientos** | Bounded context + `ConstructionEntity` (mapeado de `applies_to`) + agrupación de alternativas + value object `Measurement` + fix de unidades + tests | Assembly/Material | esqueleto | Base limpia, nada se rompe |
-| **1 — Histórico + Labor** | `material_price_history`, `labor_rates`(+hist), API ingesta + seeds. **Desbloquea el predictivo** | precios actuales | tablas + ingesta | Lista de precios versionada por org |
-| **2 — Simulador (Mód. 2)** | `POST /simulations`, `/scenarios/compare` | budget + schedule | motor escenarios | **Comparar Ladrillo vs Durlock** con $ y días |
-| **3 — Grafo (Mód. 4)** | DAG BOM formal + recalc + indirectos configurables | compute | grafo + indirectos | Recálculo automático + costos indirectos |
-| **4 — Predictivo (Mód. 3)** | Vía A determinística (ya) → Vía B ML (con datos). Timescale si hace falta | histórico (F1) | forecaster | Proyección a futuro |
-| **5 — Export (Mód. 5)** | XLSX 4 hojas | openpyxl | hojas nuevas | Entregable comercial completo |
+| **0 — Cimientos** | ✅ `3e5ddf8` | Bounded context + `ConstructionEntity` (mapeado de `applies_to`) + agrupación de alternativas + `Money`/`Quantity`/`measure_for` + tests | Assembly/Material | esqueleto + dominio |
+| **1a — Histórico precios** | ✅ `34467e9` | `material_price_history` (slice domain→app→infra) + backfill + ingesta data real | unit_price | tabla + repo + casos de uso |
+| **1b — Labor first-class** | ✅ `3d68efa` | `labor_rates`(+hist) + seed desde material "Mano de Obra" | schedule | tablas + slice |
+| **2 — Simulador (Mód. 2)** | ⏳ siguiente | `POST /simulations`, `/scenarios/compare` | budget + schedule | motor escenarios |
+| **3 — Grafo (Mód. 4)** | pendiente | DAG BOM formal + recalc + indirectos configurables | compute | grafo + indirectos |
+| **4 — Predictivo (Mód. 3)** | pendiente | Vía A determinística → Vía B ML (con datos). Timescale si hace falta | histórico (F1) | forecaster |
+| **5 — Export (Mód. 5)** | pendiente | XLSX 4 hojas | openpyxl | hojas nuevas |
 
 **Ruta recomendada:** **0 + 1 primero** (cimientos + histórico) → desbloquea todo y da valor sin romper nada → luego **2** (el feature estrella: comparar escenarios).
 
@@ -278,11 +290,12 @@ Cada fase entrega: diseño · modelo de datos · migraciones · seeds · servici
 
 ## 12. Decisiones abiertas
 
-1. ✅ Enfoque "evolucionar lo existente" — **aprobado**.
-2. ⏳ Arrancar por **Fase 0 + 1** (recomendado).
-3. ⏳ Predictivo **Vía A determinística primero** (recomendado: sí).
-4. ⏳ **TimescaleDB diferido a Fase 4** (recomendado: sí).
-5. ⏳ Fuente de datos macro: ¿INDEC/BCRA API, scraping, o carga manual al inicio?
+1. ✅ Enfoque "evolucionar lo existente" — **aprobado e implementado**.
+2. ✅ Arrancar por **Fase 0 + 1** — **hecho** (Fase 0, 1a, 1b commiteadas).
+3. ✅ Predictivo **Vía A determinística primero**, ML después — **definido**.
+4. ✅ **TimescaleDB diferido a Fase 4** — **definido** (tablas hypertable-ready mientras tanto).
+5. ⏳ Fuente de datos macro (ICC/IPC/dólar): API INDEC/BCRA en Fase 4. **Pendiente** elegir endpoint/feed.
+6. ⏳ Precios de materiales reales: ingestar más cotizaciones de proveedor (Carignani et al.) para construir serie. **Pendiente** (depende de que el usuario sume PDFs).
 
 ---
 
