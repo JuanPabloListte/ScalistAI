@@ -9,5 +9,6 @@ from app.models.construction_entity import ConstructionEntity
 from app.models.price_history import MaterialPriceHistory
 from app.models.labor import LaborRate, LaborRateHistory
 from app.models.simulation import Simulation
+from app.models.macro_series import MacroSeries
 
-__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation"]
+__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries"]
