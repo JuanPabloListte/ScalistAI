@@ -2,19 +2,23 @@
 
 > Evolución de ScalistAI: de **calculadora estática** de materiales a **plataforma de simulación estratégica de construcción** (presupuesto base → comparación de materiales → simulación de escenarios → proyección de costos futuros).
 
-**Estado:** **Fase 0 y Fase 1 implementadas, testeadas y commiteadas.** Próximo: Fase 2 (Simulador de Escenarios).
-**Regla:** no se escribe código de implementación de una fase hasta aprobar su diseño detallado.
+**Estado:** **Módulos 1, 2, 3 (Vía A) y 5 implementados, testeados y commiteados.** Falta: Fase 3 (Módulo 4 — costos indirectos) y el predictivo ML (Vía B, cuando haya data).
+**Regla:** no se escribe código de implementación de una fase hasta aprobar su diseño detallado. **42 tests verdes.**
 
 ### Progreso
 | Fase | Estado | Commit | Entregado |
 |---|---|---|---|
-| **0 — Cimientos** | ✅ hecho | `3e5ddf8` | Bounded context, domain (`Money`/`Quantity`/`measure_for`), `ConstructionEntity` + alternativas, 14 tests |
-| **1a — Histórico de precios** | ✅ hecho | `34467e9` | Vertical slice completo (domain→app→infra), `material_price_history`, **5 precios reales ingestados** (Carignani), 6 tests |
-| **1b — Mano de obra first-class** | ✅ hecho | `3d68efa` | `labor_rates` + histórico, oficio "Ayudante" derivado, 5 tests |
-| **2 — Simulador** | ⏳ siguiente | — | comparar recetas alternativas (Ladrillo vs Durlock) |
-| **3 — Grafo** · **4 — Predictivo** · **5 — Export** | pendiente | — | — |
+| **0 — Cimientos** | ✅ | `3e5ddf8` | Bounded context, domain (`Money`/`Quantity`/`measure_for`), `ConstructionEntity` + alternativas |
+| **1a — Histórico de precios** | ✅ | `34467e9` | Vertical slice domain→app→infra, `material_price_history` |
+| **1b — Mano de obra first-class** | ✅ | `3d68efa` | `labor_rates` + histórico |
+| **2a — Simulador (núcleo)** | ✅ | `890b346` | `ScenarioCalculator` + casos de uso, validado sobre plan real |
+| **2b — Simulador (API)** | ✅ | `4cc12b2` | `simulations` + `POST /simulations`, `/scenarios/compare` |
+| **4 — Predictivo (Vía A)** | ✅ | `78320f6` | `Forecaster` + `macro_series`, `POST /forecast`. **IPC real INDEC** (`e956c34`) |
+| **5 — Export XLSX** | ✅ | `aa6a420` | 4 hojas (presupuesto/escenarios/proyección/detalle), `GET /export/{id}` |
+| **3 — Grafo + costos indirectos** | ⏳ siguiente | — | gastos generales + beneficio → precio de venta |
+| **Vía B — Predictivo ML** | futuro | — | Prophet/XGBoost cuando se acumule serie real |
 
-> **Nota de datos (importante):** los precios de materiales solo entran de fuentes **reales** (cotizaciones de proveedor, ej. Carignani/2448 Córdoba). **No se ingesta data sintética** al histórico real — envenena presupuesto y forecasting. Datos sintéticos, si se usan, viven aislados como fixture de dev (`source="synthetic"`), nunca mezclados. Índices macro (ICC/IPC/dólar) entran por API oficial en Fase 4.
+> **Nota de datos (CRÍTICO):** los precios de materiales solo entran de fuentes **reales** (cotizaciones de proveedor, ej. Carignani/2448 Córdoba — 21 materiales reales) o el flywheel de clientes. **NUNCA data sintética** al histórico real. Índices macro: **IPC real de INDEC** (`datos.gob.ar`, serie `195.1_NIVEL_GENERAL_0_0_13`, 118 puntos 2016-2026) vía `scripts/fetch_indec_macro.py`. El **ICC está discontinuado** en la API (termina 2015) → se usa IPC como proxy de inflación. **No se puede scrapear precios** de retailers para un producto comercial (frágil + riesgo legal de ToS).
 
 ---
 
