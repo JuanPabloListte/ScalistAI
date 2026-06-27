@@ -2,8 +2,8 @@
 
 > Evolución de ScalistAI: de **calculadora estática** de materiales a **plataforma de simulación estratégica de construcción** (presupuesto base → comparación de materiales → simulación de escenarios → proyección de costos futuros).
 
-**Estado:** **Módulos 1, 2, 3 (Vía A) y 5 implementados, testeados y commiteados.** Falta: Fase 3 (Módulo 4 — costos indirectos) y el predictivo ML (Vía B, cuando haya data).
-**Regla:** no se escribe código de implementación de una fase hasta aprobar su diseño detallado. **42 tests verdes.**
+**Estado:** ✅ **ROADMAP COMPLETO — los 5 módulos (M1-M5, Vía A) implementados, testeados y commiteados.** Único pendiente (a propósito): el predictivo ML (Vía B), cuando se acumule serie real de precios.
+**45 tests verdes.** Flujo end-to-end: plano CAD → presupuesto → comparar sistemas → proyectar inflación (IPC real) → precio de venta → XLSX.
 
 ### Progreso
 | Fase | Estado | Commit | Entregado |
@@ -15,8 +15,8 @@
 | **2b — Simulador (API)** | ✅ | `4cc12b2` | `simulations` + `POST /simulations`, `/scenarios/compare` |
 | **4 — Predictivo (Vía A)** | ✅ | `78320f6` | `Forecaster` + `macro_series`, `POST /forecast`. **IPC real INDEC** (`e956c34`) |
 | **5 — Export XLSX** | ✅ | `aa6a420` | 4 hojas (presupuesto/escenarios/proyección/detalle), `GET /export/{id}` |
-| **3 — Grafo + costos indirectos** | ⏳ siguiente | — | gastos generales + beneficio → precio de venta |
-| **Vía B — Predictivo ML** | futuro | — | Prophet/XGBoost cuando se acumule serie real |
+| **3 — Costos indirectos** | ✅ | `c9ce215` | `cost_settings` + `build_price` (gastos+beneficio+IVA → precio de venta), `GET/PUT /cost-settings` |
+| **Vía B — Predictivo ML** | futuro | — | Prophet/XGBoost cuando se acumule serie real (puerto `Forecaster` listo) |
 
 > **Nota de datos (CRÍTICO):** los precios de materiales solo entran de fuentes **reales** (cotizaciones de proveedor, ej. Carignani/2448 Córdoba — 21 materiales reales) o el flywheel de clientes. **NUNCA data sintética** al histórico real. Índices macro: **IPC real de INDEC** (`datos.gob.ar`, serie `195.1_NIVEL_GENERAL_0_0_13`, 118 puntos 2016-2026) vía `scripts/fetch_indec_macro.py`. El **ICC está discontinuado** en la API (termina 2015) → se usa IPC como proxy de inflación. **No se puede scrapear precios** de retailers para un producto comercial (frágil + riesgo legal de ToS).
 
