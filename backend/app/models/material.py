@@ -6,6 +6,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.detected_element import DetectedElement
     from app.models.construction_entity import ConstructionEntity
+    from app.models.material_group import MaterialGroup
 
 # Material en crudo (ej: "Ladrillo hueco 15cm", "Cemento portland", "Arena")
 class Material(Base):
@@ -17,10 +18,16 @@ class Material(Base):
     category: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., "Mampostería", "Aglomerantes", "Áridos"
     unit: Mapped[str] = mapped_column(String(32), nullable=False)  # e.g., "un", "kg", "m3", "l"
     unit_price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # Producto canónico al que pertenece (agrupa equivalentes entre fuentes/fechas).
+    # Nullable: un material puede no estar agrupado todavía.
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("material_groups.id", ondelete="SET NULL"), nullable=True, index=True)
 
     assembly_materials: Mapped[list["AssemblyMaterial"]] = relationship(
         "AssemblyMaterial", back_populates="material", cascade="all, delete-orphan"
     )
+    group: Mapped["MaterialGroup | None"] = relationship(
+        "MaterialGroup", back_populates="members")
 
 # Sistema Constructivo / Ensamblaje (ej: "Muro Ladrillo Hueco 15cm c/ Revoque")
 # Se asigna a un elemento (ej: "wall", "room", "roof")
