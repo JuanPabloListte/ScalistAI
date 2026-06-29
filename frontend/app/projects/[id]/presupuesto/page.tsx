@@ -17,6 +17,19 @@ export default function PresupuestoPage() {
   const [data, setData] = useState<ProjectBudgetSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+
+  async function download(planId: number, name: string) {
+    setDownloading(true);
+    try {
+      const sim = await api.runSimulation(planId, name);
+      await api.downloadSimulationXlsx(sim.id);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     api.listPlans(projectId)
@@ -38,10 +51,20 @@ export default function PresupuestoPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <button onClick={() => router.push(`/projects/${projectId}`)}
-              className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-        ← Volver al proyecto
-      </button>
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={() => router.push(`/projects/${projectId}`)}
+                className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+          ← Volver al proyecto
+        </button>
+        <button
+          onClick={() => void download(data.plan_id, data.project_name)}
+          disabled={downloading}
+          className="flex items-center gap-1.5 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          {downloading ? "Generando…" : "Descargar Excel"}
+        </button>
+      </div>
 
       {/* HERO */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white shadow-sm dark:border-slate-700">
