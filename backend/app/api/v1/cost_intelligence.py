@@ -24,8 +24,11 @@ from app.cost_intelligence.infrastructure.persistence.measurement_provider impor
 from app.cost_intelligence.infrastructure.persistence.recipe_catalog import SqlRecipeCatalog
 from app.cost_intelligence.infrastructure.persistence.simulation_store import SqlSimulationStore
 from app.models import Assembly, ConstructionEntity, Plan, Project, Simulation, User
+from app.models.material_group import MaterialGroup
+from app.models.price_history import MaterialPriceHistory
 from app.schemas.cost_settings import CostSettingsRead, CostSettingsUpdate
 from app.schemas.forecast import ForecastRequest, ForecastResponse
+from app.schemas.price_series import PriceSeriesPoint, PriceSeriesProduct
 from app.schemas.simulation import (
     CompareRequest, CompareResponse, SimulationCreate, SimulationRead,
 )
@@ -270,3 +273,38 @@ def update_cost_settings(
     )
     db.commit()
     return CostSettingsRead(overhead_pct=s.overhead_pct, profit_pct=s.profit_pct, iva_pct=s.iva_pct)
+
+
+@router.get("/price-series", response_model=list[PriceSeriesProduct])
+def price_series(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[PriceSeriesProduct]:
+    """Serie histórica REAL de precios por producto canónico (MaterialGroup),
+    consolidando los PricePoint de todos sus materiales equivalentes. Aislado
+    por org. Solo grupos con ≥1 punto."""
+    groups = db.scalars(
+        select(MaterialGroup)
+        .where(MaterialGroup.organization_id == user.organization_id)
+        .order_by(MaterialGroup.name)
+    ).all()
+    out: list[PriceSeriesProduct] = []
+    for g in groups:
+        member_ids = [m.id for m in g.members]
+        if not member_ids:
+            continue
+        rows = db.execute(
+            select(MaterialPriceHistory.date, MaterialPriceHistory.price, MaterialPriceHistory.source)
+            .where(MaterialPriceHistory.material_id.in_(member_ids))
+            .order_by(MaterialPriceHistory.date)
+        ).all()
+        if not rows:
+            continue
+        points = [PriceSeriesPoint(date=d.date(), price=p, source=s.split(" (")[0]) for d, p, s in rows]
+        first, last = points[0].price, points[-1].price
+        out.append(PriceSeriesProduct(
+            id=g.id, name=g.name, category=g.category, unit=g.unit, points=points,
+            first_price=first, last_price=last,
+            change_pct=((last / first - 1) * 100 if first else None),
+        ))
+    return out

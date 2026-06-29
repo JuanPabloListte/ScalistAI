@@ -423,6 +423,17 @@ export type ForecastResult = {
   method: string;
 };
 export type CostSettings = { overhead_pct: number; profit_pct: number; iva_pct: number };
+export type PriceSeriesPoint = { date: string; price: number; source: string };
+export type PriceSeriesProduct = {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  points: PriceSeriesPoint[];
+  first_price: number;
+  last_price: number;
+  change_pct: number | null;
+};
 
 export const api = {
   register: (email: string, password: string) =>
@@ -569,6 +580,7 @@ export const api = {
       body: JSON.stringify({ simulation_id: simulationId, horizon_months: horizonMonths }),
     }),
   getCostSettings: () => request<CostSettings>("/api/v1/cost-settings"),
+  getPriceSeries: () => request<PriceSeriesProduct[]>("/api/v1/price-series"),
   updateCostSettings: (patch: Partial<CostSettings>) =>
     request<CostSettings>("/api/v1/cost-settings", {
       method: "PUT",
