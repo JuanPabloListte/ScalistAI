@@ -14,6 +14,7 @@ from app.core.deps import get_current_user
 from app.cost_intelligence.application.use_cases.compare_scenarios import CompareScenarios
 from app.cost_intelligence.application.use_cases.forecast_cost import ForecastCost
 from app.cost_intelligence.application.use_cases.run_simulation import RunSimulation
+from app.cost_intelligence.domain.material_trend import project_material
 from app.cost_intelligence.domain.pricing_breakdown import build_price
 from app.cost_intelligence.domain.value_objects import Money
 from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_workbook
@@ -283,6 +284,10 @@ def price_series(
     """Serie histórica REAL de precios por producto canónico (MaterialGroup),
     consolidando los PricePoint de todos sus materiales equivalentes. Aislado
     por org. Solo grupos con ≥1 punto."""
+    ipc_rate_dec = SqlMacroRateProvider(db).monthly_rate("IPC")
+    ipc_rate = float(ipc_rate_dec) if ipc_rate_dec is not None else None
+    horizon = 6
+
     groups = db.scalars(
         select(MaterialGroup)
         .where(MaterialGroup.organization_id == user.organization_id)
@@ -302,9 +307,17 @@ def price_series(
             continue
         points = [PriceSeriesPoint(date=d.date(), price=p, source=s.split(" (")[0]) for d, p, s in rows]
         first, last = points[0].price, points[-1].price
+        fc = project_material([(p.date, p.price) for p in points], horizon, ipc_rate)
         out.append(PriceSeriesProduct(
             id=g.id, name=g.name, category=g.category, unit=g.unit, points=points,
             first_price=first, last_price=last,
             change_pct=((last / first - 1) * 100 if first else None),
+            horizon_months=horizon,
+            projected_price=fc.projected_price,
+            forecast_rate=fc.monthly_rate,
+            forecast_method=fc.method,
+            forecast_variation_pct=fc.variation_pct,
+            ipc_monthly_rate=fc.ipc_monthly_rate,
+            beats_inflation=fc.beats_inflation,
         ))
     return out

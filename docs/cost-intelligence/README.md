@@ -16,9 +16,13 @@
 | **4 — Predictivo (Vía A)** | ✅ | `78320f6` | `Forecaster` + `macro_series`, `POST /forecast`. **IPC real INDEC** (`e956c34`) |
 | **5 — Export XLSX** | ✅ | `aa6a420` | 4 hojas (presupuesto/escenarios/proyección/detalle), `GET /export/{id}` |
 | **3 — Costos indirectos** | ✅ | `c9ce215` | `cost_settings` + `build_price` (gastos+beneficio+IVA → precio de venta), `GET/PUT /cost-settings` |
-| **Vía B — Predictivo ML** | futuro | — | Prophet/XGBoost cuando se acumule serie real (puerto `Forecaster` listo) |
+| **D — Fuentes reales 2022-2026** | ✅ | `541b043`+`25dabb3`+`be16b14` | Scraper 2448 (JSON-LD), Cormac 2022, acopio Silicio 2023 (3 proveedores) → 268 precios reales |
+| **E — Producto canónico** | ✅ | `63878dd`+`25cbe5e` | `MaterialGroup`, `match_materials.py` (sugiere/aprueba/aplica) → 15 series multi-año unidas |
+| **F — Vista Inteligencia de Precios** | ✅ | `95bb97e`+`2dd2da1` | `GET /price-series`, página `/precios` (gráfico SVG), ítem en sidebar |
+| **G — Forecaster por material (Vía B-lite)** | ✅ | — | `material_trend.py`: proyecta desde la serie PROPIA + fallback IPC + comparación |
+| **Vía B — Predictivo ML** | futuro | — | Prophet/XGBoost/regresión cuando la serie tenga densidad (puerto `Forecaster` listo) |
 
-> **Nota de datos (CRÍTICO):** los precios de materiales solo entran de fuentes **reales** (cotizaciones de proveedor, ej. Carignani/2448 Córdoba — 21 materiales reales) o el flywheel de clientes. **NUNCA data sintética** al histórico real. Índices macro: **IPC real de INDEC** (`datos.gob.ar`, serie `195.1_NIVEL_GENERAL_0_0_13`, 118 puntos 2016-2026) vía `scripts/fetch_indec_macro.py`. El **ICC está discontinuado** en la API (termina 2015) → se usa IPC como proxy de inflación. **No se puede scrapear precios** de retailers para un producto comercial (frágil + riesgo legal de ToS).
+> **Nota de datos (CRÍTICO):** los precios de materiales solo entran de fuentes **reales** o del flywheel de clientes — **NUNCA data sintética** al histórico (envenena presupuesto y forecasting). Ver §14 para las fuentes cargadas (Cormac 2022, Silicio 2023, Carignani 2025, scraper 2448 2026 = 268 puntos). Índices macro: **IPC real de INDEC** (`datos.gob.ar`, serie `195.1_NIVEL_GENERAL_0_0_13`) vía `scripts/fetch_indec_macro.py`; el **ICC está discontinuado** (termina 2015) → IPC como proxy. Scraping: **del propio proveedor del usuario** (2448, Tiendanube vía JSON-LD) es defendible y está hecho; scrapear retailers ajenos al por mayor no. El **histórico no se fetchea ni se reconstruye con fórmulas** (eso es fabricar el pasado): se observa hacia adelante o se transcribe de listas reales fechadas.
 
 ---
 
@@ -313,5 +317,83 @@ Cada fase entrega: diseño · modelo de datos · migraciones · seeds · servici
 | Measurement | `DetectedElement.{length_m, area_m2, height_m}` |
 | LaborRate | hoy `Material` "Mano de Obra" → tabla nueva |
 | Money (precio) | `Material.unit_price` → `material_price_history` |
+
+---
+
+## 14. Inteligencia de Precios: fuentes reales, producto canónico y forecaster por material
+
+Esta sección documenta cómo el motor pasa de "un precio suelto" a "una serie real
+que predice", **sin fabricar nada**.
+
+### 14.1 Fuentes reales cargadas (268 precios, 2022-2026)
+
+Cada precio entra a `material_price_history` con **fecha + fuente**. No hay data sintética.
+
+| Fuente | Script | Fecha | Qué es |
+|---|---|---|---|
+| **Cormac S.A** | `seed_cormac_2022.py` | ene-2022 | 86 ítems transcritos de un PDF real de lista (ancla histórica) |
+| **Acopio Silicio** | `seed_acopio_2023.py` | sep-2023 | 32 materiales × 3 proveedores (Zárate/Ferrocons/Cormac) = 78 puntos; incluye outliers reales (no se corrigen) |
+| **Carignani/2448** | seed manual de PDFs | mar-abr 2025 | cotizaciones del proveedor del usuario |
+| **2448materiales.com.ar** | `scrape_2448_prices.py` | jun-2026 | scraper del **propio proveedor**: parsea el JSON-LD (schema.org `Product`/`Offer`) de la Tiendanube. Honesto: si falla, FALLA (sin fallbacks). Ojo idempotencia same-day |
+| **IPC INDEC** (macro) | `fetch_indec_macro.py` | 2016-2026 | inflación oficial real, en `macro_series` |
+
+**Principio:** el histórico **no se fetchea ni se reconstruye con fórmulas** (deflactar el
+precio de hoy + ruido = fabricar el pasado). Se observa hacia adelante (flywheel) o se
+transcribe de listas reales fechadas. Gemini reincide en generar scripts `fetch_*`/`scrape_*`
+que en realidad devuelven hardcoded/ruido — **revisar y borrar siempre**.
+
+### 14.2 Producto canónico (`MaterialGroup`)
+
+Cada fuente nombra el mismo producto distinto ("Cemento Holcim 50kg" vs "CEMENTO BOLSA").
+`MaterialGroup` + `materials.group_id` agrupan los equivalentes para unir sus precios en
+**una sola serie**. El match **no es automático** (un match malo envenena la serie):
+`scripts/match_materials.py` —
+
+- `--suggest`: propone candidatos cross-fuente por similitud (fuzzy). **Read-only.**
+- `--apply`: crea los grupos `CONFIRMED` (revisados a mano por id). El fuzzy **solo descubre**, el humano **aprueba** (misma filosofía que la detección CAD/IA).
+- `--series`: imprime la serie consolidada.
+
+Trampas reales a NO unir: distinta **marca** (revoque fino Weber ≠ Tector), **color**
+(pastina Plata ≠ Plomo) o **medida**. Commodities (cemento, cal) sí se agrupan entre marcas.
+
+### 14.3 Forecaster por material (Vía B-lite) — `domain/material_trend.py`
+
+La idea del usuario: *"si tengo que el hormigón valía X hace 3 meses y hoy Y, proyecto a
+qué ritmo viene subiendo"*. Implementado como función pura:
+
+```
+tasa_mensual = (precio_último / precio_primero) ^ (1 / meses) − 1
+proyectado   = precio_último × (1 + tasa_mensual) ^ horizonte
+```
+
+Reglas de **honestidad/confianza**:
+- **≥2 puntos** en fechas distintas → tasa **observada** del material (`method="serie_propia"`).
+- **<2 puntos** → fallback a **IPC** (`method="ipc"`); si tampoco hay IPC, no proyecta (`sin_dato`).
+- Varias cotizaciones del **mismo día** (varios proveedores) cuentan como **1 punto** de tendencia (se promedian).
+- Siempre se informa **nº de puntos** (confianza) y se compara contra el **IPC** (`beats_inflation`): "tu material sube más/menos que la inflación".
+
+Es determinístico y explicable. Cuando la serie tenga densidad, una **regresión/ML** (Vía B)
+reemplaza el cálculo de la tasa **sin cambiar el contrato** (`TrendForecast`). Trabaja en
+`float`: es proyección analítica para mostrar, no aritmética de dinero autoritativa (esa es `Money`).
+
+Tests: `tests/test_cost_intelligence_material_trend.py` (serie propia, fallback IPC, sin dato,
+same-day = 1 punto, flag vs inflación).
+
+### 14.4 Las 3 capas de valor (para un cliente que arranca de cero)
+
+Un cliente nuevo carga precios de **hoy**, no historia de años. Por eso el valor se da en capas:
+
+1. **Día 1, sin historia** — forecaster con **IPC**: con 1 solo precio ya proyecta "hoy → +IPC%". Universal.
+2. **Con el tiempo — flywheel**: cada actualización suma un punto fechado → el cliente construye **su** serie real hacia adelante; ahí entra `serie_propia`.
+3. **Opcional — índice de mercado compartido**: el scraper de precios públicos podría ser una referencia compartida entre orgs (separada de las cotizaciones privadas). **No implementado.**
+
+La historia 2022-2023 cargada es **ventaja particular** de este usuario (tenía PDFs viejos),
+no la norma. Que un cliente nuevo **no** tenga historia es coherente con no fabricar data.
+
+### 14.5 Interfaz
+
+- `GET /api/v1/price-series` → productos canónicos con serie + proyección (`PriceSeriesProduct`).
+- Frontend `/precios` (ítem **Inteligencia de Precios** en el sidebar, org-level): gráfico SVG
+  propio (sin libs), dots por proveedor, tramo de proyección punteado, badge "vs IPC".
 | CostEngine | `_get_materials_summary_data()` |
 | Labor/ScheduleEngine | `schedule.py: compute_schedule/compute_cashflow` |

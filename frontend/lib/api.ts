@@ -433,6 +433,13 @@ export type PriceSeriesProduct = {
   first_price: number;
   last_price: number;
   change_pct: number | null;
+  horizon_months: number;
+  projected_price: number;
+  forecast_rate: number;
+  forecast_method: "serie_propia" | "ipc" | "sin_dato";
+  forecast_variation_pct: number;
+  ipc_monthly_rate: number | null;
+  beats_inflation: boolean | null;
 };
 
 export const api = {
