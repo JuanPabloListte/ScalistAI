@@ -448,10 +448,14 @@ export type BudgetTakeoff = {
   columns: number; beams_ml: number; roof_m2: number; cloaca_ml: number;
   electricidad_ml: number; rooms: number; floor_m2: number;
 };
+export type SalePriceBreakdown = {
+  direct: number; overhead: number; profit: number; iva: number; total: number;
+};
 export type ProjectBudgetSummary = {
   plan_id: number; project_name: string; area_m2: number;
   materials_total: number; labor_total: number; labor_hours: number; duration_days: number;
   direct_cost: number; sale_price: number; cost_per_m2: number | null;
+  breakdown: SalePriceBreakdown;
   categories: BudgetCategory[]; takeoff: BudgetTakeoff;
 };
 

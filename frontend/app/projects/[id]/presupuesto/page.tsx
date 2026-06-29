@@ -2,8 +2,13 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
 
 import { api, type ProjectBudgetSummary } from "@/lib/api";
+
+const PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#3b82f6", "#ec4899", "#14b8a6", "#8b5cf6", "#94a3b8"];
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -49,6 +54,25 @@ export default function PresupuestoPage() {
 
   const maxPct = Math.max(...data.categories.map((c) => c.pct), 1);
 
+  // Dona: top 7 rubros + "Otros".
+  const topCats = data.categories.slice(0, 7);
+  const otros = data.categories.slice(7).reduce((a, c) => a + c.total, 0);
+  const donutData = [
+    ...topCats.map((c) => ({ name: c.name, value: c.total })),
+    ...(otros > 0 ? [{ name: "Otros", value: otros }] : []),
+  ];
+
+  // Waterfall costo directo -> precio de venta.
+  const b = data.breakdown;
+  const net = b.direct + b.overhead + b.profit;
+  const waterfall = [
+    { name: "Costo directo", base: 0, value: b.direct, fill: "#6366f1" },
+    { name: "+ Gastos grales.", base: b.direct, value: b.overhead, fill: "#94a3b8" },
+    { name: "+ Beneficio", base: b.direct + b.overhead, value: b.profit, fill: "#94a3b8" },
+    { name: "+ IVA", base: net, value: b.iva, fill: "#cbd5e1" },
+    { name: "Precio de venta", base: 0, value: b.total, fill: "#10b981" },
+  ];
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div className="flex items-center justify-between gap-3">
@@ -87,6 +111,59 @@ export default function PresupuestoPage() {
           </div>
         </div>
       </div>
+
+      {/* GRÁFICOS */}
+      <section className="grid gap-4 lg:grid-cols-2">
+        {/* Dona: distribución por rubro */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">Distribución por rubro</h2>
+          <div className="flex items-center gap-2">
+            <div className="h-56 w-1/2 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2} stroke="none">
+                    {donutData.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => `$${fmtARS(Number(v))}`} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <ul className="flex-1 space-y-1 text-xs">
+              {donutData.map((d, i) => (
+                <li key={d.name} className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />
+                    <span className="truncate text-slate-600 dark:text-slate-300">{d.name}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums text-slate-400">
+                    {((d.value / data.direct_cost) * 100).toFixed(0)}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* Waterfall: costo directo -> precio de venta */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">Del costo al precio de venta</h2>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={waterfall} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} interval={0} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false}
+                       tickFormatter={(v: number) => `$${(v / 1_000_000).toFixed(0)}M`} width={38} />
+                <Tooltip formatter={(v) => `$${fmtARS(Number(v))}`} cursor={{ fill: "#94a3b818" }}
+                         contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Bar dataKey="base" stackId="a" fill="transparent" />
+                <Bar dataKey="value" stackId="a" radius={[4, 4, 0, 0]}>
+                  {waterfall.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </section>
 
       {/* RESUMEN DE CÓMPUTO (takeoff) */}
       <section>

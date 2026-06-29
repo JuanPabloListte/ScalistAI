@@ -30,7 +30,9 @@ from app.models.detected_element import DetectedElement
 from app.models.material import Material
 from app.models.material_group import MaterialGroup
 from app.models.price_history import MaterialPriceHistory
-from app.schemas.budget_summary import BudgetCategory, BudgetTakeoff, ProjectBudgetSummary
+from app.schemas.budget_summary import (
+    BudgetCategory, BudgetTakeoff, ProjectBudgetSummary, SalePriceBreakdown,
+)
 from app.schemas.cost_settings import CostSettingsRead, CostSettingsUpdate
 from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.schemas.price_series import PriceSeriesPoint, PriceSeriesProduct
@@ -355,6 +357,13 @@ def budget_summary(
         duration_days=float(scenario.totals.duration_days),
         direct_cost=direct, sale_price=float(breakdown.total.amount),
         cost_per_m2=(direct / area if area else None),
+        breakdown=SalePriceBreakdown(
+            direct=direct,
+            overhead=float(breakdown.overhead.amount),
+            profit=float(breakdown.profit.amount),
+            iva=float(breakdown.iva.amount),
+            total=float(breakdown.total.amount),
+        ),
         categories=categories, takeoff=takeoff,
     )
 
