@@ -205,7 +205,7 @@ export default function PreciosPage() {
       ) : (
         <>
           {/* Barra de filtros (sticky para listas largas) */}
-          <div className="sticky top-0 z-10 -mx-6 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/85 px-6 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
             <input
               type="search"
               value={query}
