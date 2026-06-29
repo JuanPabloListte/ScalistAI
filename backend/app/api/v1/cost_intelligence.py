@@ -3,6 +3,7 @@
 Cablea los casos de uso del bounded context (`RunSimulation`,
 `CompareScenarios`) con los adapters SQL y la auth/multi-tenancy existente.
 """
+from collections import defaultdict
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -15,7 +16,7 @@ from app.cost_intelligence.application.use_cases.compare_scenarios import Compar
 from app.cost_intelligence.application.use_cases.forecast_cost import ForecastCost
 from app.cost_intelligence.application.use_cases.run_simulation import RunSimulation
 from app.cost_intelligence.domain.material_trend import project_material
-from app.cost_intelligence.domain.pricing_breakdown import build_price
+from app.cost_intelligence.domain.pricing_breakdown import IndirectRates, build_price
 from app.cost_intelligence.domain.value_objects import Money
 from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_workbook
 from app.cost_intelligence.infrastructure.forecasting.deterministic import DeterministicForecaster
@@ -25,8 +26,11 @@ from app.cost_intelligence.infrastructure.persistence.measurement_provider impor
 from app.cost_intelligence.infrastructure.persistence.recipe_catalog import SqlRecipeCatalog
 from app.cost_intelligence.infrastructure.persistence.simulation_store import SqlSimulationStore
 from app.models import Assembly, ConstructionEntity, Plan, Project, Simulation, User
+from app.models.detected_element import DetectedElement
+from app.models.material import Material
 from app.models.material_group import MaterialGroup
 from app.models.price_history import MaterialPriceHistory
+from app.schemas.budget_summary import BudgetCategory, BudgetTakeoff, ProjectBudgetSummary
 from app.schemas.cost_settings import CostSettingsRead, CostSettingsUpdate
 from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.schemas.price_series import PriceSeriesPoint, PriceSeriesProduct
@@ -274,6 +278,85 @@ def update_cost_settings(
     )
     db.commit()
     return CostSettingsRead(overhead_pct=s.overhead_pct, profit_pct=s.profit_pct, iva_pct=s.iva_pct)
+
+
+_OPENING_TYPES = ("opening", "door", "window", "sliding_door")
+
+
+@router.get("/plans/{plan_id}/budget-summary", response_model=ProjectBudgetSummary)
+def budget_summary(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ProjectBudgetSummary:
+    """Presupuesto COMPLETO del proyecto: total, desglose por rubro y resumen de
+    cómputo (ml de muro, aberturas, etc.). Corre la simulación y agrega."""
+    _assert_plan_in_org(db, plan_id, user.organization_id)
+    plan = db.get(Plan, plan_id)
+    project = db.get(Project, plan.project_id)
+
+    scenario = RunSimulation(SqlMeasurementProvider(db), SqlRecipeCatalog(db)).execute(
+        plan_id, user.organization_id)
+    materials_total = float(scenario.totals.materials.amount)
+    labor_total = float(scenario.totals.labor_cost.amount)
+    direct = materials_total + labor_total
+
+    # Rubros: materiales por categoría + Mano de Obra como rubro propio.
+    mat_ids = [ln.material_id for ln in scenario.lines]
+    cat_by_id = dict(db.execute(
+        select(Material.id, Material.category).where(Material.id.in_(mat_ids))).all()) if mat_ids else {}
+    cat_totals: dict[str, float] = defaultdict(float)
+    for ln in scenario.lines:
+        cat_totals[cat_by_id.get(ln.material_id) or "Otros"] += float(ln.total.amount)
+    if labor_total > 0:
+        cat_totals["Mano de Obra"] += labor_total
+
+    # Takeoff de cantidades desde los elementos aprobados.
+    els = db.scalars(select(DetectedElement).where(
+        DetectedElement.plan_id == plan_id,
+        DetectedElement.is_candidate.is_(False))).all()
+
+    def _sum(pred, attr):
+        return float(sum(getattr(e, attr) or 0 for e in els if pred(e)))
+
+    floor_m2 = _sum(lambda e: e.type == "room", "area_m2")
+    roof_m2 = _sum(lambda e: e.type == "roof", "area_m2") or floor_m2
+    openings = [e for e in els if e.type in _OPENING_TYPES]
+    doors = sum(1 for e in openings if (e.geometry or {}).get("subtype") in ("door", "sliding_door"))
+    windows = sum(1 for e in openings if (e.geometry or {}).get("subtype") == "window")
+    takeoff = BudgetTakeoff(
+        wall_ml=_sum(lambda e: e.type == "wall", "length_m"),
+        wall_m2=float(sum((e.length_m or 0) * (e.height_m or 2.8) for e in els if e.type == "wall")),
+        openings=len(openings), doors=doors, windows=windows,
+        columns=sum(1 for e in els if e.type == "column"),
+        beams_ml=_sum(lambda e: e.type == "beam", "length_m"),
+        roof_m2=roof_m2,
+        cloaca_ml=_sum(lambda e: e.type == "cloaca", "length_m"),
+        electricidad_ml=_sum(lambda e: e.type == "electricidad", "length_m"),
+        rooms=sum(1 for e in els if e.type == "room"),
+        floor_m2=floor_m2,
+    )
+
+    area = floor_m2
+    cs = SqlCostSettingsRepo(db).get_or_create(user.organization_id)
+    db.commit()
+    breakdown = build_price(Money(direct), IndirectRates(
+        Decimal(str(cs.overhead_pct)), Decimal(str(cs.profit_pct)), Decimal(str(cs.iva_pct))))
+
+    categories = sorted(
+        (BudgetCategory(name=k, total=v, pct=(v / direct * 100 if direct else 0.0),
+                        per_m2=(v / area if area else None)) for k, v in cat_totals.items()),
+        key=lambda c: -c.total)
+
+    return ProjectBudgetSummary(
+        plan_id=plan_id, project_name=project.name, area_m2=area,
+        materials_total=materials_total, labor_total=labor_total,
+        labor_hours=float(scenario.totals.labor_hours),
+        duration_days=float(scenario.totals.duration_days),
+        direct_cost=direct, sale_price=float(breakdown.total.amount),
+        cost_per_m2=(direct / area if area else None),
+        categories=categories, takeoff=takeoff,
+    )
 
 
 @router.get("/price-series", response_model=list[PriceSeriesProduct])

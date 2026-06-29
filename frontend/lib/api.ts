@@ -442,6 +442,19 @@ export type PriceSeriesProduct = {
   beats_inflation: boolean | null;
 };
 
+export type BudgetCategory = { name: string; total: number; pct: number; per_m2: number | null };
+export type BudgetTakeoff = {
+  wall_ml: number; wall_m2: number; openings: number; doors: number; windows: number;
+  columns: number; beams_ml: number; roof_m2: number; cloaca_ml: number;
+  electricidad_ml: number; rooms: number; floor_m2: number;
+};
+export type ProjectBudgetSummary = {
+  plan_id: number; project_name: string; area_m2: number;
+  materials_total: number; labor_total: number; labor_hours: number; duration_days: number;
+  direct_cost: number; sale_price: number; cost_per_m2: number | null;
+  categories: BudgetCategory[]; takeoff: BudgetTakeoff;
+};
+
 export const api = {
   register: (email: string, password: string) =>
     request<{ id: number; email: string }>("/api/v1/auth/register", {
@@ -588,6 +601,8 @@ export const api = {
     }),
   getCostSettings: () => request<CostSettings>("/api/v1/cost-settings"),
   getPriceSeries: () => request<PriceSeriesProduct[]>("/api/v1/price-series"),
+  getBudgetSummary: (planId: number) =>
+    request<ProjectBudgetSummary>(`/api/v1/plans/${planId}/budget-summary`),
   updateCostSettings: (patch: Partial<CostSettings>) =>
     request<CostSettings>("/api/v1/cost-settings", {
       method: "PUT",
