@@ -38,6 +38,19 @@ CONFIRMED: list[tuple[str, str, str, list[int]]] = [
     ("Pegamento Flex Tector 25kg", "Revoques y pegamentos", "bolsa", [43, 47]),
     ("Pastina Weber Classic Plata 5kg", "Revoques y pegamentos", "un", [74, 177]),
     ("Ladrillo común", "Mampostería", "un", [33, 110]),
+    # --- Ampliación con ancla 2023 (acopio Silicio). Commodities = se agrupan
+    # entre marcas (cemento Holcim/Loma Negra, cal El Milagro/Blancaley) porque
+    # son sustituibles; medidas/tipos deben coincidir. Lo ambiguo queda fuera.
+    ("Cemento Portland 50kg", "Cemento y cal", "bolsa", [106, 184, 6]),
+    ("Hercal (bolsa)", "Cemento y cal", "bolsa", [107, 185]),
+    ("Arena gruesa (m3)", "Áridos", "m3", [101, 186]),
+    ("Arena fina (m3)", "Áridos", "m3", [99, 187]),
+    ("Granza 3-5 (m3)", "Áridos", "m3", [104, 189]),
+    ("Cal hidratada 25kg", "Cemento y cal", "bolsa", [54, 108]),
+    ("Cal viva 25kg", "Cemento y cal", "bolsa", [56, 109]),
+    ("Pastina Weber Prestige perla 5kg", "Revoques y pegamentos", "un", [53, 176]),
+    ("Vigueta pretensada 3.6m", "Viguetas", "un", [156, 194]),
+    ("Vigueta pretensada 4.6m", "Viguetas", "un", [161, 195]),
 ]
 
 _STOP = {"x", "de", "p", "para", "el", "la", "con", "y", "en", "s", "mm", "kg", "l", "m"}
