@@ -38,6 +38,11 @@ RECIPES = [
         (201, 0.04, 0.05),   # Látex interior (tacho)
         (13, 0.90, 0.00),    # Mano de Obra Ayudante (hs)
     ]),
+    ("room_perimeter", "Zócalo de porcelanato", 60.0, "Terminaciones", 6, [
+        (3, 0.12, 0.10),     # Porcelanato 60x60 (tira de zócalo ~10cm) m²/ml
+        (27, 0.02, 0.05),    # Pegamento/Pastina Porcelanato (bolsa)
+        (13, 0.20, 0.00),    # Mano de Obra Ayudante (hs)
+    ]),
 ]
 
 
