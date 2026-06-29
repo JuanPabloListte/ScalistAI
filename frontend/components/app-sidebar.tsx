@@ -27,6 +27,12 @@ const NAV_ITEMS: NavItem[] = [
     matchPrefix: "/materials",
     icon: <PackageIcon />,
   },
+  {
+    href: "/precios",
+    label: "Inteligencia de Precios",
+    matchPrefix: "/precios",
+    icon: <ChartIcon />,
+  },
 ];
 
 export function AppSidebar() {
@@ -140,6 +146,25 @@ function PackageIcon() {
       <path d="M21 8 12 13 3 8" />
       <path d="M3 8v8l9 5 9-5V8" />
       <path d="m12 13 0 8" />
+    </svg>
+  );
+}
+
+function ChartIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 3v18h18" />
+      <path d="m19 9-5 5-4-4-3 3" />
     </svg>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -121,12 +120,6 @@ export default function CostosPage() {
           <p className="text-sm text-slate-500">{project?.name}</p>
         </div>
         <div className="flex gap-2">
-          <Link
-            href="/precios"
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            📈 Historial de precios
-          </Link>
           <button
             onClick={() => void compute()}
             disabled={!planId || computing}
