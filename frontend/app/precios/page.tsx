@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api, type PriceSeriesPoint, type PriceSeriesProduct } from "@/lib/api";
@@ -33,11 +33,12 @@ function PriceChart({ points, projection }: {
   points: PriceSeriesPoint[];
   projection: { t: number; price: number } | null;
 }) {
-  const W = 560, H = 140, PAD_L = 10, PAD_R = 10, PAD_T = 14, PAD_B = 24;
+  const uid = useId().replace(/:/g, "");
+  const W = 600, H = 172, PAD_L = 48, PAD_R = 56, PAD_T = 26, PAD_B = 30;
+  const baseline = H - PAD_B;
   const pts = [...points].sort((a, b) => a.date.localeCompare(b.date));
   const ts = pts.map((p) => new Date(p.date).getTime());
   const prices = pts.map((p) => p.price);
-  // El dominio incluye el punto proyectado (futuro y, normalmente, mayor precio).
   const extraT = projection ? [projection.t] : [];
   const extraP = projection ? [projection.price] : [];
   const tMin = Math.min(...ts), tMax = Math.max(...ts, ...extraT);
@@ -45,7 +46,7 @@ function PriceChart({ points, projection }: {
   const x = (t: number) =>
     PAD_L + (tMax === tMin ? (W - PAD_L - PAD_R) / 2 : ((t - tMin) / (tMax - tMin)) * (W - PAD_L - PAD_R));
   const y = (p: number) =>
-    PAD_T + (pMax === pMin ? (H - PAD_T - PAD_B) / 2 : (1 - (p - pMin) / (pMax - pMin)) * (H - PAD_T - PAD_B));
+    PAD_T + (pMax === pMin ? (baseline - PAD_T) / 2 : (1 - (p - pMin) / (pMax - pMin)) * (baseline - PAD_T));
 
   // Línea de tendencia: media por fecha única (evita zigzag entre proveedores del mismo día).
   const byDate = new Map<string, number[]>();
@@ -57,10 +58,14 @@ function PriceChart({ points, projection }: {
   const verts = [...byDate.entries()]
     .map(([d, arr]) => ({ t: new Date(d).getTime(), p: arr.reduce((s, v) => s + v, 0) / arr.length, d }))
     .sort((a, b) => a.t - b.t);
-  const path = verts.map((v, i) => `${i ? "L" : "M"}${x(v.t).toFixed(1)},${y(v.p).toFixed(1)}`).join(" ");
+  const line = verts.map((v, i) => `${i ? "L" : "M"}${x(v.t).toFixed(1)},${y(v.p).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(verts[verts.length - 1].t).toFixed(1)},${baseline} L${x(verts[0].t).toFixed(1)},${baseline} Z`;
   const last = verts[verts.length - 1];
 
-  // Etiqueta de año en la x de su primera aparición.
+  // Anclaje de etiqueta según posición (evita que se corte en los bordes).
+  const anchor = (xv: number): "start" | "middle" | "end" =>
+    xv < PAD_L + 16 ? "start" : xv > W - PAD_R - 16 ? "end" : "middle";
+
   const yearAt = new Map<number, number>();
   verts.forEach((v) => {
     const yr = new Date(v.d).getFullYear();
@@ -69,44 +74,67 @@ function PriceChart({ points, projection }: {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img">
-      {/* línea de tendencia (histórico real) */}
+      <defs>
+        <linearGradient id={`grad-${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#6366f1" stopOpacity={0.22} />
+          <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+        </linearGradient>
+      </defs>
+
+      {/* grilla horizontal suave + precio en el eje Y */}
+      {[0, 0.5, 1].map((f) => {
+        const val = pMin + f * (pMax - pMin);
+        const gy = y(val);
+        return (
+          <g key={f}>
+            <line x1={PAD_L} y1={gy} x2={W - PAD_R} y2={gy} stroke="#94a3b8" strokeOpacity={0.14} strokeWidth={1} />
+            <text x={PAD_L - 8} y={gy + 3} fontSize={10} fill="#94a3b8" textAnchor="end">${fmtARS(val)}</text>
+          </g>
+        );
+      })}
+
+      {/* área + línea del histórico */}
+      {verts.length > 1 && <path d={area} fill={`url(#grad-${uid})`} stroke="none" />}
       {verts.length > 1 && (
-        <path d={path} fill="none" stroke="#64748b" strokeWidth={1.5} />
+        <path d={line} fill="none" stroke="#6366f1" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
       )}
+
+      {/* divisor real | proyección */}
+      {projection && (
+        <line x1={x(last.t)} y1={PAD_T - 4} x2={x(last.t)} y2={baseline}
+              stroke="#94a3b8" strokeOpacity={0.25} strokeWidth={1} strokeDasharray="2 3" />
+      )}
+
       {/* tramo de proyección (punteado, ámbar) */}
       {projection && (
         <>
           <path d={`M${x(last.t)},${y(last.p)} L${x(projection.t)},${y(projection.price)}`}
-                fill="none" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 3" />
-          <circle cx={x(projection.t)} cy={y(projection.price)} r={4} fill="none"
-                  stroke="#f59e0b" strokeWidth={1.5}>
+                fill="none" stroke="#f59e0b" strokeWidth={2.5} strokeDasharray="5 4" strokeLinecap="round" />
+          <circle cx={x(projection.t)} cy={y(projection.price)} r={7} fill="#f59e0b" fillOpacity={0.15} />
+          <circle cx={x(projection.t)} cy={y(projection.price)} r={4} fill="white" stroke="#f59e0b" strokeWidth={2}>
             <title>{`proyectado · $${fmtARS(projection.price)}`}</title>
           </circle>
-          <text x={x(projection.t)} y={y(projection.price) - 8} fontSize={11}
-                fill="#d97706" textAnchor="end" fontWeight={600}>
+          <text x={x(projection.t)} y={y(projection.price) - 11} fontSize={11.5}
+                fill="#d97706" textAnchor={anchor(x(projection.t))} fontWeight={700}>
             ${fmtARS(projection.price)}
+          </text>
+          <text x={x(projection.t)} y={baseline + 16} fontSize={10} fill="#d97706"
+                textAnchor={anchor(x(projection.t))} opacity={0.85}>
+            proy.
           </text>
         </>
       )}
+
       {/* puntos reales (uno por cotización, color por fuente) */}
       {pts.map((p, i) => (
-        <circle key={i} cx={x(ts[i])} cy={y(p.price)} r={4} fill={sourceColor(p.source)} stroke="white" strokeWidth={1}>
+        <circle key={i} cx={x(ts[i])} cy={y(p.price)} r={4} fill={sourceColor(p.source)} stroke="white" strokeWidth={1.5}>
           <title>{`${p.date} · $${fmtARS(p.price)} · ${p.source}`}</title>
         </circle>
       ))}
-      {/* etiqueta primer y último precio real */}
-      <text x={x(verts[0].t)} y={y(verts[0].p) - 8} fontSize={11} fill="#94a3b8" textAnchor="middle">
-        ${fmtARS(verts[0].p)}
-      </text>
-      {verts.length > 1 && (
-        <text x={x(last.t)} y={y(last.p) - 8} fontSize={11}
-              fill="#0f172a" textAnchor="middle" className="dark:fill-white" fontWeight={600}>
-          ${fmtARS(last.p)}
-        </text>
-      )}
+
       {/* eje X: años */}
       {[...yearAt.entries()].map(([yr, t]) => (
-        <text key={yr} x={x(t)} y={H - 6} fontSize={11} fill="#94a3b8" textAnchor="middle">
+        <text key={yr} x={x(t)} y={baseline + 16} fontSize={11} fill="#94a3b8" textAnchor={anchor(x(t))}>
           {yr}
         </text>
       ))}
