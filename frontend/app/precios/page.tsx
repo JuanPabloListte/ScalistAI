@@ -2,8 +2,15 @@
 
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Bar, BarChart, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
 
 import { api, type PriceSeriesPoint, type PriceSeriesProduct } from "@/lib/api";
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -182,6 +189,23 @@ export default function PreciosPage() {
     });
   const shown = filtered.slice(0, RENDER_CAP);
 
+  // Panorama (sobre TODOS los productos, no el filtro).
+  const ipcPct = (products.find((p) => p.ipc_monthly_rate != null)?.ipc_monthly_rate ?? 0) * 100;
+  const withOwnRate = products.filter((p) => p.forecast_method === "serie_propia");
+  const beats = withOwnRate.filter((p) => p.beats_inflation === true).length;
+  const topRiser = products
+    .filter((p) => p.change_pct != null)
+    .reduce<PriceSeriesProduct | null>((m, p) => (m && (m.change_pct ?? 0) >= (p.change_pct ?? 0) ? m : p), null);
+  const topMovers = products
+    .filter((p) => p.change_pct != null)
+    .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0))
+    .slice(0, 8)
+    .map((p) => ({ name: truncate(p.name, 22), change: p.change_pct as number }));
+  const vsIpc = [...withOwnRate]
+    .sort((a, b) => b.forecast_rate - a.forecast_rate)
+    .slice(0, 8)
+    .map((p) => ({ name: truncate(p.name, 14), rate: p.forecast_rate * 100, beats: p.beats_inflation }));
+
   const selectClass =
     "rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200";
 
@@ -204,6 +228,53 @@ export default function PreciosPage() {
         </div>
       ) : (
         <>
+          {/* PANORAMA — KPIs + gráficos sobre TODOS los productos */}
+          <section className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Kpi label="Productos con serie" value={`${products.length}`} />
+              <Kpi label="Le ganan al IPC" value={`${beats}/${withOwnRate.length}`} sub="suben más que la inflación" />
+              <Kpi label="Mayor suba" value={topRiser ? `+${fmtARS(topRiser.change_pct ?? 0)}%` : "—"}
+                   sub={topRiser ? truncate(topRiser.name, 24) : ""} />
+              <Kpi label="IPC oficial" value={`${ipcPct.toFixed(1)}%/mes`} sub="inflación INDEC" />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {/* Top movers */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <h2 className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Mayores subas (histórico)</h2>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={topMovers} layout="vertical" margin={{ left: 8, right: 30, top: 4, bottom: 4 }}>
+                      <XAxis type="number" tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                      <Tooltip formatter={(v) => `+${fmtARS(Number(v))}%`} cursor={{ fill: "#94a3b818" }} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                      <Bar dataKey="change" radius={[0, 4, 4, 0]} fill="#f59e0b" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Ritmo mensual vs IPC */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <h2 className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Ritmo mensual vs IPC</h2>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={vsIpc} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#94a3b8" }} interval={0} angle={-35} textAnchor="end" height={56} axisLine={false} tickLine={false} />
+                      <YAxis tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={34} />
+                      <Tooltip formatter={(v) => `${Number(v).toFixed(1)}%/mes`} cursor={{ fill: "#94a3b818" }} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                      <ReferenceLine y={ipcPct} stroke="#ef4444" strokeDasharray="4 3"
+                                     label={{ value: `IPC ${ipcPct.toFixed(1)}%`, fontSize: 10, fill: "#ef4444", position: "insideTopRight" }} />
+                      <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
+                        {vsIpc.map((d, i) => <Cell key={i} fill={d.beats ? "#10b981" : "#94a3b8"} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* Barra de filtros (sticky para listas largas) */}
           <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
             <input
@@ -295,6 +366,16 @@ function ProductCard({ p }: { p: PriceSeriesProduct }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-0.5 text-lg font-bold text-slate-900 dark:text-white">{value}</p>
+      {sub && <p className="truncate text-xs text-slate-500">{sub}</p>}
     </div>
   );
 }
