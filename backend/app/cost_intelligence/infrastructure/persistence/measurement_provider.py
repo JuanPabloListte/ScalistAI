@@ -16,12 +16,12 @@ from app.models.detected_element import DetectedElement
 
 # tipo de DetectedElement -> entity_types (applies_to) que GENERA. Casi todos
 # 1:1, pero un `room` se EXPANDE en sus terminaciones: piso (área), cielorraso
-# (área) y revoque+pintura interior de muros (perímetro × altura). Cada una mide
-# distinto vía `measure_for`. Aberturas (door/window/sliding_door) -> opening.
+# (área), revoque+pintura interior de muros (perímetro × altura) y zócalo
+# (perímetro). Cada una mide distinto vía `measure_for`. Aberturas -> opening.
 # Tipos no listados se ignoran.
 _TYPE_TO_ENTITIES: dict[str, tuple[str, ...]] = {
     "wall": ("wall",),
-    "room": ("room_floor", "room_ceiling", "room_wall"),
+    "room": ("room_floor", "room_ceiling", "room_wall", "room_perimeter"),
     "opening": ("opening",),
     "door": ("opening",),
     "window": ("opening",),
