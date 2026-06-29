@@ -121,6 +121,12 @@ export default function CostosPage() {
           <p className="text-sm text-slate-500">{project?.name}</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            href="/precios"
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            📈 Historial de precios
+          </Link>
           <button
             onClick={() => void compute()}
             disabled={!planId || computing}
@@ -183,11 +189,11 @@ export default function CostosPage() {
                 <select
                   value={horizon}
                   onChange={(e) => setHorizon(Number(e.target.value))}
-                  className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700"
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value={3}>3 meses</option>
-                  <option value={6}>6 meses</option>
-                  <option value={12}>12 meses</option>
+                  <option value={3} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-white">3 meses</option>
+                  <option value={6} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-white">6 meses</option>
+                  <option value={12} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-white">12 meses</option>
                 </select>
               </div>
               {forecast ? (
