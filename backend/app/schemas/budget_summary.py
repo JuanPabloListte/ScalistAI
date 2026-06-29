@@ -26,6 +26,15 @@ class BudgetTakeoff(BaseModel):
     floor_m2: float      # superficie de piso (suma de ambientes)
 
 
+class SalePriceBreakdown(BaseModel):
+    """Costo directo → precio de venta, paso a paso (para el waterfall)."""
+    direct: float
+    overhead: float      # gastos generales
+    profit: float        # beneficio
+    iva: float
+    total: float         # precio de venta final
+
+
 class ProjectBudgetSummary(BaseModel):
     plan_id: int
     project_name: str
@@ -37,5 +46,6 @@ class ProjectBudgetSummary(BaseModel):
     direct_cost: float
     sale_price: float
     cost_per_m2: float | None
+    breakdown: SalePriceBreakdown
     categories: list[BudgetCategory]
     takeoff: BudgetTakeoff
