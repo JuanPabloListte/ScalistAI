@@ -14,23 +14,26 @@ from app.cost_intelligence.domain.measurement import ElementGeometry
 from app.cost_intelligence.domain.scenario import ElementMeasurement
 from app.models.detected_element import DetectedElement
 
-# tipo de DetectedElement -> entity_type (applies_to). Las aberturas (door/
-# window/sliding_door) se computan como "opening". Tipos no listados se ignoran.
-_TYPE_TO_ENTITY = {
-    "wall": "wall",
-    "room": "room_floor",
-    "opening": "opening",
-    "door": "opening",
-    "window": "opening",
-    "sliding_door": "opening",
-    "beam": "beam",
-    "column": "column",
-    "roof": "roof",
-    "riostra": "riostra",
-    "cloaca": "cloaca",
-    "electricidad": "electricidad",
-    "escalera": "escalera",
-    "pozo": "pozo",
+# tipo de DetectedElement -> entity_types (applies_to) que GENERA. Casi todos
+# 1:1, pero un `room` se EXPANDE en sus terminaciones: piso (área), cielorraso
+# (área) y revoque+pintura interior de muros (perímetro × altura). Cada una mide
+# distinto vía `measure_for`. Aberturas (door/window/sliding_door) -> opening.
+# Tipos no listados se ignoran.
+_TYPE_TO_ENTITIES: dict[str, tuple[str, ...]] = {
+    "wall": ("wall",),
+    "room": ("room_floor", "room_ceiling", "room_wall"),
+    "opening": ("opening",),
+    "door": ("opening",),
+    "window": ("opening",),
+    "sliding_door": ("opening",),
+    "beam": ("beam",),
+    "column": ("column",),
+    "roof": ("roof",),
+    "riostra": ("riostra",),
+    "cloaca": ("cloaca",),
+    "electricidad": ("electricidad",),
+    "escalera": ("escalera",),
+    "pozo": ("pozo",),
 }
 
 
@@ -48,13 +51,9 @@ class SqlMeasurementProvider(MeasurementProvider):
 
         out: list[ElementMeasurement] = []
         for el in self._s.scalars(stmt):
-            entity_type = _TYPE_TO_ENTITY.get(el.type)
-            if entity_type is None:
-                continue
-            out.append(ElementMeasurement(
-                entity_type=entity_type,
-                geometry=ElementGeometry(
-                    length_m=el.length_m, area_m2=el.area_m2, height_m=el.height_m,
-                ),
-            ))
+            geom = ElementGeometry(
+                length_m=el.length_m, area_m2=el.area_m2, height_m=el.height_m,
+            )
+            for entity_type in _TYPE_TO_ENTITIES.get(el.type, ()):
+                out.append(ElementMeasurement(entity_type=entity_type, geometry=geom))
         return out

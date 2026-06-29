@@ -44,6 +44,7 @@ class ElementGeometry:
 _BASIS: dict[str, tuple[str, str]] = {
     "wall": ("wall_area", "m2"),
     "room_floor": ("area", "m2"),
+    "room_ceiling": ("area", "m2"),
     "roof": ("area", "m2"),
     "escalera": ("area", "m2"),
     "room_wall": ("wall_area", "m2"),
