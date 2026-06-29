@@ -142,10 +142,21 @@ function PriceChart({ points, projection }: {
   );
 }
 
+const SORTS = {
+  name: "Nombre (A-Z)",
+  change: "Mayor variación histórica",
+  projection: "Mayor proyección",
+} as const;
+type SortKey = keyof typeof SORTS;
+const RENDER_CAP = 48; // tope de gráficos renderizados a la vez (perf con miles)
+
 export default function PreciosPage() {
   const router = useRouter();
   const [products, setProducts] = useState<PriceSeriesProduct[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [sort, setSort] = useState<SortKey>("name");
 
   useEffect(() => {
     api.getPriceSeries()
@@ -160,16 +171,22 @@ export default function PreciosPage() {
     return <div className="p-8 text-slate-500">Cargando…</div>;
   }
 
-  // Agrupa por categoría.
-  const byCategory = new Map<string, PriceSeriesProduct[]>();
-  for (const p of products) {
-    const a = byCategory.get(p.category) ?? [];
-    a.push(p);
-    byCategory.set(p.category, a);
-  }
+  const categories = [...new Set(products.map((p) => p.category))].sort();
+  const q = query.trim().toLowerCase();
+  const filtered = products
+    .filter((p) => (!q || p.name.toLowerCase().includes(q)) && (!category || p.category === category))
+    .sort((a, b) => {
+      if (sort === "change") return (b.change_pct ?? -Infinity) - (a.change_pct ?? -Infinity);
+      if (sort === "projection") return b.forecast_variation_pct - a.forecast_variation_pct;
+      return a.name.localeCompare(b.name);
+    });
+  const shown = filtered.slice(0, RENDER_CAP);
+
+  const selectClass =
+    "rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200";
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-5 p-6">
       <div>
         <button onClick={() => router.push("/")}
                 className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
@@ -177,66 +194,107 @@ export default function PreciosPage() {
         </button>
         <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">Inteligencia de Precios</h1>
         <p className="text-sm text-slate-500">
-          Evolución histórica REAL de tus materiales · {products.length} productos · datos de cotizaciones y proveedores
+          Evolución histórica REAL de tus materiales · {products.length} productos
         </p>
       </div>
 
-      {products.length === 0 && (
+      {products.length === 0 ? (
         <div className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
           Todavía no hay productos con serie de precios. Cargá precios y unilos con el matching de materiales.
         </div>
-      )}
-
-      {[...byCategory.entries()].map(([category, items]) => (
-        <div key={category} className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{category}</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {items.map((p) => (
-              <div key={p.id} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 flex items-start justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{p.name}</h3>
-                  {p.change_pct !== null && (
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ${
-                      p.change_pct >= 0
-                        ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-                        : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                    }`}>
-                      {p.change_pct >= 0 ? "+" : ""}{fmtARS(p.change_pct)}%
-                    </span>
-                  )}
-                </div>
-                <p className="mb-2 text-xs text-slate-400">
-                  ${fmtARS(p.first_price)} → ${fmtARS(p.last_price)} / {p.unit} · {p.points.length} puntos
-                </p>
-                <PriceChart points={p.points} projection={projectionOf(p)} />
-                {p.forecast_method !== "sin_dato" && (
-                  <div className="mt-2 border-t border-slate-100 pt-2 text-xs dark:border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">
-                        Proyección {p.horizon_months}m
-                        <span className="ml-1 text-slate-400">
-                          ({p.forecast_method === "serie_propia" ? "según tu serie" : "según IPC"})
-                        </span>
-                      </span>
-                      <span className="font-semibold text-amber-600 dark:text-amber-400">
-                        ${fmtARS(p.projected_price)} (+{fmtARS(p.forecast_variation_pct)}%)
-                      </span>
-                    </div>
-                    {p.beats_inflation !== null && p.ipc_monthly_rate !== null && (
-                      <div className="mt-0.5 text-slate-400">
-                        {(p.forecast_rate * 100).toFixed(1)}%/mes vs IPC {(p.ipc_monthly_rate * 100).toFixed(1)}%/mes ·{" "}
-                        <span className={p.beats_inflation ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
-                          {p.beats_inflation ? "sube más que la inflación" : "por debajo de la inflación"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+      ) : (
+        <>
+          {/* Barra de filtros (sticky para listas largas) */}
+          <div className="sticky top-0 z-10 -mx-6 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/85 px-6 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar material…"
+              className="w-56 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            />
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className={selectClass}>
+              <option value="">Todos los rubros</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className={selectClass}>
+              {Object.entries(SORTS).map(([k, label]) => (
+                <option key={k} value={k}>{label}</option>
+              ))}
+            </select>
+            <span className="ml-auto text-xs text-slate-400">
+              {filtered.length === products.length
+                ? `${products.length} productos`
+                : `${filtered.length} de ${products.length}`}
+            </span>
           </div>
+
+          {shown.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">Sin resultados.</p>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {shown.map((p) => <ProductCard key={p.id} p={p} />)}
+            </div>
+          )}
+
+          {filtered.length > RENDER_CAP && (
+            <p className="text-center text-xs text-slate-400">
+              Mostrando {RENDER_CAP} de {filtered.length}. Refiná la búsqueda o el rubro para ver el resto.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProductCard({ p }: { p: PriceSeriesProduct }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{p.name}</h3>
+          <span className="text-[10px] uppercase tracking-wide text-slate-400">{p.category}</span>
         </div>
-      ))}
+        {p.change_pct !== null && (
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ${
+            p.change_pct >= 0
+              ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+          }`}>
+            {p.change_pct >= 0 ? "+" : ""}{fmtARS(p.change_pct)}%
+          </span>
+        )}
+      </div>
+      <p className="mb-2 text-xs text-slate-400">
+        ${fmtARS(p.first_price)} → ${fmtARS(p.last_price)} / {p.unit} · {p.points.length} puntos
+      </p>
+      <PriceChart points={p.points} projection={projectionOf(p)} />
+      {p.forecast_method !== "sin_dato" && (
+        <div className="mt-2 border-t border-slate-100 pt-2 text-xs dark:border-slate-800">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500">
+              Proyección {p.horizon_months}m
+              <span className="ml-1 text-slate-400">
+                ({p.forecast_method === "serie_propia" ? "según tu serie" : "según IPC"})
+              </span>
+            </span>
+            <span className="font-semibold text-amber-600 dark:text-amber-400">
+              ${fmtARS(p.projected_price)} (+{fmtARS(p.forecast_variation_pct)}%)
+            </span>
+          </div>
+          {p.beats_inflation !== null && p.ipc_monthly_rate !== null && (
+            <div className="mt-0.5 text-slate-400">
+              {(p.forecast_rate * 100).toFixed(1)}%/mes vs IPC {(p.ipc_monthly_rate * 100).toFixed(1)}%/mes ·{" "}
+              <span className={p.beats_inflation ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
+                {p.beats_inflation ? "sube más que la inflación" : "por debajo de la inflación"}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
