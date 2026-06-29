@@ -9,6 +9,15 @@ function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
 }
 
+// Punto proyectado para el gráfico: última fecha real + horizonte (meses).
+function projectionOf(p: PriceSeriesProduct): { t: number; price: number } | null {
+  if (p.forecast_method === "sin_dato" || p.points.length === 0) return null;
+  const lastDate = p.points[p.points.length - 1].date;
+  const d = new Date(lastDate);
+  d.setMonth(d.getMonth() + p.horizon_months);
+  return { t: d.getTime(), price: p.projected_price };
+}
+
 // Color por proveedor/fuente — deja ver la dispersión entre cotizaciones.
 function sourceColor(source: string): string {
   const s = source.toLowerCase();
@@ -20,13 +29,19 @@ function sourceColor(source: string): string {
   return "#94a3b8";
 }
 
-function PriceChart({ points }: { points: PriceSeriesPoint[] }) {
+function PriceChart({ points, projection }: {
+  points: PriceSeriesPoint[];
+  projection: { t: number; price: number } | null;
+}) {
   const W = 560, H = 140, PAD_L = 10, PAD_R = 10, PAD_T = 14, PAD_B = 24;
   const pts = [...points].sort((a, b) => a.date.localeCompare(b.date));
   const ts = pts.map((p) => new Date(p.date).getTime());
   const prices = pts.map((p) => p.price);
-  const tMin = Math.min(...ts), tMax = Math.max(...ts);
-  const pMin = Math.min(...prices), pMax = Math.max(...prices);
+  // El dominio incluye el punto proyectado (futuro y, normalmente, mayor precio).
+  const extraT = projection ? [projection.t] : [];
+  const extraP = projection ? [projection.price] : [];
+  const tMin = Math.min(...ts), tMax = Math.max(...ts, ...extraT);
+  const pMin = Math.min(...prices, ...extraP), pMax = Math.max(...prices, ...extraP);
   const x = (t: number) =>
     PAD_L + (tMax === tMin ? (W - PAD_L - PAD_R) / 2 : ((t - tMin) / (tMax - tMin)) * (W - PAD_L - PAD_R));
   const y = (p: number) =>
@@ -43,6 +58,7 @@ function PriceChart({ points }: { points: PriceSeriesPoint[] }) {
     .map(([d, arr]) => ({ t: new Date(d).getTime(), p: arr.reduce((s, v) => s + v, 0) / arr.length, d }))
     .sort((a, b) => a.t - b.t);
   const path = verts.map((v, i) => `${i ? "L" : "M"}${x(v.t).toFixed(1)},${y(v.p).toFixed(1)}`).join(" ");
+  const last = verts[verts.length - 1];
 
   // Etiqueta de año en la x de su primera aparición.
   const yearAt = new Map<number, number>();
@@ -53,9 +69,24 @@ function PriceChart({ points }: { points: PriceSeriesPoint[] }) {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img">
-      {/* línea de tendencia */}
+      {/* línea de tendencia (histórico real) */}
       {verts.length > 1 && (
-        <path d={path} fill="none" stroke="#64748b" strokeWidth={1.5} strokeDasharray="3 3" />
+        <path d={path} fill="none" stroke="#64748b" strokeWidth={1.5} />
+      )}
+      {/* tramo de proyección (punteado, ámbar) */}
+      {projection && (
+        <>
+          <path d={`M${x(last.t)},${y(last.p)} L${x(projection.t)},${y(projection.price)}`}
+                fill="none" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 3" />
+          <circle cx={x(projection.t)} cy={y(projection.price)} r={4} fill="none"
+                  stroke="#f59e0b" strokeWidth={1.5}>
+            <title>{`proyectado · $${fmtARS(projection.price)}`}</title>
+          </circle>
+          <text x={x(projection.t)} y={y(projection.price) - 8} fontSize={11}
+                fill="#d97706" textAnchor="end" fontWeight={600}>
+            ${fmtARS(projection.price)}
+          </text>
+        </>
       )}
       {/* puntos reales (uno por cotización, color por fuente) */}
       {pts.map((p, i) => (
@@ -63,14 +94,14 @@ function PriceChart({ points }: { points: PriceSeriesPoint[] }) {
           <title>{`${p.date} · $${fmtARS(p.price)} · ${p.source}`}</title>
         </circle>
       ))}
-      {/* etiqueta primer y último precio */}
+      {/* etiqueta primer y último precio real */}
       <text x={x(verts[0].t)} y={y(verts[0].p) - 8} fontSize={11} fill="#94a3b8" textAnchor="middle">
         ${fmtARS(verts[0].p)}
       </text>
       {verts.length > 1 && (
-        <text x={x(verts[verts.length - 1].t)} y={y(verts[verts.length - 1].p) - 8} fontSize={11}
+        <text x={x(last.t)} y={y(last.p) - 8} fontSize={11}
               fill="#0f172a" textAnchor="middle" className="dark:fill-white" fontWeight={600}>
-          ${fmtARS(verts[verts.length - 1].p)}
+          ${fmtARS(last.p)}
         </text>
       )}
       {/* eje X: años */}
@@ -149,7 +180,30 @@ export default function PreciosPage() {
                 <p className="mb-2 text-xs text-slate-400">
                   ${fmtARS(p.first_price)} → ${fmtARS(p.last_price)} / {p.unit} · {p.points.length} puntos
                 </p>
-                <PriceChart points={p.points} />
+                <PriceChart points={p.points} projection={projectionOf(p)} />
+                {p.forecast_method !== "sin_dato" && (
+                  <div className="mt-2 border-t border-slate-100 pt-2 text-xs dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">
+                        Proyección {p.horizon_months}m
+                        <span className="ml-1 text-slate-400">
+                          ({p.forecast_method === "serie_propia" ? "según tu serie" : "según IPC"})
+                        </span>
+                      </span>
+                      <span className="font-semibold text-amber-600 dark:text-amber-400">
+                        ${fmtARS(p.projected_price)} (+{fmtARS(p.forecast_variation_pct)}%)
+                      </span>
+                    </div>
+                    {p.beats_inflation !== null && p.ipc_monthly_rate !== null && (
+                      <div className="mt-0.5 text-slate-400">
+                        {(p.forecast_rate * 100).toFixed(1)}%/mes vs IPC {(p.ipc_monthly_rate * 100).toFixed(1)}%/mes ·{" "}
+                        <span className={p.beats_inflation ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
+                          {p.beats_inflation ? "sube más que la inflación" : "por debajo de la inflación"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
