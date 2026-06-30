@@ -31,3 +31,5 @@ matplotlib>=3.9.0
 openai>=1.12.0
 anthropic>=0.18.0
 google-generativeai>=0.4.0
+
+ifcopenshell==0.8.5  # import de modelos BIM (IFC) -> cómputo exacto
