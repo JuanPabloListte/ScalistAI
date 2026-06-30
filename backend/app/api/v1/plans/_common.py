@@ -1,6 +1,7 @@
 from pathlib import Path
 
 MAX_PDF_BYTES = 50 * 1024 * 1024
+MAX_IFC_BYTES = 500 * 1024 * 1024  # los modelos BIM pesan mucho (cientos de MB)
 # 150 DPI da ~30 MP por página A3 — tamaño que el browser muestra sin pérdida
 # de líneas finas al hacer fit-zoom.
 RASTER_DPI = 150

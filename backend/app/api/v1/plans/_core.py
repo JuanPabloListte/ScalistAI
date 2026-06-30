@@ -23,7 +23,7 @@ from app.services.auto_scale import detect_scales
 from app.services.pdf import classify_pages, page_count, recommend_pages
 from app.services.prewarm import prewarm_plan_pages
 
-from ._common import MAX_PDF_BYTES, RASTER_DPI, _page_raster_path
+from ._common import MAX_IFC_BYTES, MAX_PDF_BYTES, RASTER_DPI, _page_raster_path
 
 router = APIRouter(tags=["plans"])
 
@@ -45,11 +45,26 @@ async def upload_plan(
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     contents = await file.read()
-    if len(contents) > MAX_PDF_BYTES:
-        raise HTTPException(status_code=413, detail="Archivo demasiado grande (máx 50 MB)")
+    fname_lower = (file.filename or "").lower()
+    is_ifc = fname_lower.endswith(".ifc")
+    max_bytes = MAX_IFC_BYTES if is_ifc else MAX_PDF_BYTES
+    if len(contents) > max_bytes:
+        mb = max_bytes // (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"Archivo demasiado grande (máx {mb} MB)")
+
+    # IFC (BIM): modelo exacto, sin páginas ni raster. Salta el visor -> presupuesto.
+    if is_ifc:
+        from app.services.ifc_import import build_ifc_plan, process_ifc
+
+        plan = build_ifc_plan(project_id, contents, file.filename or "modelo.ifc", db)
+        if project.wizard_step < 2:
+            project.wizard_step = 2
+        db.commit()
+        db.refresh(plan)
+        background_tasks.add_task(process_ifc, plan.id)
+        return plan
 
     # DXF / DWG: se plotea a PDF vectorial; los elementos salen del mapeo de capas.
-    fname_lower = (file.filename or "").lower()
     if fname_lower.endswith(".dxf") or fname_lower.endswith(".dwg"):
         from app.services.dxf_import import build_dxf_plan
 
