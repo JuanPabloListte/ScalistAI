@@ -153,6 +153,64 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
     return out, meta
 
 
+def build_ifc_plan(project_id: int, contents: bytes, filename: str, db) -> "object":
+    """Guarda el .ifc y crea el Plan (sin páginas, status 'processing'). El parseo
+    a elementos lo hace `process_ifc` en background (puede tardar en modelos grandes)."""
+    import uuid
+    from pathlib import Path
+
+    from app.core.config import settings
+    from app.models.plan import Plan
+
+    plan_storage = Path(settings.STORAGE_DIR) / "plans" / str(project_id)
+    plan_storage.mkdir(parents=True, exist_ok=True)
+    ifc_path = plan_storage / f"{uuid.uuid4().hex}.ifc"
+    ifc_path.write_bytes(contents)
+
+    plan = Plan(
+        project_id=project_id,
+        original_filename=filename,
+        pdf_path=str(ifc_path),  # no hay PDF: guardamos la ruta del .ifc acá
+        dpi=0,
+        page_count=1,
+        status="processing",
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def process_ifc(plan_id: int) -> None:
+    """Background: parsea el IFC del plan y crea los DetectedElement exactos."""
+    from app.core.database import SessionLocal
+    from app.models.detected_element import DetectedElement
+    from app.models.plan import Plan
+
+    with SessionLocal() as db:
+        plan = db.get(Plan, plan_id)
+        if plan is None:
+            return
+        try:
+            elements, _meta = parse_ifc(plan.pdf_path)
+            for e in elements:
+                geom = {"source": "ifc"}
+                if e.get("subtype"):
+                    geom["subtype"] = e["subtype"]
+                db.add(DetectedElement(
+                    plan_id=plan_id, page=1, type=e["type"], geometry=geom,
+                    length_m=e.get("length_m"), area_m2=e.get("area_m2"),
+                    height_m=e.get("height_m"), source="ifc",
+                    is_candidate=False, confidence=1.0,
+                ))
+            plan.status = "ready"
+            db.commit()
+        except Exception:
+            plan.status = "error"
+            db.commit()
+            raise
+
+
 if __name__ == "__main__":
     import sys
     els, meta = parse_ifc(sys.argv[1] if len(sys.argv) > 1 else "/tmp/duplex.ifc")
