@@ -167,8 +167,9 @@ export default function CostosPage() {
                 <Row label="PRECIO DE VENTA" value={sale.total} strong highlight />
               </div>
             </dl>
-            <p className="mt-3 text-xs text-slate-400">
-              {sim.totals.labor_hours.toFixed(0)} horas hombre · {sim.totals.duration_days.toFixed(0)} días estimados
+            <p className="mt-3 text-xs text-slate-400"
+               title="Jornales = días-cuadrilla de esfuerzo (suma de tareas). El calendario real, con tareas en paralelo, está en el Cronograma (Gantt).">
+              {sim.totals.labor_hours.toFixed(0)} horas hombre · {sim.totals.duration_days.toFixed(0)} jornales
             </p>
           </div>
 
