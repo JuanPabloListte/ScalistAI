@@ -21,6 +21,8 @@ from typing import Optional
 CONTEXT_MAX_M = 50.0
 SLAB_MAX_M = 200.0
 DEFAULT_HEIGHT_M = 2.8
+# Niveles NO habitables: sus losas no cuentan como piso cubierto (evita inflar el área).
+_AUX_STOREY_KW = ("TECHO", "TANQUE", "CUBIERTA", "AZOTEA", "VIGA", "CIMIENT", "FUNDAC", "SOBRE LOSA")
 
 
 def _num(x) -> float:
@@ -114,6 +116,10 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             out.append({"type": "roof", "area_m2": area})
             raw["roof"] += 1
         elif not has_space:  # sin IfcSpace, la losa de piso aproxima el ambiente
+            cont = UE.get_container(sl)
+            storey = (getattr(cont, "Name", "") or "").upper()
+            if any(k in storey for k in _AUX_STOREY_KW):
+                continue  # losa de nivel auxiliar (techo/tanque/estructura), no piso habitable
             out.append({"type": "room", "area_m2": area, "length_m": 4 * area ** 0.5, "height_m": DEFAULT_HEIGHT_M})
             raw["room(from_slab)"] += 1
 
