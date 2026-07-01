@@ -13,9 +13,12 @@ No tiene páginas ni raster: el IFC salta el visor → va directo al presupuesto
 """
 from __future__ import annotations
 
+import logging
 import math
 from collections import Counter
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Un muro/viga no supera esto; más largo = degenerado/contexto. Las losas SÍ
 # pueden ser plateas grandes (edificios largos), por eso su límite es mayor.
@@ -39,6 +42,83 @@ def _habitable_storeys(f) -> int:
     habitable = [st for st in storeys
                  if not any(k in (st.Name or "").upper() for k in _AUX_STOREY_KW)]
     return len(habitable) or len(storeys) or 1
+
+
+def _material_name(el) -> Optional[str]:
+    """Nombre del material del elemento según el modelo BIM.
+
+    Los muros de Revit suelen venir como LayerSet (ladrillo + revoque + ...):
+    se toma la CAPA MÁS GRUESA, que es el material estructural. Nunca lanza.
+    """
+    import ifcopenshell.util.element as UE
+
+    try:
+        m = UE.get_material(el)
+        if m is None:
+            return None
+        t = m.is_a()
+        if t == "IfcMaterial":
+            return m.Name or None
+        if t == "IfcMaterialLayerSetUsage":
+            m = m.ForLayerSet
+            t = m.is_a()
+        if t == "IfcMaterialLayerSet":
+            layers = [ly for ly in (m.MaterialLayers or []) if ly.Material]
+            if not layers:
+                return None
+            thickest = max(layers, key=lambda ly: _num(ly.LayerThickness))
+            return thickest.Material.Name or None
+        if t == "IfcMaterialList":
+            mats = m.Materials or []
+            return mats[0].Name if mats else None
+        if t == "IfcMaterialProfileSetUsage":  # vigas/columnas IFC4
+            profiles = m.ForProfileSet.MaterialProfiles or []
+            return profiles[0].Material.Name if profiles and profiles[0].Material else None
+    except Exception:  # noqa: BLE001 — el material es un extra, nunca rompe el parse
+        pass
+    return None
+
+
+# --- Matching material BIM → receta de la org -------------------------------
+# Familias de material: sinónimos ES/EN normalizados (sin acentos, mayúsculas).
+# El match es CONSERVADOR: se asigna receta solo si el material del IFC y
+# exactamente UNA receta del tipo comparten familia. Con 0 o >1 candidatas
+# queda el default por tipo (no adivinamos).
+_MATERIAL_FAMILIES: list[tuple[str, ...]] = [
+    ("LADRILLO", "BRICK", "MAMPOSTER"),
+    ("BLOQUE", "BLOCK"),
+    ("PIEDRA", "STONE"),
+    ("HORMIGON", "CONCRETE", "H°A°", "HºAº"),
+    ("MADERA", "WOOD", "TIMBER"),
+    ("ACERO", "STEEL", "METALICA", "METALICO"),
+    ("ALUMINIO", "ALUMINUM", "ALUMINIUM"),
+    ("YESO", "GYPSUM", "DRYWALL", "DURLOCK"),
+    ("VIDRIO", "GLASS", "GLAZING"),
+]
+
+_ACCENTS = str.maketrans("ÁÉÍÓÚÜÑ", "AEIOUUN")
+
+
+def _norm(s: str) -> str:
+    return (s or "").upper().translate(_ACCENTS)
+
+
+def _families_of(name: str) -> set[int]:
+    up = _norm(name)
+    return {i for i, fam in enumerate(_MATERIAL_FAMILIES) if any(k in up for k in fam)}
+
+
+def match_recipe_by_material(material: str, recipes: list[tuple[int, str]]) -> Optional[int]:
+    """Elige la receta cuyo nombre comparte familia de material con el IFC.
+
+    `recipes`: [(id, nombre)] del MISMO applies_to y la MISMA org.
+    Devuelve el id solo si exactamente UNA receta matchea (sin ambigüedad).
+    """
+    mat_fams = _families_of(material)
+    if not mat_fams:
+        return None
+    hits = [rid for rid, rname in recipes if _families_of(rname) & mat_fams]
+    return hits[0] if len(hits) == 1 else None
 
 
 def parse_ifc(path: str) -> tuple[list[dict], dict]:
@@ -102,16 +182,24 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
     out: list[dict] = []
     raw = Counter()
 
+    def _with_mat(el, d: dict) -> dict:
+        """Agrega el material BIM al dict del elemento (si el modelo lo trae).
+        Después se usa para auto-asignar la receta (ladrillo vs piedra...)."""
+        mat = _material_name(el)
+        if mat:
+            d["material"] = mat
+        return d
+
     # --- Aberturas: medida directa (exacta), sin geometría ---
     for d in f.by_type("IfcDoor"):
         w, h = _num(d.OverallWidth) * scale, _num(d.OverallHeight) * scale
         if w > 0 and h > 0:
-            out.append({"type": "opening", "length_m": w, "height_m": h, "subtype": "door"})
+            out.append(_with_mat(d, {"type": "opening", "length_m": w, "height_m": h, "subtype": "door"}))
             raw["door"] += 1
     for wd in f.by_type("IfcWindow"):
         w, h = _num(wd.OverallWidth) * scale, _num(wd.OverallHeight) * scale
         if w > 0 and h > 0:
-            out.append({"type": "opening", "length_m": w, "height_m": h, "subtype": "window"})
+            out.append(_with_mat(wd, {"type": "opening", "length_m": w, "height_m": h, "subtype": "window"}))
             raw["window"] += 1
 
     # --- Muros: largo × alto (cordura: espesor < 1m) ---
@@ -127,7 +215,7 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             height = height * scale if height is not None else bb[2]
         if not (0 < length <= 30 and 0 < height <= 8):
             continue
-        out.append({"type": "wall", "length_m": length, "height_m": height})
+        out.append(_with_mat(wl, {"type": "wall", "length_m": length, "height_m": height}))
         raw["wall"] += 1
 
     # --- Losas: recolectamos huellas (no sumamos aún) ---
@@ -196,7 +284,7 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         bb = bbox(c)
         if not bb or max(bb[0], bb[1]) > 2.0:
             continue
-        out.append({"type": "column", "area_m2": max(bb[0] * bb[1], 0.01), "height_m": bb[2]})
+        out.append(_with_mat(c, {"type": "column", "area_m2": max(bb[0] * bb[1], 0.01), "height_m": bb[2]}))
         raw["column"] += 1
     for b in f.by_type("IfcBeam"):
         length = qty(b, "Length")
@@ -208,7 +296,7 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
                 continue
             length = max(bb[0], bb[1])
         if 0 < length <= 30:
-            out.append({"type": "beam", "length_m": length})
+            out.append(_with_mat(b, {"type": "beam", "length_m": length}))
             raw["beam"] += 1
 
     # --- Metadata del edificio (para autocompletar el Paso 5) ---
@@ -319,9 +407,16 @@ def build_ifc_plan(project_id: int, contents: bytes, filename: str, db) -> "obje
 
 
 def process_ifc(plan_id: int) -> None:
-    """Background: parsea el IFC del plan y crea los DetectedElement exactos."""
+    """Background: parsea el IFC del plan y crea los DetectedElement exactos.
+
+    Si el modelo trae materiales (IfcMaterial), auto-asigna la receta de la
+    org que corresponda a cada elemento ("muro de piedra" → receta piedra) vía
+    el mecanismo de receta-por-elemento (element_assemblies). Conservador: sin
+    match inequívoco no asigna nada y queda el default por tipo.
+    """
     from app.core.database import SessionLocal
     from app.models.detected_element import DetectedElement
+    from app.models.material import Assembly
     from app.models.plan import Plan
     from app.models.project import Project
 
@@ -331,19 +426,44 @@ def process_ifc(plan_id: int) -> None:
             return
         try:
             elements, meta = parse_ifc_robust(plan.pdf_path)
+            project = db.get(Project, plan.project_id)
+
+            # Recetas de la org por tipo, para el matching por material.
+            recipes_by_type: dict[str, list[tuple[int, str]]] = {}
+            assemblies_by_id: dict[int, Assembly] = {}
+            if project is not None:
+                for a in db.query(Assembly).filter(
+                        Assembly.organization_id == project.organization_id).all():
+                    recipes_by_type.setdefault(a.applies_to, []).append((a.id, a.name))
+                    assemblies_by_id[a.id] = a
+
+            matched = Counter()
             for e in elements:
                 geom = {"source": "ifc"}
                 if e.get("subtype"):
                     geom["subtype"] = e["subtype"]
-                db.add(DetectedElement(
+                if e.get("material"):
+                    geom["material"] = e["material"]  # visible en el visor/debug
+                de = DetectedElement(
                     plan_id=plan_id, page=1, type=e["type"], geometry=geom,
                     length_m=e.get("length_m"), area_m2=e.get("area_m2"),
                     height_m=e.get("height_m"), source="ifc",
                     is_candidate=False, confidence=1.0,
-                ))
+                )
+                # Material BIM → receta (solo tipos con receta directa; los
+                # rooms usan recetas compuestas room_* y quedan al default).
+                if e.get("material") and e["type"] in ("wall", "column", "beam", "roof", "opening"):
+                    rid = match_recipe_by_material(
+                        e["material"], recipes_by_type.get(e["type"], []))
+                    if rid is not None:
+                        de.assemblies.append(assemblies_by_id[rid])
+                        matched[f"{e['type']}→{assemblies_by_id[rid].name}"] += 1
+                db.add(de)
+            if matched:
+                logger.info("ifc materiales→recetas plan=%s: %s", plan_id, dict(matched))
+
             plan.status = "ready"
             # Autocompleta el Paso 5 desde el modelo (si el proyecto no lo tiene aún).
-            project = db.get(Project, plan.project_id)
             if project is not None and not project.building_info:
                 _autofill_building(project, meta)
             db.commit()
