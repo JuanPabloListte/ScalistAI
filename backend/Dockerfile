@@ -54,6 +54,10 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
+# Cola de trabajos pesados (IFC/vector/ML) — capa separada a propósito: agrega
+# rq sin invalidar la caché del install grande de requirements.txt.
+RUN pip install --no-cache-dir rq==1.16.2
+
 COPY . .
 
 RUN chmod +x /app/scripts/start.sh || true

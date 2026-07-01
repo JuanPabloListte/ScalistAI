@@ -166,7 +166,11 @@ def activate_project(
         getattr(settings, "AUTO_GENERATE_TRAINING_DATA", True)
         and project.allow_training_data
     ):
-        background_tasks.add_task(_snapshot_project_for_training, project.id)
+        from app.core.jobs import enqueue
+
+        # Al worker: rasteriza y genera variaciones sintéticas (CPU-pesado).
+        enqueue(_snapshot_project_for_training, project.id,
+                background_tasks=background_tasks)
 
     return project
 
