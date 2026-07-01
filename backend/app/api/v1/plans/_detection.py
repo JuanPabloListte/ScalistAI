@@ -9,7 +9,8 @@ from app.core.deps import get_current_user
 from app.models import Plan, User
 from app.models.plan_ai_context import PlanAiContext
 from app.schemas.plan import PageRolesUpdate
-from app.services.auto_detect_pipeline import get_ai_status, run_initial_detection
+from app.core.jobs import enqueue
+from app.services.auto_detect_pipeline import get_ai_status, run_initial_detection_sync
 from app.services.ml_detector import get_ml_detector
 
 from ._common import RASTER_DPI
@@ -128,7 +129,9 @@ def set_page_roles(
     db.refresh(plan)
 
     if cleaned and not payload.skip_ai_detection:
-        background_tasks.add_task(run_initial_detection, plan.id)
+        # Al worker: la inferencia ML por página es CPU/GPU-pesada y no debe
+        # competir con los requests. Fallback in-process si no hay cola.
+        enqueue(run_initial_detection_sync, plan.id, background_tasks=background_tasks)
 
     return plan
 

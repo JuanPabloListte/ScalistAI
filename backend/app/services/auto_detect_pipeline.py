@@ -348,6 +348,13 @@ def _pages_for_role(page_roles: dict[str, list[str]], role: str) -> list[int]:
     return sorted(set(pages))
 
 
+def run_initial_detection_sync(plan_id: int) -> None:
+    """Entrada SYNC para el worker de jobs (rq no ejecuta corutinas).
+    También sirve como fallback in-process: BackgroundTasks la corre en su
+    threadpool, donde no hay event loop y asyncio.run es válido."""
+    asyncio.run(run_initial_detection(plan_id))
+
+
 async def run_initial_detection(plan_id: int) -> None:
     """Punto de entrada del background task. Lee `plan.page_roles` y corre cada
     detector **solo sobre sus páginas asignadas**.

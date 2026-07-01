@@ -66,6 +66,41 @@ services:
               capabilities: [gpu]
     command: bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
+  # Worker de trabajos pesados (rq): parseo IFC, import vectorial de PDF,
+  # detección ML, snapshots de training. Misma imagen y volúmenes que el
+  # backend; consume de la cola "scalist-jobs" en Redis. Si este contenedor
+  # no corre, la app degrada sola a ejecutar los jobs in-process (como antes).
+  # OJO dev: no tiene hot-reload — tras cambiar código de servicios,
+  # `docker compose restart worker`.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    shm_size: "2gb"
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      OLLAMA_HOST: ollama
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: rq worker scalist-jobs --url redis://redis:6379
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

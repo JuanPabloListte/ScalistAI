@@ -54,6 +54,7 @@ async def upload_plan(
 
     # IFC (BIM): modelo exacto, sin páginas ni raster. Salta el visor -> presupuesto.
     if is_ifc:
+        from app.core.jobs import enqueue
         from app.services.ifc_import import build_ifc_plan, process_ifc
 
         plan = build_ifc_plan(project_id, contents, file.filename or "modelo.ifc", db)
@@ -61,7 +62,9 @@ async def upload_plan(
             project.wizard_step = 2
         db.commit()
         db.refresh(plan)
-        background_tasks.add_task(process_ifc, plan.id)
+        # Al worker: parsear 200+ MB dentro del proceso web corrompía la
+        # geometría bajo presión de memoria (8 de 92 muros).
+        enqueue(process_ifc, plan.id, background_tasks=background_tasks)
         return plan
 
     # DXF / DWG: se plotea a PDF vectorial; los elementos salen del mapeo de capas.
@@ -115,9 +118,11 @@ async def upload_plan(
 
     background_tasks.add_task(prewarm_plan_pages, plan.id)
     # Si el PDF es vectorial con capas CAD (muros/aberturas/etc.), extrae los
-    # elementos exactos en background. Si no tiene capas, no hace nada.
+    # elementos exactos. Va al worker de jobs: una lámina A0 con miles de
+    # entidades puede tardar minutos de CPU.
+    from app.core.jobs import enqueue
     from app.services.pdf_vector_import import try_vector_import
-    background_tasks.add_task(try_vector_import, plan.id)
+    enqueue(try_vector_import, plan.id, background_tasks=background_tasks)
     return plan
 
 
