@@ -65,23 +65,62 @@ export function Step4Building({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autofilled, setAutofilled] = useState(false);
+  const [waitingBim, setWaitingBim] = useState(false);
 
-  // El IFC precarga tipo + datos en el proyecto de forma ASÍNCRONA (procesa el
-  // modelo en background). Al entrar al paso, re-consultamos el proyecto para
-  // levantar esos datos si el usuario todavía no cargó nada a mano.
+  // El IFC se procesa en un WORKER (un modelo grande tarda minutos). Si el
+  // usuario llega a este paso antes de que termine, los datos todavía no
+  // existen: POLLEAMOS hasta que aparezcan, mostrando un aviso. Si el usuario
+  // carga algo a mano mientras tanto, nunca se lo pisamos (setters
+  // funcionales: solo se puebla si sigue vacío).
   useEffect(() => {
     if (buildingType || Object.keys(values).length > 0) return;
-    api.getProject(project.id)
-      .then((p) => {
-        if (p.building_type) setBuildingType(p.building_type);
-        if (p.building_info && Object.keys(p.building_info).length > 0) {
-          const v: Record<string, string> = {};
-          for (const [k, val] of Object.entries(p.building_info)) v[k] = String(val);
-          setValues(v);
-          setAutofilled(true);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let tries = 0;
+
+    async function poll() {
+      try {
+        const [p, plans] = await Promise.all([
+          api.getProject(project.id),
+          api.listPlans(project.id),
+        ]);
+        if (cancelled) return;
+        const hasData = Boolean(
+          p.building_type || (p.building_info && Object.keys(p.building_info).length > 0),
+        );
+        if (hasData) {
+          if (p.building_type) {
+            setBuildingType((prev) => prev ?? p.building_type ?? null);
+          }
+          if (p.building_info && Object.keys(p.building_info).length > 0) {
+            const v: Record<string, string> = {};
+            for (const [k, val] of Object.entries(p.building_info)) v[k] = String(val);
+            setValues((prev) => {
+              if (Object.keys(prev).length > 0) return prev; // el usuario ya tipeó
+              setAutofilled(true);
+              return v;
+            });
+          }
+          setWaitingBim(false);
+          return;
         }
-      })
-      .catch(() => {});
+        // Sin datos aún: ¿hay un modelo BIM procesándose? → esperar y reintentar.
+        const processing = plans.some(
+          (pl) => pl.status === "processing" &&
+            pl.original_filename?.toLowerCase().endsWith(".ifc"),
+        );
+        setWaitingBim(processing);
+        if (processing && tries < 90) {  // hasta ~6 min para modelos grandes
+          tries += 1;
+          timer = setTimeout(poll, 4000);
+        }
+      } catch {
+        /* sin red o sin datos: el usuario carga a mano, como siempre */
+      }
+    }
+
+    poll();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -122,6 +161,14 @@ export function Step4Building({
       {autofilled && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
           ✓ Datos precargados desde el modelo BIM. Revisalos y completá lo que falte.
+        </div>
+      )}
+
+      {waitingBim && !buildingType && (
+        <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300">
+          <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600 dark:border-sky-600 dark:border-t-sky-300" />
+          Procesando el modelo BIM… los datos de construcción se van a completar solos
+          en un momento (también podés cargarlos a mano y seguir).
         </div>
       )}
 
