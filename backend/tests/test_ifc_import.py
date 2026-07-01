@@ -64,10 +64,13 @@ def _build_ifc(tmp: Path, with_spaces: bool) -> Path:
         qto = run("pset.add_qto", f, product=product, name=name)
         run("pset.edit_qto", f, qto=qto, properties=props)
 
-    # Muro sano: 10 m × 2.8 m por base quantities.
+    # Muro sano: 10 m × 2.8 m por base quantities, con MATERIAL asignado
+    # (para el auto-matching de recetas: piedra ≠ ladrillo).
     wall = run("root.create_entity", f, ifc_class="IfcWall", name="Muro 10m")
     run("spatial.assign_container", f, products=[wall], relating_structure=st1)
     _qto(wall, "Qto_WallBaseQuantities", {"Length": 10.0, "Height": 2.8})
+    piedra = run("material.add_material", f, name="Piedra San Luis")
+    run("material.assign_material", f, products=[wall], material=piedra)
     # Muro ROTO: sin qty ni geometría → el parser debe descartarlo sin excepción.
     broken = run("root.create_entity", f, ifc_class="IfcWall", name="Muro roto")
     run("spatial.assign_container", f, products=[broken], relating_structure=st1)
@@ -148,6 +151,9 @@ def test_parse_sin_spaces_area_estimada():
     assert len(g["wall"]) == 1, f"muros: {g.get('wall')}"
     assert abs(g["wall"][0]["length_m"] - 10.0) < 1e-6
     assert abs(g["wall"][0]["height_m"] - 2.8) < 1e-6
+    # El material BIM viaja en el dict (para el auto-matching de recetas).
+    assert g["wall"][0].get("material") == "Piedra San Luis", \
+        f"material del muro: {g['wall'][0].get('material')!r}"
 
     # Viga por quantity.
     assert len(g["beam"]) == 1 and abs(g["beam"][0]["length_m"] - 4.0) < 1e-6
@@ -201,6 +207,32 @@ def test_parse_ifc_robust_coincide():
     els_b, meta_b = ifc.parse_ifc_robust(path, attempts=2)
     assert len(els_a) == len(els_b)
     assert meta_a["raw"] == meta_b["raw"]
+
+
+def test_match_recipe_by_material():
+    """Matching material BIM → receta: conservador, solo con match inequívoco."""
+    ifc = _load_ifc_import()
+    m = ifc.match_recipe_by_material
+
+    # Recetas de muro típicas de la org (3 de ladrillo + 1 de piedra).
+    walls = [
+        (7, "Muro Ladrillo Hueco 18x18x33"),
+        (16, "Muro Exterior 22cm (ladrillo 18 + revoque)"),
+        (17, "Muro Interior 16cm (ladrillo 12 + revoque)"),
+        (30, "Muro de Piedra vista 20cm"),
+    ]
+    # Piedra: UNA sola receta comparte familia → asigna (el caso de uso real).
+    assert m("Piedra San Luis", walls) == 30
+    assert m("Stone Basalt", walls) == 30           # sinónimo EN
+    # Ladrillo: 3 recetas comparten familia → ambiguo → no asigna (default).
+    assert m("Ladrillo hueco cerámico", walls) is None
+    # Material sin familia conocida → no asigna.
+    assert m("Fenólico 18mm", walls) is None
+    # Acentos y mayúsculas normalizados; "H°A°" es notación de hormigón.
+    assert m("HORMIGÓN ARMADO", [(6, "Columna H°A° 20x20"), (12, "Columna metálica")]) == 6
+    assert m("Hormigón in situ", [(6, "Columna de hormigon armado"), (12, "Columna metálica")]) == 6
+    # Sin recetas candidatas → None (org sin recetas de ese tipo).
+    assert m("Piedra", []) is None
 
 
 def test_autofill_building():
