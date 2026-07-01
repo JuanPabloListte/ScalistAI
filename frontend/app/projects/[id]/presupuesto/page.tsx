@@ -112,8 +112,9 @@ export default function PresupuestoPage() {
           <div className="text-right">
             <p className="text-xs uppercase tracking-wide text-slate-400">Precio de venta (c/ IVA)</p>
             <p className="text-2xl font-semibold text-emerald-400">${fmtARS(data.sale_price)}</p>
-            <p className="mt-1 text-xs text-slate-400">
-              {fmtARS(data.labor_hours)} h·hombre · {fmtARS(data.duration_days)} días estimados
+            <p className="mt-1 text-xs text-slate-400"
+               title="Jornales = días-cuadrilla de esfuerzo (suma de tareas, no calendario). El tiempo real de obra, con tareas en paralelo, se ve en el Cronograma (Gantt).">
+              {fmtARS(data.labor_hours)} h·hombre · {fmtARS(data.duration_days)} jornales de obra
             </p>
           </div>
         </div>
