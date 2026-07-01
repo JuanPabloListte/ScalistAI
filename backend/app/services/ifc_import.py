@@ -13,6 +13,7 @@ No tiene páginas ni raster: el IFC salta el visor → va directo al presupuesto
 """
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Optional
 
@@ -30,6 +31,14 @@ def _num(x) -> float:
         return float(x)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _habitable_storeys(f) -> int:
+    """Cuenta los niveles habitables (excluye techo/tanque/estructura)."""
+    storeys = f.by_type("IfcBuildingStorey")
+    habitable = [st for st in storeys
+                 if not any(k in (st.Name or "").upper() for k in _AUX_STOREY_KW)]
+    return len(habitable) or len(storeys) or 1
 
 
 def parse_ifc(path: str) -> tuple[list[dict], dict]:
@@ -55,15 +64,40 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
                     return float(pset[name])
         return None
 
-    def bbox(el) -> Optional[tuple[float, float, float]]:
-        try:
-            v = ifcopenshell.geom.create_shape(settings, el).geometry.verts
-        except Exception:
-            return None
+    def _verts_bbox(v) -> Optional[tuple[float, float, float]]:
         if not v:
             return None
         xs, ys, zs = v[0::3], v[1::3], v[2::3]
         return ((max(xs) - min(xs)) * scale, (max(ys) - min(ys)) * scale, (max(zs) - min(zs)) * scale)
+
+    # Geometría en LOTE con el iterador: `create_shape` uno-por-uno falla de forma
+    # NO-determinística en archivos grandes (memoria/OpenCASCADE) → devolvía 8 de
+    # 92 muros. El iterador procesa todo de una y es fiable. Guardamos solo el
+    # bbox (dx,dy,dz) por id de entidad; los verts se descartan (memoria liviana).
+    bbox_map: dict[int, tuple[float, float, float]] = {}
+    try:
+        import multiprocessing
+        it = ifcopenshell.geom.iterator(settings, f, max(1, multiprocessing.cpu_count()))
+        if it.initialize():
+            while True:
+                sh = it.get()
+                bb = _verts_bbox(sh.geometry.verts)
+                if bb is not None:
+                    bbox_map[sh.id] = bb
+                if not it.next():
+                    break
+    except Exception:
+        pass  # si el iterador no está disponible, bbox() cae a create_shape puntual
+
+    def bbox(el) -> Optional[tuple[float, float, float]]:
+        bb = bbox_map.get(el.id())
+        if bb is not None:
+            return bb
+        try:  # fallback puntual (elementos que el iterador no tesela)
+            v = ifcopenshell.geom.create_shape(settings, el).geometry.verts
+        except Exception:
+            return None
+        return _verts_bbox(v)
 
     out: list[dict] = []
     raw = Counter()
@@ -96,8 +130,13 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         out.append({"type": "wall", "length_m": length, "height_m": height})
         raw["wall"] += 1
 
-    # --- Losas: ROOF -> cubierta · FLOOR -> ambiente (huella = piso) ---
+    # --- Losas: recolectamos huellas (no sumamos aún) ---
+    # ROOF -> techo. FLOOR -> piso. Guardamos áreas individuales para estimar la
+    # huella del edificio (losa más grande), robusta a losas fragmentadas.
     has_space = len(f.by_type("IfcSpace")) > 0
+    n_floors = _habitable_storeys(f)
+    floor_slab_areas: list[float] = []
+    roof_area = 0.0
     for sl in f.by_type("IfcSlab"):
         pt = str(sl.PredefinedType)
         if pt not in ("FLOOR", "ROOF"):
@@ -113,27 +152,44 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         if area <= 0:
             continue
         if pt == "ROOF":
-            out.append({"type": "roof", "area_m2": area})
-            raw["roof"] += 1
-        elif not has_space:  # sin IfcSpace, la losa de piso aproxima el ambiente
+            roof_area = max(roof_area, area)  # huella de techo = la mayor
+        else:
             cont = UE.get_container(sl)
             storey = (getattr(cont, "Name", "") or "").upper()
             if any(k in storey for k in _AUX_STOREY_KW):
                 continue  # losa de nivel auxiliar (techo/tanque/estructura), no piso habitable
-            out.append({"type": "room", "area_m2": area, "length_m": 4 * area ** 0.5, "height_m": DEFAULT_HEIGHT_M})
-            raw["room(from_slab)"] += 1
+            floor_slab_areas.append(area)
 
-    # --- Ambientes reales (si el export trae IfcSpace) ---
-    for sp in f.by_type("IfcSpace"):
-        area = qty(sp, "NetFloorArea", "GrossFloorArea")
-        if area is None:
-            bb = bbox(sp)
-            area = bb[0] * bb[1] if bb else None
-        else:
-            area = area * scale * scale
-        if area and area > 0:
-            out.append({"type": "room", "area_m2": area, "length_m": 4 * area ** 0.5, "height_m": DEFAULT_HEIGHT_M})
-            raw["room"] += 1
+    if roof_area > 0:
+        out.append({"type": "roof", "area_m2": roof_area})
+        raw["roof"] += 1
+
+    if has_space:
+        # --- Ambientes REALES (el export trae IfcSpace): área exacta ---
+        # Sin base quantities el área sale de geometría (bbox), que a veces
+        # devuelve basura (verts corruptos → área absurda). Se descarta si no es
+        # física: un ambiente > SLAB_MAX_M² (ó no finito) es geometría rota.
+        for sp in f.by_type("IfcSpace"):
+            area = qty(sp, "NetFloorArea", "GrossFloorArea")
+            if area is None:
+                bb = bbox(sp)
+                area = bb[0] * bb[1] if bb else None
+            else:
+                area = area * scale * scale
+            if area and math.isfinite(area) and 0 < area <= SLAB_MAX_M ** 2:
+                out.append({"type": "room", "area_m2": area, "length_m": 4 * area ** 0.5, "height_m": DEFAULT_HEIGHT_M})
+                raw["room"] += 1
+    elif floor_slab_areas:
+        # --- Sin IfcSpace: ESTIMAMOS el área cubierta ---
+        # Las losas de piso suelen venir fragmentadas y hasta duplicadas entre
+        # niveles: sumarlas infla el área varias veces. En su lugar usamos
+        # HUELLA (la losa más grande, ~footprint del edificio) × pisos habitables.
+        # Es determinístico y no depende de la geometría flaky de losas rotas.
+        footprint = max(max(floor_slab_areas), roof_area)
+        for _ in range(max(1, n_floors)):
+            out.append({"type": "room", "area_m2": footprint, "length_m": 4 * footprint ** 0.5,
+                        "height_m": DEFAULT_HEIGHT_M, "subtype": "estimated_floor"})
+            raw["room(estimated)"] += 1
 
     # --- Columnas (sección < 2m) y vigas (sección < 1.5m) ---
     for c in f.by_type("IfcColumn"):
@@ -156,9 +212,6 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             raw["beam"] += 1
 
     # --- Metadata del edificio (para autocompletar el Paso 5) ---
-    storeys = f.by_type("IfcBuildingStorey")
-    habitable = [st for st in storeys
-                 if not any(k in (st.Name or "").upper() for k in _AUX_STOREY_KW)]
     spaces = f.by_type("IfcSpace")
 
     def _sp_name(sp) -> str:
@@ -167,15 +220,54 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
     banos = sum(1 for sp in spaces
                 if any(k in _sp_name(sp) for k in ("BAÑO", "BANO", "BATH", "TOILET", "SANITARIO", "ASEO", "WC")))
     area_cubierta = sum(e.get("area_m2", 0) for e in out if e["type"] == "room")
+    area_estimada = not has_space  # el área cubierta es estimación (huella×pisos), no exacta
 
     meta = {
         "schema": f.schema, "scale": scale, "raw": dict(raw), "n_elements": len(out),
-        "pisos": len(habitable) or len(storeys) or 1,
+        "pisos": n_floors,
+        "area_estimada": area_estimada,
         "ambientes": len(spaces),
         "banos": banos,
         "area_cubierta_m2": round(area_cubierta, 1),
+        # Cantidad REAL de entidades en el archivo (para verificar el rendimiento
+        # del parseo: si sobrevivieron muchas menos, la geometría falló).
+        "entities": {
+            "wall": len(f.by_type("IfcWall")),
+            "beam": len(f.by_type("IfcBeam")),
+            "column": len(f.by_type("IfcColumn")),
+            "slab": len(f.by_type("IfcSlab")),
+        },
     }
     return out, meta
+
+
+def parse_ifc_robust(path: str, attempts: int = 3) -> tuple[list[dict], dict]:
+    """Igual que `parse_ifc`, pero tolerante a fallos transitorios del motor de
+    geometría (que bajo presión de memoria puede fallar en silencio en muchos
+    elementos de archivos grandes). Reintenta y se queda con la mejor corrida:
+    la que más se acerca a la cantidad real de entidades del archivo.
+
+    Corta apenas una corrida rinde bien (>=90% de muros y vigas), para no
+    reparsear de gorra un archivo que ya salió completo.
+    """
+    best: Optional[tuple[list[dict], dict]] = None
+
+    def _yield(meta: dict) -> float:
+        ent, raw = meta.get("entities", {}), meta.get("raw", {})
+        ratios = []
+        for k in ("wall", "beam"):  # tipos que dependen de geometría solida
+            n = ent.get(k, 0)
+            if n:
+                ratios.append(raw.get(k, 0) / n)
+        return min(ratios) if ratios else 1.0
+
+    for _ in range(max(1, attempts)):
+        out, meta = parse_ifc(path)
+        if best is None or _yield(meta) > _yield(best[1]):
+            best = (out, meta)
+        if _yield(meta) >= 0.9:
+            break
+    return best  # type: ignore[return-value]
 
 
 def _autofill_building(project, meta: dict) -> None:
@@ -238,7 +330,7 @@ def process_ifc(plan_id: int) -> None:
         if plan is None:
             return
         try:
-            elements, meta = parse_ifc(plan.pdf_path)
+            elements, meta = parse_ifc_robust(plan.pdf_path)
             for e in elements:
                 geom = {"source": "ifc"}
                 if e.get("subtype"):
