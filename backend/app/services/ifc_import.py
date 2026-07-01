@@ -155,8 +155,47 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             out.append({"type": "beam", "length_m": length})
             raw["beam"] += 1
 
-    meta = {"schema": f.schema, "scale": scale, "raw": dict(raw), "n_elements": len(out)}
+    # --- Metadata del edificio (para autocompletar el Paso 5) ---
+    storeys = f.by_type("IfcBuildingStorey")
+    habitable = [st for st in storeys
+                 if not any(k in (st.Name or "").upper() for k in _AUX_STOREY_KW)]
+    spaces = f.by_type("IfcSpace")
+
+    def _sp_name(sp) -> str:
+        return ((sp.Name or "") + " " + (getattr(sp, "LongName", "") or "")).upper()
+
+    banos = sum(1 for sp in spaces
+                if any(k in _sp_name(sp) for k in ("BAÑO", "BANO", "BATH", "TOILET", "SANITARIO", "ASEO", "WC")))
+    area_cubierta = sum(e.get("area_m2", 0) for e in out if e["type"] == "room")
+
+    meta = {
+        "schema": f.schema, "scale": scale, "raw": dict(raw), "n_elements": len(out),
+        "pisos": len(habitable) or len(storeys) or 1,
+        "ambientes": len(spaces),
+        "banos": banos,
+        "area_cubierta_m2": round(area_cubierta, 1),
+    }
     return out, meta
+
+
+def _autofill_building(project, meta: dict) -> None:
+    """Precarga tipo + datos de construcción del proyecto desde el modelo BIM.
+    Solo llena lo derivable; el resto lo completa el usuario en el Paso 5."""
+    pisos = meta.get("pisos") or 1
+    area = meta.get("area_cubierta_m2") or 0
+    ambientes = meta.get("ambientes") or 0
+    banos = meta.get("banos") or 0
+    if pisos >= 3:
+        project.building_type = "edificio"
+        project.building_info = {"area_total_m2": area, "pisos": pisos}
+    else:
+        project.building_type = "casa"
+        info = {"area_cubierta_m2": area, "pisos": pisos}
+        if ambientes:
+            info["habitaciones"] = ambientes
+        if banos:
+            info["banos"] = banos
+        project.building_info = info
 
 
 def build_ifc_plan(project_id: int, contents: bytes, filename: str, db) -> "object":
@@ -192,13 +231,14 @@ def process_ifc(plan_id: int) -> None:
     from app.core.database import SessionLocal
     from app.models.detected_element import DetectedElement
     from app.models.plan import Plan
+    from app.models.project import Project
 
     with SessionLocal() as db:
         plan = db.get(Plan, plan_id)
         if plan is None:
             return
         try:
-            elements, _meta = parse_ifc(plan.pdf_path)
+            elements, meta = parse_ifc(plan.pdf_path)
             for e in elements:
                 geom = {"source": "ifc"}
                 if e.get("subtype"):
@@ -210,6 +250,10 @@ def process_ifc(plan_id: int) -> None:
                     is_candidate=False, confidence=1.0,
                 ))
             plan.status = "ready"
+            # Autocompleta el Paso 5 desde el modelo (si el proyecto no lo tiene aún).
+            project = db.get(Project, plan.project_id)
+            if project is not None and not project.building_info:
+                _autofill_building(project, meta)
             db.commit()
         except Exception:
             plan.status = "error"
