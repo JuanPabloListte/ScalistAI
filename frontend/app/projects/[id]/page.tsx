@@ -27,6 +27,11 @@ export default function ProjectDetailPage() {
     Promise.all([api.getProject(projectId), api.listPlans(projectId)])
       .then(([proj, planList]) => {
         if (cancelled) return;
+        // IFC (modelo BIM): no tiene visor de planos -> va directo al presupuesto.
+        if (planList.some((p) => p.original_filename?.toLowerCase().endsWith(".ifc"))) {
+          router.replace(`/projects/${projectId}/presupuesto`);
+          return;
+        }
         setProject(proj);
         setPlans(planList);
         const firstReady = planList.find((p) => p.status === "ready");
