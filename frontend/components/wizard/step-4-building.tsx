@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api, type BuildingType, type Project } from "@/lib/api";
 
@@ -64,6 +64,26 @@ export function Step4Building({
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autofilled, setAutofilled] = useState(false);
+
+  // El IFC precarga tipo + datos en el proyecto de forma ASÍNCRONA (procesa el
+  // modelo en background). Al entrar al paso, re-consultamos el proyecto para
+  // levantar esos datos si el usuario todavía no cargó nada a mano.
+  useEffect(() => {
+    if (buildingType || Object.keys(values).length > 0) return;
+    api.getProject(project.id)
+      .then((p) => {
+        if (p.building_type) setBuildingType(p.building_type);
+        if (p.building_info && Object.keys(p.building_info).length > 0) {
+          const v: Record<string, string> = {};
+          for (const [k, val] of Object.entries(p.building_info)) v[k] = String(val);
+          setValues(v);
+          setAutofilled(true);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fields = buildingType ? BUILDING_FIELDS[buildingType] : [];
   const allFilled = fields.every((f) => {
@@ -98,6 +118,12 @@ export function Step4Building({
       <p className="text-sm text-slate-600 dark:text-slate-300">
         Elegí el tipo de obra y completá los datos correspondientes.
       </p>
+
+      {autofilled && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+          ✓ Datos precargados desde el modelo BIM. Revisalos y completá lo que falte.
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {TYPE_OPTIONS.map((opt) => {

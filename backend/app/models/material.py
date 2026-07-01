@@ -1,10 +1,12 @@
 from typing import TYPE_CHECKING
-from sqlalchemy import Column, ForeignKey, Integer, String, Float, Table
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.detected_element import DetectedElement
+    from app.models.construction_entity import ConstructionEntity
+    from app.models.material_group import MaterialGroup
 
 # Material en crudo (ej: "Ladrillo hueco 15cm", "Cemento portland", "Arena")
 class Material(Base):
@@ -16,10 +18,16 @@ class Material(Base):
     category: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., "Mampostería", "Aglomerantes", "Áridos"
     unit: Mapped[str] = mapped_column(String(32), nullable=False)  # e.g., "un", "kg", "m3", "l"
     unit_price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # Producto canónico al que pertenece (agrupa equivalentes entre fuentes/fechas).
+    # Nullable: un material puede no estar agrupado todavía.
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("material_groups.id", ondelete="SET NULL"), nullable=True, index=True)
 
     assembly_materials: Mapped[list["AssemblyMaterial"]] = relationship(
         "AssemblyMaterial", back_populates="material", cascade="all, delete-orphan"
     )
+    group: Mapped["MaterialGroup | None"] = relationship(
+        "MaterialGroup", back_populates="members")
 
 # Sistema Constructivo / Ensamblaje (ej: "Muro Ladrillo Hueco 15cm c/ Revoque")
 # Se asigna a un elemento (ej: "wall", "room", "roof")
@@ -45,6 +53,19 @@ class Assembly(Base):
     # cronograma (Gantt) y la certificación de avance.
     stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     stage_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+
+    # Entidad constructiva a la que esta receta pertenece como alternativa
+    # (ej. Muro → este Assembly = opción "Ladrillo"). Nullable para no romper
+    # assemblies existentes; el seed la backfillea desde applies_to.
+    construction_entity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("construction_entities.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_default_alternative: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
+    construction_entity: Mapped["ConstructionEntity | None"] = relationship(
+        "ConstructionEntity", back_populates="recipes"
+    )
 
     assembly_materials: Mapped[list["AssemblyMaterial"]] = relationship(
         "AssemblyMaterial", back_populates="assembly", cascade="all, delete-orphan"

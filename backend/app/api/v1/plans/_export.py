@@ -98,6 +98,16 @@ def _get_materials_summary_data(plan_id: int, page: int | None, db: Session) -> 
                     qty = (element.area_m2 or 0.0) * am.consumption * (1.0 + am.waste_factor)
                 elif element.type == "column" and assembly.applies_to == "column":
                     qty = (element.area_m2 or 0.0) * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "riostra" and assembly.applies_to == "riostra":
+                    qty = (element.length_m or 0.0) * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "escalera" and assembly.applies_to == "escalera":
+                    qty = (element.area_m2 or 0.0) * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "cloaca" and assembly.applies_to == "cloaca":
+                    qty = (element.length_m or 0.0) * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "electricidad" and assembly.applies_to == "electricidad":
+                    qty = (element.length_m or 0.0) * am.consumption * (1.0 + am.waste_factor)
+                elif element.type == "pozo" and assembly.applies_to == "pozo":
+                    qty = (element.area_m2 or 0.0) * am.consumption * (1.0 + am.waste_factor)
 
                 if qty > 0.0:
                     if material.id not in summary_dict:

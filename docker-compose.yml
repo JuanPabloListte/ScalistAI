@@ -71,6 +71,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     env_file: .env
+    environment:
+      # El watcher de Next no detecta cambios en el bind mount de Windows ->
+      # polling para que el hot-reload funcione sin reiniciar el contenedor.
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     volumes:

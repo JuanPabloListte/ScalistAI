@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
-from app.models import DetectedElement, Plan, Project, User, Material, Assembly, AssemblyMaterial, element_assemblies, Organization  # noqa: F401 — registra tablas
+from app.models import DetectedElement, Plan, Project, User, Material, Assembly, AssemblyMaterial, element_assemblies, Organization, ConstructionEntity, MaterialPriceHistory, LaborRate, LaborRateHistory, Simulation, MacroSeries, CostSettings, MaterialGroup  # noqa: F401 — registra tablas
 
 
 config = context.config
