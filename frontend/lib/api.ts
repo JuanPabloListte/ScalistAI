@@ -442,7 +442,8 @@ export type PriceSeriesProduct = {
   beats_inflation: boolean | null;
 };
 
-export type BudgetCategory = { name: string; total: number; pct: number; per_m2: number | null };
+export type BudgetCategory = { name: string; total: number; pct: number; per_m2: number | null; parametric?: boolean };
+export type ParametricRubro = { key: string; label: string; pct: number };
 export type BudgetTakeoff = {
   wall_ml: number; wall_m2: number; openings: number; doors: number; windows: number;
   columns: number; beams_ml: number; roof_m2: number; cloaca_ml: number;
@@ -452,8 +453,9 @@ export type SalePriceBreakdown = {
   direct: number; overhead: number; profit: number; iva: number; total: number;
 };
 export type ProjectBudgetSummary = {
-  plan_id: number; project_name: string; area_m2: number;
+  plan_id: number; project_name: string; area_m2: number; area_estimated?: boolean;
   materials_total: number; labor_total: number; labor_hours: number; duration_days: number;
+  obra_gris_direct?: number; parametric_total?: number;
   direct_cost: number; sale_price: number; cost_per_m2: number | null;
   breakdown: SalePriceBreakdown;
   categories: BudgetCategory[]; takeoff: BudgetTakeoff;
@@ -611,6 +613,12 @@ export const api = {
     request<CostSettings>("/api/v1/cost-settings", {
       method: "PUT",
       body: JSON.stringify(patch),
+    }),
+  getParametricRubros: () => request<ParametricRubro[]>("/api/v1/parametric-rubros"),
+  updateParametricRubros: (rubros: ParametricRubro[]) =>
+    request<ParametricRubro[]>("/api/v1/parametric-rubros", {
+      method: "PUT",
+      body: JSON.stringify({ rubros }),
     }),
   downloadSimulationXlsx: async (simulationId: number) => {
     const token = getToken();

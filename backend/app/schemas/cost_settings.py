@@ -16,3 +16,13 @@ class CostSettingsUpdate(BaseModel):
     overhead_pct: Optional[float] = None
     profit_pct: Optional[float] = None
     iva_pct: Optional[float] = None
+
+
+class ParametricRubro(BaseModel):
+    key: str
+    label: str
+    pct: float            # fracción sobre la obra gris (0.22 = 22%)
+
+
+class ParametricRubrosUpdate(BaseModel):
+    rubros: list[ParametricRubro]

@@ -33,7 +33,9 @@ from app.models.price_history import MaterialPriceHistory
 from app.schemas.budget_summary import (
     BudgetCategory, BudgetTakeoff, ProjectBudgetSummary, SalePriceBreakdown,
 )
-from app.schemas.cost_settings import CostSettingsRead, CostSettingsUpdate
+from app.schemas.cost_settings import (
+    CostSettingsRead, CostSettingsUpdate, ParametricRubro, ParametricRubrosUpdate,
+)
 from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.schemas.price_series import PriceSeriesPoint, PriceSeriesProduct
 from app.schemas.simulation import (
@@ -282,6 +284,30 @@ def update_cost_settings(
     return CostSettingsRead(overhead_pct=s.overhead_pct, profit_pct=s.profit_pct, iva_pct=s.iva_pct)
 
 
+@router.get("/parametric-rubros", response_model=list[ParametricRubro])
+def get_parametric_rubros(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ParametricRubro]:
+    """Rubros estimados (fundaciones, instalaciones, terminaciones) como % de la
+    obra gris. Lo que el modelo IFC/plano no trae. Editable por org."""
+    rubros = SqlCostSettingsRepo(db).parametric_rubros(user.organization_id)
+    db.commit()
+    return [ParametricRubro(**r) for r in rubros]
+
+
+@router.put("/parametric-rubros", response_model=list[ParametricRubro])
+def update_parametric_rubros(
+    payload: ParametricRubrosUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ParametricRubro]:
+    rubros = SqlCostSettingsRepo(db).update_parametric_rubros(
+        user.organization_id, [r.model_dump() for r in payload.rubros])
+    db.commit()
+    return [ParametricRubro(**r) for r in rubros]
+
+
 _OPENING_TYPES = ("opening", "door", "window", "sliding_door")
 
 
@@ -301,7 +327,7 @@ def budget_summary(
         plan_id, user.organization_id)
     materials_total = float(scenario.totals.materials.amount)
     labor_total = float(scenario.totals.labor_cost.amount)
-    direct = materials_total + labor_total
+    obra_gris = materials_total + labor_total  # costo directo de lo MODELADO
 
     # Rubros: materiales por categoría + Mano de Obra como rubro propio.
     mat_ids = [ln.material_id for ln in scenario.lines]
@@ -323,6 +349,10 @@ def budget_summary(
 
     floor_m2 = _sum(lambda e: e.type == "room", "area_m2")
     roof_m2 = _sum(lambda e: e.type == "roof", "area_m2") or floor_m2
+    # Área estimada (huella×pisos) cuando el IFC no trae ambientes reales.
+    area_estimated = any(
+        (e.geometry or {}).get("subtype") == "estimated_floor"
+        for e in els if e.type == "room")
     openings = [e for e in els if e.type in _OPENING_TYPES]
     doors = sum(1 for e in openings if (e.geometry or {}).get("subtype") in ("door", "sliding_door"))
     windows = sum(1 for e in openings if (e.geometry or {}).get("subtype") == "window")
@@ -340,21 +370,38 @@ def budget_summary(
     )
 
     area = floor_m2
-    cs = SqlCostSettingsRepo(db).get_or_create(user.organization_id)
+    repo = SqlCostSettingsRepo(db)
+    cs = repo.get_or_create(user.organization_id)
+
+    # Rubros PARAMÉTRICOS: lo que el modelo no trae (fundaciones, instalaciones,
+    # terminaciones) estimado como % sobre la obra gris. Estimación explícita,
+    # editable por org; se marcan como parametric=True para diferenciarlos.
+    prubros = repo.parametric_rubros(user.organization_id)
+    parametric_cats = [(r["label"], obra_gris * r["pct"])
+                       for r in prubros if r.get("pct", 0) > 0]
+    parametric_total = float(sum(t for _, t in parametric_cats))
+    direct = obra_gris + parametric_total
     db.commit()
+
     breakdown = build_price(Money(direct), IndirectRates(
         Decimal(str(cs.overhead_pct)), Decimal(str(cs.profit_pct)), Decimal(str(cs.iva_pct))))
 
-    categories = sorted(
-        (BudgetCategory(name=k, total=v, pct=(v / direct * 100 if direct else 0.0),
-                        per_m2=(v / area if area else None)) for k, v in cat_totals.items()),
-        key=lambda c: -c.total)
+    def _cat(name, total, parametric):
+        return BudgetCategory(name=name, total=total,
+                              pct=(total / direct * 100 if direct else 0.0),
+                              per_m2=(total / area if area else None), parametric=parametric)
+
+    modeled = sorted((_cat(k, v, False) for k, v in cat_totals.items()), key=lambda c: -c.total)
+    estimated = sorted((_cat(n, t, True) for n, t in parametric_cats), key=lambda c: -c.total)
+    categories = modeled + estimated  # primero lo modelado, luego los estimados
 
     return ProjectBudgetSummary(
         plan_id=plan_id, project_name=project.name, area_m2=area,
+        area_estimated=area_estimated,
         materials_total=materials_total, labor_total=labor_total,
         labor_hours=float(scenario.totals.labor_hours),
         duration_days=float(scenario.totals.duration_days),
+        obra_gris_direct=obra_gris, parametric_total=parametric_total,
         direct_cost=direct, sale_price=float(breakdown.total.amount),
         cost_per_m2=(direct / area if area else None),
         breakdown=SalePriceBreakdown(

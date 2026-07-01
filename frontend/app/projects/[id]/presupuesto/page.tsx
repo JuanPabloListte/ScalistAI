@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, type ProjectBudgetSummary } from "@/lib/api";
+import { api, type ParametricRubro, type ProjectBudgetSummary } from "@/lib/api";
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -18,6 +18,27 @@ export default function PresupuestoPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [isIfc, setIsIfc] = useState(false);
+  const [rubros, setRubros] = useState<ParametricRubro[] | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
+  const [savingRubros, setSavingRubros] = useState(false);
+
+  async function saveRubros() {
+    if (!rubros) return;
+    setSavingRubros(true);
+    try {
+      await api.updateParametricRubros(rubros);
+      // recargar el presupuesto para reflejar los nuevos totales
+      const plans = await api.listPlans(projectId);
+      const ready = plans.find((p) => p.status === "ready") ?? plans[0];
+      if (ready) setData(await api.getBudgetSummary(ready.id));
+      setShowEditor(false);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setSavingRubros(false);
+    }
+  }
 
   async function download(planId: number, name: string) {
     setDownloading(true);
@@ -37,6 +58,7 @@ export default function PresupuestoPage() {
     async function load() {
       try {
         const plans = await api.listPlans(projectId);
+        setIsIfc(plans.some((p) => p.original_filename?.toLowerCase().endsWith(".ifc")));
         const ready = plans.find((p) => p.status === "ready");
         const proc = plans.find((p) => p.status === "processing");
         // Modelo BIM (IFC) procesándose en background -> esperar y reintentar.
@@ -65,6 +87,10 @@ export default function PresupuestoPage() {
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [projectId]);
 
+  useEffect(() => {
+    api.getParametricRubros().then(setRubros).catch(() => {});
+  }, []);
+
   if (loading) return <div className="p-8 text-slate-500">Calculando presupuesto…</div>;
   if (error) return <div className="p-8 text-red-600">{error}</div>;
   if (processing && !data) {
@@ -83,9 +109,9 @@ export default function PresupuestoPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div className="flex items-center justify-between gap-3">
-        <button onClick={() => router.push(`/projects/${projectId}`)}
+        <button onClick={() => router.push(isIfc ? "/projects" : `/projects/${projectId}`)}
                 className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-          ← Volver al proyecto
+          ← {isIfc ? "Volver a proyectos" : "Volver al proyecto"}
         </button>
         <button
           onClick={() => void download(data.plan_id, data.project_name)}
@@ -106,7 +132,13 @@ export default function PresupuestoPage() {
             <p className="text-4xl font-bold">${fmtARS(data.direct_cost)}</p>
             <p className="mt-1 text-sm text-slate-300">
               {data.cost_per_m2 ? <>${fmtARS(data.cost_per_m2)} /m² · </> : null}
-              {fmtARS(data.area_m2)} m² cubiertos
+              {data.area_estimated ? "≈ " : ""}{fmtARS(data.area_m2)} m² cubiertos
+              {data.area_estimated && (
+                <span className="ml-1 cursor-help text-amber-400/90"
+                      title="El modelo IFC no trae ambientes (IfcSpace), así que el área cubierta es una ESTIMACIÓN: huella del edificio × pisos habitables, no una medida exacta. La estructura y las aberturas sí son exactas. Para área exacta, el modelo Revit necesita Rooms colocados.">
+                  (estimada)
+                </span>
+              )}
             </p>
           </div>
           <div className="text-right">
@@ -137,8 +169,14 @@ export default function PresupuestoPage() {
 
       {/* DESGLOSE POR RUBRO */}
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3 dark:border-slate-800">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Desglose por rubro</h2>
+          {rubros && (
+            <button onClick={() => setShowEditor((v) => !v)}
+                    className="rounded-md border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-300 dark:hover:bg-amber-500/10">
+              {showEditor ? "Cerrar" : "Ajustar estimados"}
+            </button>
+          )}
         </div>
         <table className="w-full text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
@@ -150,28 +188,62 @@ export default function PresupuestoPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {data.categories.map((c, i) => (
-              <tr key={c.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                <td className="px-5 py-2.5">
-                  <span className="text-slate-400">{i + 1}.</span>{" "}
-                  <span className="text-slate-800 dark:text-slate-100">{c.name}</span>
-                </td>
-                <td className="px-3 py-2.5 text-right font-medium text-slate-900 dark:text-white">
-                  ${fmtARS(c.total)}
-                </td>
-                <td className="px-3 py-2.5 text-right text-slate-500">
-                  {c.per_m2 ? `$${fmtARS(c.per_m2)}` : "—"}
-                </td>
-                <td className="px-5 py-2.5">
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 sm:block dark:bg-slate-800">
-                      <div className="h-full rounded-full bg-brand" style={{ width: `${(c.pct / maxPct) * 100}%` }} />
-                    </div>
-                    <span className="w-12 text-right tabular-nums text-slate-500">{c.pct.toFixed(1)}%</span>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {(() => {
+              const firstParam = data.categories.findIndex((c) => c.parametric);
+              return data.categories.flatMap((c, i) => {
+                const rows = [];
+                if (i === firstParam && firstParam > 0) {
+                  rows.push(
+                    <tr key="__subtotal_obragris" className="bg-slate-50 text-xs dark:bg-slate-800/50">
+                      <td className="px-5 py-2 font-semibold uppercase tracking-wide text-slate-500">
+                        Obra gris (del modelo)
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-700 dark:text-slate-200">
+                        ${fmtARS(data.obra_gris_direct ?? 0)}
+                      </td>
+                      <td colSpan={2} className="px-5 py-2 text-right text-amber-600 dark:text-amber-400">
+                        ↓ estimados (no vienen del modelo)
+                      </td>
+                    </tr>,
+                  );
+                }
+                rows.push(
+                  <tr key={c.name}
+                      className={c.parametric
+                        ? "bg-amber-50/40 hover:bg-amber-50 dark:bg-amber-500/[0.04] dark:hover:bg-amber-500/10"
+                        : "hover:bg-slate-50 dark:hover:bg-slate-800/40"}>
+                    <td className="px-5 py-2.5">
+                      <span className="text-slate-400">{i + 1}.</span>{" "}
+                      <span className={c.parametric ? "text-amber-800 dark:text-amber-200" : "text-slate-800 dark:text-slate-100"}>
+                        {c.name}
+                      </span>
+                      {c.parametric && (
+                        <span className="ml-2 cursor-help rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                              title="Rubro estimado como % de la obra gris (el modelo IFC no lo trae). Editable en 'Ajustar estimados'.">
+                          ≈ estimado
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-medium text-slate-900 dark:text-white">
+                      ${fmtARS(c.total)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-500">
+                      {c.per_m2 ? `$${fmtARS(c.per_m2)}` : "—"}
+                    </td>
+                    <td className="px-5 py-2.5">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 sm:block dark:bg-slate-800">
+                          <div className={`h-full rounded-full ${c.parametric ? "bg-amber-400" : "bg-brand"}`}
+                               style={{ width: `${(c.pct / maxPct) * 100}%` }} />
+                        </div>
+                        <span className="w-12 text-right tabular-nums text-slate-500">{c.pct.toFixed(1)}%</span>
+                      </div>
+                    </td>
+                  </tr>,
+                );
+                return rows;
+              });
+            })()}
           </tbody>
           <tfoot className="border-t border-slate-200 dark:border-slate-700">
             <tr className="font-semibold text-slate-900 dark:text-white">
@@ -183,6 +255,52 @@ export default function PresupuestoPage() {
           </tfoot>
         </table>
       </section>
+
+      {/* EDITOR DE RUBROS PARAMÉTRICOS */}
+      {showEditor && rubros && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-5 dark:border-amber-500/30 dark:bg-amber-500/[0.04]">
+          <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">Ajustar estimados</h3>
+          <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-300/80">
+            Rubros que el modelo no trae, estimados como % de la <b>obra gris</b> (${fmtARS(data.obra_gris_direct ?? 0)}).
+            Ajustá los porcentajes según tu experiencia o poné 0 para excluir un rubro.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {rubros.map((r, idx) => (
+              <label key={r.key} className="flex items-center justify-between gap-3 rounded-md bg-white/70 px-3 py-2 text-sm dark:bg-slate-900/40">
+                <span className="text-slate-700 dark:text-slate-200">{r.label}</span>
+                <span className="flex items-center gap-1">
+                  <input type="number" min="0" max="500" step="1"
+                         value={Math.round(r.pct * 100)}
+                         onChange={(e) => {
+                           const v = Math.max(0, Number(e.target.value) || 0) / 100;
+                           setRubros((prev) => prev!.map((x, i) => (i === idx ? { ...x, pct: v } : x)));
+                         }}
+                         className="w-16 rounded border border-slate-300 px-2 py-1 text-right dark:border-slate-600 dark:bg-slate-900" />
+                  <span className="text-slate-400">%</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button onClick={() => void saveRubros()} disabled={savingRubros}
+                    className="rounded-md bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50">
+              {savingRubros ? "Recalculando…" : "Guardar y recalcular"}
+            </button>
+            <button onClick={() => api.getParametricRubros().then(setRubros)}
+                    className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+              Restablecer
+            </button>
+          </div>
+        </section>
+      )}
+
+      {(data.parametric_total ?? 0) > 0 && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/[0.04] dark:text-amber-200">
+          ⚠ Los rubros marcados <b>≈ estimado</b> (${fmtARS(data.parametric_total ?? 0)}) no salen del modelo:
+          son fundaciones, instalaciones y terminaciones calculadas como % de la obra gris. La estructura,
+          mampostería y aberturas sí son cómputo exacto. Ajustá los % con "Ajustar estimados".
+        </p>
+      )}
 
       <p className="text-center text-xs text-slate-400">
         Materiales ${fmtARS(data.materials_total)} · Mano de obra ${fmtARS(data.labor_total)} ·

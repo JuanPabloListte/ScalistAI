@@ -9,6 +9,7 @@ class BudgetCategory(BaseModel):
     total: float
     pct: float           # % sobre el costo directo
     per_m2: float | None  # $/m² de superficie cubierta
+    parametric: bool = False  # True si es rubro estimado (no sale del modelo)
 
 
 class BudgetTakeoff(BaseModel):
@@ -38,12 +39,15 @@ class SalePriceBreakdown(BaseModel):
 class ProjectBudgetSummary(BaseModel):
     plan_id: int
     project_name: str
-    area_m2: float       # superficie cubierta estimada
+    area_m2: float       # superficie cubierta
+    area_estimated: bool = False  # True si el área es estimación (huella×pisos), no medida exacta
     materials_total: float
     labor_total: float
     labor_hours: float
     duration_days: float
-    direct_cost: float
+    obra_gris_direct: float = 0.0   # costo directo de lo MODELADO (estructura+mampostería+aberturas)
+    parametric_total: float = 0.0   # suma de rubros estimados (fundaciones, instalaciones, terminaciones)
+    direct_cost: float              # obra_gris_direct + parametric_total
     sale_price: float
     cost_per_m2: float | None
     breakdown: SalePriceBreakdown
