@@ -46,4 +46,12 @@ class RunSimulation:
             if recipe is not None:
                 recipe_by_entity[entity_type] = recipe
 
-        return self._calculator.calculate(label, measurements, recipe_by_entity)
+        # Recetas asignadas a elementos puntuales (override del default por tipo):
+        # así "esta pared piedra, esta ladrillo" computa bien, no una sola por tipo.
+        override_recipes = {}
+        for rid in {m.recipe_id for m in measurements if m.recipe_id is not None}:
+            recipe = self._catalog.recipe(rid)
+            if recipe is not None:
+                override_recipes[rid] = recipe
+
+        return self._calculator.calculate(label, measurements, recipe_by_entity, override_recipes)

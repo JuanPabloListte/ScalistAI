@@ -46,6 +46,7 @@ class Recipe:
 class ElementMeasurement:
     entity_type: str
     geometry: ElementGeometry
+    recipe_id: Optional[int] = None  # receta asignada a ESTE elemento (override del default por tipo)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,7 @@ class ScenarioCalculator:
         label: str,
         measurements: Iterable[ElementMeasurement],
         recipe_by_entity: dict[str, Recipe],
+        override_recipes: Optional[dict[int, Recipe]] = None,
         currency: str = "ARS",
     ) -> Scenario:
         materials = Money.zero(currency)
@@ -109,7 +111,12 @@ class ScenarioCalculator:
         lines: dict[int, list] = {}
 
         for m in measurements:
-            recipe = recipe_by_entity.get(m.entity_type)
+            # Receta ASIGNADA a este elemento (override) o la default del tipo.
+            recipe = None
+            if m.recipe_id is not None and override_recipes:
+                recipe = override_recipes.get(m.recipe_id)
+            if recipe is None:
+                recipe = recipe_by_entity.get(m.entity_type)
             if recipe is None:
                 continue
             measured = measure_for(m.entity_type, m.geometry)

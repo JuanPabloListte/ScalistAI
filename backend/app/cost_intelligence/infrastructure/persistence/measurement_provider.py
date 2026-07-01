@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.cost_intelligence.application.scenario_ports import MeasurementProvider
 from app.cost_intelligence.domain.measurement import ElementGeometry
@@ -45,7 +45,7 @@ class SqlMeasurementProvider(MeasurementProvider):
         stmt = select(DetectedElement).where(
             DetectedElement.plan_id == plan_id,
             DetectedElement.is_candidate.is_(False),
-        )
+        ).options(selectinload(DetectedElement.assemblies))
         if page is not None:
             stmt = stmt.where(DetectedElement.page == page)
 
@@ -56,12 +56,16 @@ class SqlMeasurementProvider(MeasurementProvider):
             geom = ElementGeometry(
                 length_m=el.length_m, area_m2=el.area_m2, height_m=el.height_m,
             )
+            # Receta asignada a ESTE elemento, por applies_to (override del default).
+            assigned = {a.applies_to: a.id for a in el.assemblies}
             if el.type == "roof":
                 has_roof = True
             elif el.type == "room" and el.area_m2:
                 room_area_sum += el.area_m2
             for entity_type in _TYPE_TO_ENTITIES.get(el.type, ()):
-                out.append(ElementMeasurement(entity_type=entity_type, geometry=geom))
+                out.append(ElementMeasurement(
+                    entity_type=entity_type, geometry=geom,
+                    recipe_id=assigned.get(entity_type)))
 
         # Cubierta/losa DERIVADA: en los DXF reales el techo no está dibujado como
         # polígono cerrado (son arcos/líneas), así que no se puede extraer. Si no
