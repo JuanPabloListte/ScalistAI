@@ -110,6 +110,18 @@ def _build_ifc(tmp: Path, with_spaces: bool) -> Path:
               profile=profile, depth=2.8)
     run("geometry.assign_representation", f, product=col, representation=rep)
 
+    # Artefactos MEP y escalera: el modelo trae los ARTEFACTOS aunque no las
+    # redes. Sanitario + luminaria (FlowTerminal, clasificados por nombre),
+    # toma (proxy genérico con keyword PLUG) y una escalera armada.
+    for nm in ("Sanitary_Toilets_DURAVIT Starck-3", "SASSO 60 round direct-indirect"):
+        ft = run("root.create_entity", f, ifc_class="IfcFlowTerminal", name=nm)
+        run("spatial.assign_container", f, products=[ft], relating_structure=st1)
+    px = run("root.create_entity", f, ifc_class="IfcBuildingElementProxy",
+             name="JARTON_USAWallPlugSmartHome")
+    run("spatial.assign_container", f, products=[px], relating_structure=st1)
+    stair = run("root.create_entity", f, ifc_class="IfcStair", name="Assembled Stair")
+    run("spatial.assign_container", f, products=[stair], relating_structure=st1)
+
     if with_spaces:
         sp1 = run("root.create_entity", f, ifc_class="IfcSpace", name="Baño 1")
         run("aggregate.assign_object", f, products=[sp1], relating_object=st1)
@@ -165,6 +177,13 @@ def test_parse_sin_spaces_area_estimada():
 
     # Techo = huella mayor.
     assert len(g["roof"]) == 1 and abs(g["roof"][0]["area_m2"] - 55.0) < 1e-6
+
+    # Artefactos MEP contados por nombre + escalera sin medidas inventadas.
+    assert len(g.get("sanitario", [])) == 1, f"sanitarios: {g.get('sanitario')}"
+    assert len(g.get("boca_electrica", [])) == 2, \
+        f"bocas (luminaria FlowTerminal + toma proxy): {g.get('boca_electrica')}"
+    assert len(g.get("escalera", [])) == 1
+    assert "area_m2" not in g["escalera"][0], "la escalera no debe inventar área"
 
     # Área ESTIMADA: huella max(losa 50, techo 55)=55 × 2 pisos habitables
     # (TECHOS excluido; si la losa de 999 m² entrara, la huella sería 999).
