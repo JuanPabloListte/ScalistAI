@@ -418,7 +418,22 @@ async def run_initial_detection(plan_id: int) -> None:
     )
 
     # --- Detección Híbrida / ML / LLM ---
-    if ai_provider == "scalist" or not ai_api_key:
+    # El detector LLM (BYOK) está detrás de un flag y apagado por default:
+    # solo detecta muros y su precisión de coordenadas no alcanza para cómputo.
+    # Con el flag apagado, una org con api key configurada usa el camino ML.
+    from app.core.config import settings as app_settings
+
+    use_llm = (
+        app_settings.ENABLE_LLM_DETECTOR
+        and ai_provider != "scalist"
+        and bool(ai_api_key)
+    )
+    if not use_llm:
+        if ai_provider != "scalist" and ai_api_key:
+            logger.info(
+                "llm detector deshabilitado por flag (ENABLE_LLM_DETECTOR=False) "
+                "plan=%s: se usa el camino ML", plan_id,
+            )
         await asyncio.to_thread(
             _run_ml_stage,
             plan_id, page_roles, pdf_path, dpi, page_scales, deleted_pages,

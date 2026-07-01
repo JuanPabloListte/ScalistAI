@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     ML_MODEL_PATH: str = "./storage/models/scalistai_seg_v1.pt"
     # Encender / apagar el detector ML aunque el modelo esté presente.
     ENABLE_ML_DETECTION: bool = True
+    # Detector por LLM externo (BYOK: la org configura su api key de
+    # OpenAI/Gemini/Anthropic). Apagado por default: solo detecta muros y la
+    # precisión de coordenadas de los LLM multimodales no alcanza para cómputo.
+    # El código queda; se puede prender por env para experimentar.
+    ENABLE_LLM_DETECTOR: bool = False
     # Device para PyTorch: "auto" detecta CUDA si está, sino CPU.
     ML_DEVICE: str = "auto"
     # Cuando un usuario activa un proyecto y consintió `allow_training_data`,
