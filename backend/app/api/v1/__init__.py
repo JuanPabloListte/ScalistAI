@@ -4,6 +4,7 @@ from app.api.v1 import (
     admin,
     assemblies,
     auth,
+    cost_intelligence,
     integrations,
     materials,
     plans,
@@ -24,3 +25,4 @@ api_router.include_router(admin.router)
 api_router.include_router(team.router)
 api_router.include_router(organization.router)
 api_router.include_router(ai_providers.router)
+api_router.include_router(cost_intelligence.router)

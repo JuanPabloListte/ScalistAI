@@ -333,6 +333,7 @@ _APPLIES_TO_TYPES: dict[str, set[str]] = {
     "beam": {"beam"}, "column": {"column"}, "roof": {"roof"},
     "riostra": {"riostra"}, "cloaca": {"cloaca"},
     "electricidad": {"electricidad"}, "escalera": {"escalera"},
+    "pozo": {"pozo"},
 }
 
 

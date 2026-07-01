@@ -76,7 +76,7 @@ export function Step2Plan({
       >
         <input
           type="file"
-          accept="application/pdf,.pdf,.dxf,.dwg"
+          accept="application/pdf,.pdf,.dxf,.dwg,.ifc"
           onChange={handleUpload}
           disabled={uploading}
           className="hidden"
@@ -90,7 +90,7 @@ export function Step2Plan({
               : "Hacé clic para elegir un archivo"}
         </span>
         <span className="text-xs text-slate-500 dark:text-slate-400">
-          Máximo 50 MB · archivos .pdf, .dxf o .dwg
+          PDF, DXF o DWG (máx 50 MB) · modelo BIM IFC (máx 500 MB)
         </span>
       </label>
 

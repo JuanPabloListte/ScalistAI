@@ -4527,20 +4527,21 @@ export default function PlanViewerInner({
         <aside className={`w-full shrink-0 flex-col surface p-4 lg:w-80${isMaximized ? " hidden" : " flex"}`}>
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
-              Cómputo
+              Sistemas
             </h3>
             <button
               type="button"
               onClick={downloadXlsx}
               disabled={exporting || summary.length === 0}
-              title="Exportar a Excel"
+              title="Exportar cómputo a Excel"
               className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               {exporting ? "..." : "XLSX"}
             </button>
           </div>
           <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-            Página {page} · cantidades por material
+            Asigná un sistema constructivo a cada tipo de elemento. El presupuesto
+            completo lo ves con el botón “Presupuesto completo”.
           </p>
 
           {/* Sistemas por tipo: asignar un sistema a TODOS los elementos de un
@@ -4592,67 +4593,8 @@ export default function PlanViewerInner({
             </div>
           )}
 
-          {summaryLoading ? (
+          {summaryLoading && (
             <p className="py-4 text-center text-xs text-slate-400">Calculando...</p>
-          ) : summary.length === 0 ? (
-            <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
-              <div>
-                <p className="font-medium">Sin materiales asignados</p>
-                <p className="mt-1">
-                  Asigná materiales a los elementos para ver el cómputo agregado.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="max-h-[420px] flex-1 space-y-2 overflow-y-auto pr-1">
-                {summary.map((item) => (
-                  <div
-                    key={item.material.id}
-                    className="rounded-md border border-slate-100 bg-slate-50/30 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/30"
-                  >
-                    <div className="flex items-start justify-between gap-3 text-sm">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold text-slate-700 dark:text-slate-200">
-                          {item.material.name}
-                        </p>
-                        <p className="text-xs text-slate-400">{item.material.category}</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="font-bold text-brand dark:text-sky-400">
-                          {item.quantity.toLocaleString(undefined, {
-                            minimumFractionDigits: 1,
-                            maximumFractionDigits: 2,
-                          })}
-                          <span className="ml-1 text-xs font-semibold text-slate-500">
-                            {item.unit}
-                          </span>
-                        </p>
-                        {item.subtotal > 0 && (
-                          <p className="text-xs font-medium text-slate-500">
-                            ${item.subtotal.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {summary.some((s) => s.subtotal > 0) && (
-                <div className="mt-3 flex items-center justify-between rounded-md border border-brand/30 bg-sky-50/60 px-3 py-2.5 text-sm font-bold dark:border-sky-800 dark:bg-sky-950/30">
-                  <span className="text-slate-700 dark:text-slate-200">Total estimado</span>
-                  <span className="text-brand dark:text-sky-300">
-                    ${summary.reduce((a, s) => a + s.subtotal, 0).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </div>
-              )}
-            </>
           )}
         </aside>
       </div>

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -123,6 +124,32 @@ def _call_ollama(names: list[str]) -> dict[str, str | None]:
             val = low.get(n.lower())
         out[n] = _parse_answer(val) if isinstance(val, str) else None
     return out
+
+
+def classify_layers_cached(names: list[str]) -> dict[str, str | None]:
+    """Solo lee la caché, sin red. Para endpoints síncronos (ej. dxf-info del
+    wizard) que no pueden bloquear esperando al LLM.
+
+    Devuelve únicamente los nombres que YA tienen decisión cacheada (incluida
+    la decisión None = "otro"); los ausentes son misses a resolver con
+    `prewarm_layers_async`.
+    """
+    cache = _load_cache()
+    return {n: cache[n] for n in {n.strip() for n in names} if n and n in cache}
+
+
+def prewarm_layers_async(names: list[str]) -> None:
+    """Clasifica capas en un hilo daemon (fire-and-forget) para calentar la
+    caché. El próximo fetch del endpoint ya encuentra las sugerencias.
+    Nunca lanza; si Ollama no está, classify_layers degrada solo."""
+    cache = _load_cache()
+    pending = [n for n in {n.strip() for n in names} if n and n not in cache]
+    if not pending:
+        return
+    threading.Thread(
+        target=classify_layers, args=(pending,), daemon=True,
+        name="layer-llm-prewarm",
+    ).start()
 
 
 def classify_layers(names: list[str]) -> dict[str, str | None]:

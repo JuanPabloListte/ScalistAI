@@ -66,6 +66,13 @@ _LAYER_SUGGESTIONS: list[tuple[tuple[str, ...], str]] = [
 # Valor especial del mapeo: la capa se ve en el fondo pero no genera elementos.
 CONTEXT_TYPE = "context"
 
+# Tipos que el LLM puede sugerir para el mapeo DXF. Es la intersección entre lo
+# que responde layer_llm y lo que apply_layer_mapping sabe crear ("pozo" queda
+# afuera: el import DXF no tiene ese tipo de elemento).
+_LLM_SUGGESTIBLE_TYPES = {
+    "wall", "opening", "beam", "column", "roof", "cloaca", "electricidad", "escalera",
+}
+
 # Contrato de geometry.points con el visor (plan-viewer-inner.tsx):
 #   segmento  [x1,y1,x2,y2]             → wall, opening, beam, riostra
 #   polígono  [x1,y1,...] (≥3 puntos)   → room, roof, column
@@ -604,13 +611,26 @@ def _read_dwg(dwg_path: str):
             result = subprocess.run(cmd, capture_output=True, timeout=300, env=env)
         except FileNotFoundError:
             raise HTTPException(422, "xvfb-run no está instalado en el servidor.")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "La conversión del DWG tardó más de 5 minutos (archivo muy "
+                    "grande o corrupto). Exportalo como DXF desde tu CAD "
+                    "(Archivo → Guardar como → DXF AutoCAD 2010) y subí ese."
+                ),
+            )
 
         out_dxf = os.path.join(out_dir, "input.dxf")
         if not os.path.exists(out_dxf) or os.path.getsize(out_dxf) == 0:
             err = result.stderr.decode("utf-8", errors="ignore")[:400]
             raise HTTPException(
                 status_code=400,
-                detail=f"No se pudo convertir el DWG (archivo vacío o no soportado). {err}".strip(),
+                detail=(
+                    "No se pudo convertir el DWG (archivo vacío o versión no "
+                    "soportada). Alternativa: exportalo como DXF desde tu CAD "
+                    f"y subí ese. {err}"
+                ).strip(),
             )
         # readfile carga todo en memoria; tras volver, el doc es independiente del archivo.
         return ezdxf.readfile(out_dxf)
@@ -675,6 +695,27 @@ def get_dxf_info(plan: "Plan") -> dict:
             "entity_count": count,
             "suggested_type": _suggest_type(layer_name),
         })
+
+    # Fallback semántico para capas que ningún keyword reconoció (A-01, TUONG,
+    # LAYER3...): el LLM local ya clasificó nombres así en imports previos
+    # (caché compartida con el flujo PDF). Acá solo se LEE la caché — nunca se
+    # bloquea el endpoint — y los misses se calientan en un hilo de fondo:
+    # el próximo fetch del wizard ya trae la sugerencia.
+    unknown = [l["name"] for l in layers_list if l["suggested_type"] is None]
+    if unknown:
+        try:
+            from app.services.layer_llm import classify_layers_cached, prewarm_layers_async
+
+            cached = classify_layers_cached(unknown)
+            for l in layers_list:
+                t = cached.get(l["name"])
+                if l["suggested_type"] is None and t in _LLM_SUGGESTIBLE_TYPES:
+                    l["suggested_type"] = t
+            misses = [n for n in unknown if n not in cached]
+            if misses:
+                prewarm_layers_async(misses)
+        except Exception as exc:  # noqa: BLE001 — la sugerencia es opcional
+            logger.warning("layer_llm fallback dxf: %s", exc)
 
     visible = _visible_layers_default(doc)
     override_unit = plan.page_scales.get("dxf_unit") if plan.page_scales else None

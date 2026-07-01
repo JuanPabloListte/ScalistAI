@@ -404,6 +404,63 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// --- Motor de Inteligencia de Costos ---
+export type SimulationResult = {
+  id: number;
+  plan_id: number;
+  name: string;
+  status: string;
+  created_at: string;
+  totals: { materials: number; labor_cost: number; labor_hours: number; duration_days: number };
+  lines: { material_id: number; material_name: string; quantity: number; unit: string; unit_cost: number; total: number }[];
+};
+export type ForecastResult = {
+  cost_today: number;
+  projected_cost: number;
+  variation: number;
+  horizon_months: number;
+  monthly_rate: number;
+  method: string;
+};
+export type CostSettings = { overhead_pct: number; profit_pct: number; iva_pct: number };
+export type PriceSeriesPoint = { date: string; price: number; source: string };
+export type PriceSeriesProduct = {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  points: PriceSeriesPoint[];
+  first_price: number;
+  last_price: number;
+  change_pct: number | null;
+  horizon_months: number;
+  projected_price: number;
+  forecast_rate: number;
+  forecast_method: "serie_propia" | "ipc" | "sin_dato";
+  forecast_variation_pct: number;
+  ipc_monthly_rate: number | null;
+  beats_inflation: boolean | null;
+};
+
+export type BudgetCategory = { name: string; total: number; pct: number; per_m2: number | null; parametric?: boolean };
+export type ParametricRubro = { key: string; label: string; pct: number };
+export type BudgetTakeoff = {
+  wall_ml: number; wall_m2: number; openings: number; doors: number; windows: number;
+  columns: number; beams_ml: number; roof_m2: number; cloaca_ml: number;
+  electricidad_ml: number; rooms: number; floor_m2: number;
+};
+export type SalePriceBreakdown = {
+  direct: number; overhead: number; profit: number; iva: number; total: number;
+};
+export type ProjectBudgetSummary = {
+  plan_id: number; project_name: string; area_m2: number; area_estimated?: boolean;
+  materials_total: number; labor_total: number; labor_hours: number; duration_days: number;
+  obra_gris_direct?: number; parametric_total?: number;
+  direct_cost: number; sale_price: number; cost_per_m2: number | null;
+  breakdown: SalePriceBreakdown;
+  categories: BudgetCategory[]; takeoff: BudgetTakeoff;
+};
+
 export const api = {
   register: (email: string, password: string) =>
     request<{ id: number; email: string }>("/api/v1/auth/register", {
@@ -536,6 +593,49 @@ export const api = {
 
   listPlans: (projectId: number) =>
     request<Plan[]>(`/api/v1/projects/${projectId}/plans`),
+
+  // Motor de Inteligencia de Costos
+  runSimulation: (planId: number, name?: string) =>
+    request<SimulationResult>("/api/v1/simulations", {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, name }),
+    }),
+  forecastCost: (simulationId: number, horizonMonths: number) =>
+    request<ForecastResult>("/api/v1/forecast", {
+      method: "POST",
+      body: JSON.stringify({ simulation_id: simulationId, horizon_months: horizonMonths }),
+    }),
+  getCostSettings: () => request<CostSettings>("/api/v1/cost-settings"),
+  getPriceSeries: () => request<PriceSeriesProduct[]>("/api/v1/price-series"),
+  getBudgetSummary: (planId: number) =>
+    request<ProjectBudgetSummary>(`/api/v1/plans/${planId}/budget-summary`),
+  updateCostSettings: (patch: Partial<CostSettings>) =>
+    request<CostSettings>("/api/v1/cost-settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  getParametricRubros: () => request<ParametricRubro[]>("/api/v1/parametric-rubros"),
+  updateParametricRubros: (rubros: ParametricRubro[]) =>
+    request<ParametricRubro[]>("/api/v1/parametric-rubros", {
+      method: "PUT",
+      body: JSON.stringify({ rubros }),
+    }),
+  downloadSimulationXlsx: async (simulationId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/export/${simulationId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`No se pudo exportar (HTTP ${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `presupuesto_${simulationId}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 
   uploadPlan: (projectId: number, file: File) => {
     const formData = new FormData();

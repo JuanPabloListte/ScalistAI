@@ -78,8 +78,9 @@ export default function LandingPage() {
       {/* Navbar Minimalista */}
       <nav className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-6 md:px-12 lg:px-24">
         <div className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-          <div className="h-6 w-6 rounded-md bg-brand-500 flex items-center justify-center">
-            <Layers className="h-4 w-4 text-white" />
+          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="ScalistAI Logo" className="h-full w-full object-contain" />
           </div>
           ScalistAI
         </div>
@@ -135,7 +136,10 @@ export default function LandingPage() {
             <div className="flex">
               {/* Icon rail */}
               <div className="hidden w-12 shrink-0 flex-col items-center gap-5 border-r border-slate-800 bg-slate-900/60 py-4 sm:flex">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500"><Layers className="h-4 w-4 text-white" /></div>
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="Logo" className="h-full w-full object-contain brightness-0 invert opacity-90" />
+                </div>
                 <Folder className="h-5 w-5 text-brand-400" />
                 <Package className="h-5 w-5 text-slate-500" />
                 <Users className="h-5 w-5 text-slate-500" />
@@ -435,7 +439,10 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
             <div>
               <div className="flex items-center gap-2 text-white font-bold text-xl mb-4">
-                <Layers className="h-6 w-6 text-brand-500" />
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="ScalistAI Logo" className="h-full w-full object-contain" />
+                </div>
                 ScalistAI
               </div>
               <p className="text-slate-400 max-w-sm">
