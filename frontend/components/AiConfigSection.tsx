@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { api, type AiConfigRead, type ProviderModelInfo } from "@/lib/api";
 
+// El detector BYOK está deshabilitado del lado del backend
+// (ENABLE_LLM_DETECTOR=False en config.py): solo detecta muros y no llega a
+// la precisión que necesita el cómputo de obra. Se deshabilita también acá
+// para no dejar configurar algo que después no se usa. Reactivar ambos a la vez.
+const BYOK_ENABLED = false;
+
 export function AiConfigSection() {
   const [config, setConfig] = useState<AiConfigRead | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,7 +29,10 @@ export function AiConfigSection() {
     api.getAiConfig()
       .then((data) => {
         setConfig(data);
-        setProvider(data.ai_provider);
+        // Si el backend ignora BYOK (ENABLE_LLM_DETECTOR=False), una org que lo
+        // haya configurado antes no debe quedar con un proveedor deshabilitado
+        // seleccionado y sin forma de volver a "scalist" en el <select>.
+        setProvider(BYOK_ENABLED ? data.ai_provider : "scalist");
         setModelName(data.ai_model_name || "");
       })
       .catch((err) => setError(err.message))
@@ -83,10 +92,10 @@ export function AiConfigSection() {
     <div className="relative w-full max-w-lg">
       <div className="relative z-10 mb-8">
         <h2 className="bg-gradient-to-br from-slate-900 to-slate-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent dark:from-white dark:to-slate-400">
-          Configuración de Inteligencia Artificial (BYOK)
+          Configuración de Inteligencia Artificial
         </h2>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-          Usa tu propio proveedor de IA (Bring Your Own Key) para el análisis avanzado de planos y detección de recintos.
+          Detección automática de muros, recintos y aberturas en tus planos.
         </p>
       </div>
 
@@ -101,13 +110,18 @@ export function AiConfigSection() {
             className="mt-2 w-full max-w-md rounded-xl border border-slate-300/50 bg-white/60 px-4 py-3 text-sm font-medium outline-none transition-all duration-300 hover:border-cyan-500/50 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:border-cyan-400/50 dark:focus:border-cyan-400 dark:focus:ring-cyan-400"
           >
             <option value="scalist">Scalist Native AI (Recomendado)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic Claude</option>
+            <option value="gemini" disabled={!BYOK_ENABLED}>Google Gemini (BYOK) — Próximamente</option>
+            <option value="openai" disabled={!BYOK_ENABLED}>OpenAI (BYOK) — Próximamente</option>
+            <option value="anthropic" disabled={!BYOK_ENABLED}>Anthropic Claude (BYOK) — Próximamente</option>
           </select>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            La opción de traer tu propia clave de IA (BYOK) está temporalmente deshabilitada:
+            hoy solo detecta muros y no llega a la precisión que necesita el cómputo de obra.
+            El motor nativo de Scalist cubre muros, recintos, aberturas, vigas, columnas y más.
+          </p>
         </div>
 
-        {provider !== "scalist" && (
+        {BYOK_ENABLED && provider !== "scalist" && (
           <div className="animate-in fade-in slide-in-from-top-2 duration-300">
             <label className="flex items-center justify-between max-w-md text-sm font-semibold tracking-wide text-slate-700 dark:text-slate-300">
               API Key
@@ -169,7 +183,11 @@ export function AiConfigSection() {
         <div className="pt-4">
           <button
             type="submit"
-            disabled={saving || (provider !== "scalist" && !apiKey && !(config?.has_api_key && config.ai_provider === provider))}
+            disabled={
+              saving ||
+              (!BYOK_ENABLED && provider !== "scalist") ||
+              (provider !== "scalist" && !apiKey && !(config?.has_api_key && config.ai_provider === provider))
+            }
             className="group relative flex items-center gap-2 rounded-xl bg-cyan-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/25 transition-all duration-300 hover:-translate-y-0.5 hover:bg-cyan-500 hover:shadow-cyan-500/40 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-cyan-500/25 dark:focus:ring-offset-slate-900"
           >
             {saving ? (
