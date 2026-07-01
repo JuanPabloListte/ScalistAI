@@ -25,6 +25,11 @@ class BudgetTakeoff(BaseModel):
     electricidad_ml: float
     rooms: int           # ambientes
     floor_m2: float      # superficie de piso (suma de ambientes)
+    # Artefactos contados del modelo BIM (los IFC suelen traer los artefactos
+    # aunque no las redes): informan aunque no computen costo todavía.
+    sanitarios: int = 0        # inodoros, bachas, griferías, duchas...
+    bocas_electricas: int = 0  # luminarias, tomas, llaves
+    escaleras: int = 0
 
 
 class SalePriceBreakdown(BaseModel):

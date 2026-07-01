@@ -98,6 +98,18 @@ _MATERIAL_FAMILIES: list[tuple[str, ...]] = [
 
 _ACCENTS = str.maketrans("ÁÉÍÓÚÜÑ", "AEIOUUN")
 
+# Artefactos MEP por nombre (los IfcFlowTerminal de Revit 2x3 no traen
+# PredefinedType/ObjectType): sanitarios/cocina vs iluminación/tomas.
+# "DIRECT-INDIRECT" es jerga de luminarias (ej. "SASSO 60 direct-indirect").
+_SANITARY_KW = (
+    "SANITARY", "TOILET", "BIDET", "SHOWER", "WASH", "BASIN", "SINK", "TAP",
+    "MIXER", "DRAIN", "PLUMBING", "INODORO", "BACHA", "DUCHA", "GRIFER",
+)
+_ELEC_FIXTURE_KW = (
+    "LIGHT", "LAMP", "LED", "LUMINA", "PLUG", "SOCKET", "OUTLET", "SWITCH",
+    "SPOT", "DIRECT-INDIRECT",
+)
+
 
 def _norm(s: str) -> str:
     return (s or "").upper().translate(_ACCENTS)
@@ -298,6 +310,34 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         if 0 < length <= 30:
             out.append(_with_mat(b, {"type": "beam", "length_m": length}))
             raw["beam"] += 1
+
+    # --- Escaleras: contadas, sin medidas ---
+    # En los "Assembled Stair" de Revit la geometría vive en los IfcMember del
+    # conjunto y no es agregable en coordenadas locales (juntar bboxes locales
+    # de members no da la escalera). Se cuenta el elemento sin inventar área.
+    for st_el in f.by_type("IfcStair"):
+        out.append({"type": "escalera"})
+        raw["escalera"] += 1
+
+    # --- Artefactos MEP: el modelo trae ARTEFACTOS aunque no las redes ---
+    # (típico: inodoros/bachas/griferías y luminarias/tomas colocados, pero
+    # 0 ml de cañería o cable). Se cuentan EXACTOS por nombre. No computan
+    # costo (no hay receta por unidad todavía): informan el resumen y ayudan
+    # a calibrar los rubros paramétricos de instalaciones.
+    for ft in f.by_type("IfcFlowTerminal"):
+        name = _norm(getattr(ft, "Name", "") or "")
+        if any(k in name for k in _SANITARY_KW):
+            out.append({"type": "sanitario"})
+            raw["sanitario"] += 1
+        elif any(k in name for k in _ELEC_FIXTURE_KW):
+            out.append({"type": "boca_electrica"})
+            raw["boca_electrica"] += 1
+    # Tomas/llaves suelen venir como proxies genéricos: solo keywords inequívocas.
+    for px in f.by_type("IfcBuildingElementProxy"):
+        name = _norm(getattr(px, "Name", "") or "")
+        if any(k in name for k in ("PLUG", "SOCKET", "OUTLET", "TOMACORRIENTE")):
+            out.append({"type": "boca_electrica"})
+            raw["boca_electrica"] += 1
 
     # --- Metadata del edificio (para autocompletar el Paso 5) ---
     spaces = f.by_type("IfcSpace")

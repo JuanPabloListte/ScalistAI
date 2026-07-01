@@ -367,6 +367,9 @@ def budget_summary(
         electricidad_ml=_sum(lambda e: e.type == "electricidad", "length_m"),
         rooms=sum(1 for e in els if e.type == "room"),
         floor_m2=floor_m2,
+        sanitarios=sum(1 for e in els if e.type == "sanitario"),
+        bocas_electricas=sum(1 for e in els if e.type == "boca_electrica"),
+        escaleras=sum(1 for e in els if e.type == "escalera"),
     )
 
     area = floor_m2

@@ -161,9 +161,22 @@ export default function PresupuestoPage() {
           <Stat label="Ambientes" value={`${data.takeoff.rooms}`} sub={`${fmtARS(data.takeoff.floor_m2)} m² de piso`} />
           <Stat label="Cubierta" value={`${fmtARS(data.takeoff.roof_m2)} m²`} />
           <Stat label="Columnas" value={`${data.takeoff.columns}`} />
-          <Stat label="Vigas" value={`${fmtARS(data.takeoff.beams_ml)} ml`} />
-          <Stat label="Cloaca" value={`${fmtARS(data.takeoff.cloaca_ml)} ml`} />
-          <Stat label="Eléctrico" value={`${fmtARS(data.takeoff.electricidad_ml)} ml`} />
+          <Stat label="Vigas" value={`${fmtARS(data.takeoff.beams_ml)} ml`}
+                sub={data.takeoff.escaleras ? `+ ${data.takeoff.escaleras} escaleras` : undefined} />
+          <Stat label="Sanitarios"
+                value={data.takeoff.sanitarios
+                  ? `${data.takeoff.sanitarios} artefactos`
+                  : `${fmtARS(data.takeoff.cloaca_ml)} ml`}
+                sub={data.takeoff.sanitarios
+                  ? (data.takeoff.cloaca_ml ? `${fmtARS(data.takeoff.cloaca_ml)} ml de cañería` : "red no modelada (≈ estimada)")
+                  : undefined} />
+          <Stat label="Eléctrico"
+                value={data.takeoff.bocas_electricas
+                  ? `${data.takeoff.bocas_electricas} bocas`
+                  : `${fmtARS(data.takeoff.electricidad_ml)} ml`}
+                sub={data.takeoff.bocas_electricas
+                  ? (data.takeoff.electricidad_ml ? `${fmtARS(data.takeoff.electricidad_ml)} ml de tendido` : "red no modelada (≈ estimada)")
+                  : undefined} />
         </div>
       </section>
 
