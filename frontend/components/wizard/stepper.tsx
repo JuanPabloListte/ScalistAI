@@ -9,18 +9,29 @@ export const WIZARD_STEPS: { num: number; label: string }[] = [
   { num: 6, label: "Revisión" },
 ];
 
+// IFC: modelo BIM exacto -> sin "Páginas" (no tiene láminas).
+export const IFC_WIZARD_STEPS: { num: number; label: string }[] = [
+  { num: 1, label: "Datos" },
+  { num: 2, label: "Modelo BIM" },
+  { num: 4, label: "Ubicación" },
+  { num: 5, label: "Construcción" },
+  { num: 6, label: "Revisión" },
+];
+
 export function Stepper({
   currentStep,
   maxReached,
   onJump,
+  steps = WIZARD_STEPS,
 }: {
   currentStep: number;
   maxReached: number;
   onJump?: (step: number) => void;
+  steps?: { num: number; label: string }[];
 }) {
   return (
     <ol className="my-6 flex items-center gap-2">
-      {WIZARD_STEPS.map((s, idx) => {
+      {steps.map((s, idx) => {
         const active = s.num === currentStep;
         const done = s.num < currentStep || s.num <= maxReached;
         const clickable = onJump && s.num <= maxReached && s.num !== currentStep;
@@ -49,7 +60,7 @@ export function Stepper({
             >
               {s.label}
             </span>
-            {idx < WIZARD_STEPS.length - 1 && (
+            {idx < steps.length - 1 && (
               <div className="ml-1 h-px flex-1 bg-slate-300 dark:bg-slate-600" />
             )}
           </li>

@@ -2,10 +2,6 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
-  Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
-
 import { api, type ProjectBudgetSummary } from "@/lib/api";
 
 function fmtARS(n: number): string {
@@ -20,6 +16,7 @@ export default function PresupuestoPage() {
   const [data, setData] = useState<ProjectBudgetSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   async function download(planId: number, name: string) {
@@ -35,33 +32,53 @@ export default function PresupuestoPage() {
   }
 
   useEffect(() => {
-    api.listPlans(projectId)
-      .then((plans) => {
-        const ready = plans.find((p) => p.status === "ready") ?? plans[0];
-        if (!ready) throw new Error("Este proyecto no tiene un plano listo.");
-        return api.getBudgetSummary(ready.id);
-      })
-      .then(setData)
-      .catch((e) => setError(String(e?.message ?? e)))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function load() {
+      try {
+        const plans = await api.listPlans(projectId);
+        const ready = plans.find((p) => p.status === "ready");
+        const proc = plans.find((p) => p.status === "processing");
+        // Modelo BIM (IFC) procesándose en background -> esperar y reintentar.
+        if (!ready && proc) {
+          if (cancelled) return;
+          setProcessing(true);
+          setLoading(false);
+          timer = setTimeout(load, 4000);
+          return;
+        }
+        const target = ready ?? plans[0];
+        if (!target) throw new Error("Este proyecto no tiene un plano listo.");
+        const d = await api.getBudgetSummary(target.id);
+        if (cancelled) return;
+        setProcessing(false);
+        setData(d);
+        setLoading(false);
+      } catch (e) {
+        if (!cancelled) {
+          setError(String((e as Error)?.message ?? e));
+          setLoading(false);
+        }
+      }
+    }
+    load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [projectId]);
 
   if (loading) return <div className="p-8 text-slate-500">Calculando presupuesto…</div>;
   if (error) return <div className="p-8 text-red-600">{error}</div>;
+  if (processing && !data) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-8 text-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand" />
+        <p className="font-medium text-slate-700 dark:text-slate-200">Procesando el modelo BIM…</p>
+        <p className="text-sm text-slate-500">Extrayendo muros, aberturas, losas y demás. Puede tardar un minuto.</p>
+      </div>
+    );
+  }
   if (!data) return null;
 
   const maxPct = Math.max(...data.categories.map((c) => c.pct), 1);
-
-  // Waterfall costo directo -> precio de venta.
-  const b = data.breakdown;
-  const net = b.direct + b.overhead + b.profit;
-  const waterfall = [
-    { name: "Costo directo", base: 0, value: b.direct, fill: "#6366f1" },
-    { name: "+ Gastos grales.", base: b.direct, value: b.overhead, fill: "#94a3b8" },
-    { name: "+ Beneficio", base: b.direct + b.overhead, value: b.profit, fill: "#94a3b8" },
-    { name: "+ IVA", base: net, value: b.iva, fill: "#cbd5e1" },
-    { name: "Precio de venta", base: 0, value: b.total, fill: "#10b981" },
-  ];
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -101,26 +118,6 @@ export default function PresupuestoPage() {
           </div>
         </div>
       </div>
-
-      {/* GRÁFICO — del costo al precio de venta (lo que el desglose por rubro NO muestra) */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Del costo al precio de venta</h2>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={waterfall} margin={{ top: 16, right: 8, left: 8, bottom: 0 }}>
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} interval={0} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false}
-                     tickFormatter={(v: number) => `$${(v / 1_000_000).toFixed(0)}M`} width={40} />
-              <Tooltip formatter={(v) => `$${fmtARS(Number(v))}`} cursor={{ fill: "#94a3b818" }}
-                       contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-              <Bar dataKey="base" stackId="a" fill="transparent" />
-              <Bar dataKey="value" stackId="a" radius={[4, 4, 0, 0]}>
-                {waterfall.map((d, i) => <Cell key={i} fill={d.fill} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
 
       {/* RESUMEN DE CÓMPUTO (takeoff) */}
       <section>
