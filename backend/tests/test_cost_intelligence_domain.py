@@ -104,6 +104,14 @@ def test_measure_column_pozo_section_quirk():
         assert q is not None and q.unit == "m2" and q.value == Decimal("0.0324")
 
 
+def test_measure_unit_types():
+    # Artefactos por unidad: 1 por elemento, sin necesitar geometría.
+    for t in ("sanitario", "boca_electrica"):
+        q = measure_for(t, ElementGeometry())
+        assert q is not None and q.unit == "un" and q.value == Decimal("1")
+        assert unit_for(t) == "un"
+
+
 def test_measure_unknown_or_missing_returns_none():
     assert measure_for("gas", ElementGeometry(length_m=5.0)) is None
     assert measure_for("wall", ElementGeometry()) is None  # sin geometría

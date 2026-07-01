@@ -50,6 +50,19 @@ RECIPES: dict[tuple[str, str, float, tuple[str, int]], list[tuple[int, float, fl
     ("Piso Porcelanato 60x60", "room_floor", 20.0, TERMINACIONES): [
         (3, 1.0, 0.10), (6, 0.12, 0.10), (13, 0.9, 0.0),
     ],
+    # Artefactos por UNIDAD (los IFC traen los artefactos aunque no las redes).
+    # El material "representativo" (inodoro / caño+cable) es editable por org.
+    ("Artefacto sanitario (prov. y colocación)", "sanitario", 3.0, INSTALACIONES): [
+        (207, 1.0, 0.0),   # inodoro (un) — artefacto representativo, editable
+        (24, 3.0, 0.05),   # caño PVC 110 (ml) — conexión a red
+        (12, 0.5, 0.05),   # caño termofusión (tira 4m) — agua
+        (13, 4.0, 0.0),    # mano de obra (hs)
+    ],
+    ("Boca eléctrica completa (caño+cable+colocación)", "boca_electrica", 8.0, INSTALACIONES): [
+        (25, 5.0, 0.05),   # caño corrugado 22mm (ml)
+        (11, 0.15, 0.05),  # cable 2x2.5 (rollo ~100m → 15m por boca)
+        (13, 2.5, 0.0),    # mano de obra (hs)
+    ],
 }
 
 # Asignación por defecto tipo de elemento → applies_to de la receta.
@@ -74,7 +87,11 @@ def seed(org_id: int, apply_to_plan: int | None) -> None:
         for (name, applies_to, yield_, (stage, stage_order)), lines in RECIPES.items():
             a = Assembly(organization_id=org_id, name=name,
                          applies_to=applies_to, daily_yield=yield_,
-                         stage=stage, stage_order=stage_order)
+                         stage=stage, stage_order=stage_order,
+                         # La PRIMERA receta de cada applies_to es la default:
+                         # sin este flag default_recipe() no la encuentra y el
+                         # rubro no computa (visto con sanitario/boca_electrica).
+                         is_default_alternative=applies_to not in by_applies)
             db.add(a)
             db.flush()
             for mat_id, cons, waste in lines:
