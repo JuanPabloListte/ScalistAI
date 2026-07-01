@@ -41,6 +41,7 @@ class ElementGeometry:
 #   "length"       -> length_m (viga/riostra/cloaca/electricidad/perímetro)
 #   "wall_area"    -> length_m × height_m (muro)
 #   "opening_area" -> length_m × height_m con altura de abertura
+#   "unit"         -> 1 por elemento (artefactos: inodoro, boca eléctrica...)
 _BASIS: dict[str, tuple[str, str]] = {
     "wall": ("wall_area", "m2"),
     "room_floor": ("area", "m2"),
@@ -57,6 +58,8 @@ _BASIS: dict[str, tuple[str, str]] = {
     "electricidad": ("length", "ml"),
     "column": ("area", "m2"),   # sección (quirk: sin altura) — ver módulo docstring
     "pozo": ("area", "m2"),     # ídem
+    "sanitario": ("unit", "un"),        # artefacto sanitario (prov. y colocación)
+    "boca_electrica": ("unit", "un"),   # boca/luminaria/toma completa
 }
 
 
@@ -92,4 +95,7 @@ def measure_for(applies_to: str, geom: ElementGeometry) -> Optional[Quantity]:
         default = _DEFAULT_OPENING_HEIGHT_M if kind == "opening_area" else _DEFAULT_HEIGHT_M
         height = dec(geom.height_m) or default
         return Quantity(length * height, unit)
+    if kind == "unit":
+        # Artefactos: la medida es el elemento en sí (1 unidad), sin geometría.
+        return Quantity(Decimal("1"), unit)
     return None

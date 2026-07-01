@@ -34,6 +34,8 @@ _TYPE_TO_ENTITIES: dict[str, tuple[str, ...]] = {
     "electricidad": ("electricidad",),
     "escalera": ("escalera",),
     "pozo": ("pozo",),
+    "sanitario": ("sanitario",),
+    "boca_electrica": ("boca_electrica",),
 }
 
 
