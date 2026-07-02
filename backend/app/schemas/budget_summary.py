@@ -30,6 +30,15 @@ class BudgetTakeoff(BaseModel):
     sanitarios: int = 0        # inodoros, bachas, griferías, duchas...
     bocas_electricas: int = 0  # luminarias, tomas, llaves
     escaleras: int = 0
+    # Fundaciones del modelo (pilotes/zapatas, a veces camuflados como
+    # columnas/vigas) — computan en el rubro fundación y descuentan el estimado.
+    pilotes: int = 0           # elementos tipo "pozo"
+    zapatas_ml: float = 0.0    # riostras / zapatas corridas (ml)
+    # Acero de armadura exacto (IfcReinforcingBar con atributos).
+    armaduras: int = 0
+    armadura_kg: float = 0.0
+    equipos_hvac: int = 0      # calderas, calefactores
+    cielorrasos: int = 0       # IfcCovering CEILING (informativo)
 
 
 class SalePriceBreakdown(BaseModel):

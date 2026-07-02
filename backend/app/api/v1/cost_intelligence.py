@@ -310,14 +310,18 @@ def update_parametric_rubros(
 
 _OPENING_TYPES = ("opening", "door", "window", "sliding_door")
 
-# Solapamiento rubro paramétrico → categorías de material que el modelo YA
-# computa exacto para esa misma disciplina. El estimado se descuenta de esto
-# para no doble-contar (el % cubría la instalación completa; el modelo aporta
-# los artefactos + su conexión, y el paramétrico queda como la red faltante).
-# Categorías = Material.category de las recetas por unidad (ver seed_assemblies).
-_PARAMETRIC_OVERLAP: dict[str, tuple[str, ...]] = {
-    "inst_electrica": ("Inst. Eléctrica",),
-    "inst_sanitaria": ("Inst. Sanitaria", "Sanitarios"),
+# Solapamiento rubro paramétrico → entity_types que el modelo YA computa
+# exacto para esa misma disciplina. El estimado se descuenta (piso en 0) para
+# no doble-contar: el % cubría la disciplina completa; lo modelado (artefactos,
+# pilotes/zapatas) computa exacto y el paramétrico queda como lo FALTANTE.
+# Descuento por entity_costs del escenario (incluye materiales + MO de esas
+# recetas), no por categoría de material: las fundaciones comparten categorías
+# (áridos, cemento) con toda la obra y el descuento por categoría descontaría
+# de más o de menos.
+_PARAMETRIC_OVERLAP_ENTITIES: dict[str, tuple[str, ...]] = {
+    "inst_electrica": ("boca_electrica", "electricidad"),
+    "inst_sanitaria": ("sanitario", "cloaca"),
+    "fundaciones": ("pozo", "riostra"),
 }
 
 
@@ -380,6 +384,13 @@ def budget_summary(
         sanitarios=sum(1 for e in els if e.type == "sanitario"),
         bocas_electricas=sum(1 for e in els if e.type == "boca_electrica"),
         escaleras=sum(1 for e in els if e.type == "escalera"),
+        pilotes=sum(1 for e in els if e.type == "pozo"),
+        zapatas_ml=_sum(lambda e: e.type == "riostra", "length_m"),
+        armaduras=sum(1 for e in els if e.type == "armadura"),
+        armadura_kg=float(sum((e.geometry or {}).get("kg", 0.0)
+                              for e in els if e.type == "armadura")),
+        equipos_hvac=sum(1 for e in els if e.type == "equipo_hvac"),
+        cielorrasos=sum(1 for e in els if e.type == "cielorraso"),
     )
 
     area = floor_m2
@@ -396,14 +407,15 @@ def budget_summary(
     # descuenta lo ya computado exacto de su disciplina (piso en 0). Así el
     # estimado representa solo la RED faltante, no modelada.
     prubros = repo.parametric_rubros(user.organization_id)
+    entity_costs = getattr(scenario, "entity_costs", {}) or {}
     parametric_cats = []
     for r in prubros:
         pct = r.get("pct", 0)
         if pct <= 0:
             continue
         estimate = obra_gris * pct
-        already_exact = sum(cat_totals.get(c, 0.0)
-                            for c in _PARAMETRIC_OVERLAP.get(r["key"], ()))
+        already_exact = sum(entity_costs.get(e, 0.0)
+                            for e in _PARAMETRIC_OVERLAP_ENTITIES.get(r["key"], ()))
         net = max(0.0, estimate - already_exact)
         if net > 0:
             parametric_cats.append((r["label"], net))

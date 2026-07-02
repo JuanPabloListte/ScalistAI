@@ -177,6 +177,23 @@ export default function PresupuestoPage() {
                 sub={data.takeoff.bocas_electricas
                   ? (data.takeoff.electricidad_ml ? `${fmtARS(data.takeoff.electricidad_ml)} ml de tendido` : "red no modelada (≈ estimada)")
                   : undefined} />
+          {((data.takeoff.pilotes ?? 0) > 0 || (data.takeoff.zapatas_ml ?? 0) > 0) && (
+            <Stat label="Fundaciones"
+                  value={data.takeoff.pilotes ? `${data.takeoff.pilotes} pilotes` : `${fmtARS(data.takeoff.zapatas_ml ?? 0)} ml`}
+                  sub={data.takeoff.pilotes && (data.takeoff.zapatas_ml ?? 0) > 0
+                    ? `+ ${fmtARS(data.takeoff.zapatas_ml ?? 0)} ml de zapatas/riostras`
+                    : "del modelo BIM"} />
+          )}
+          {(data.takeoff.armadura_kg ?? 0) > 0 && (
+            <Stat label="Armadura"
+                  value={`${fmtARS(data.takeoff.armadura_kg ?? 0)} kg`}
+                  sub={`${data.takeoff.armaduras} barras (exacto del modelo)`} />
+          )}
+          {(data.takeoff.equipos_hvac ?? 0) > 0 && (
+            <Stat label="Climatización"
+                  value={`${data.takeoff.equipos_hvac} equipos`}
+                  sub="caldera / calefactores del modelo" />
+          )}
         </div>
       </section>
 

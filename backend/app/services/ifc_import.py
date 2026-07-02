@@ -98,6 +98,17 @@ _MATERIAL_FAMILIES: list[tuple[str, ...]] = [
 
 _ACCENTS = str.maketrans("ÁÉÍÓÚÜÑ", "AEIOUUN")
 
+# Fundaciones CAMUFLADAS: los modeladores suelen dibujar pilotes como columnas
+# ("SOE-Columns" = Support of Excavation) y zapatas corridas como vigas de H°
+# ("Hormigón-Viga rectangular:ZAPATA"). Sin esto se computan como estructura
+# común (rubro equivocado) y el % paramétrico de fundaciones las re-estima.
+_FOUNDATION_KW = ("SOE-", "SOE ", "PILOT", "ZAPATA", "FOOTING", "FUNDAC", "CIMIENT", "CIMENT")
+
+
+def _is_foundation(el) -> bool:
+    return any(k in _norm(getattr(el, "Name", "") or "") for k in _FOUNDATION_KW)
+
+
 # Artefactos MEP por nombre (los IfcFlowTerminal de Revit 2x3 no traen
 # PredefinedType/ObjectType): sanitarios/cocina vs iluminación/tomas.
 # "DIRECT-INDIRECT" es jerga de luminarias (ej. "SASSO 60 direct-indirect").
@@ -292,12 +303,17 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             raw["room(estimated)"] += 1
 
     # --- Columnas (sección < 2m) y vigas (sección < 1.5m) ---
+    # Los PILOTES modelados como columnas (SOE/PILOTE en el nombre) van al tipo
+    # "pozo" (fundación, misma medida: sección); las ZAPATAS modeladas como
+    # vigas van a "riostra" (viga de fundación, por ml). Así computan en el
+    # rubro correcto y se descuentan del % paramétrico de fundaciones.
     for c in f.by_type("IfcColumn"):
         bb = bbox(c)
         if not bb or max(bb[0], bb[1]) > 2.0:
             continue
-        out.append(_with_mat(c, {"type": "column", "area_m2": max(bb[0] * bb[1], 0.01), "height_m": bb[2]}))
-        raw["column"] += 1
+        el_type = "pozo" if _is_foundation(c) else "column"
+        out.append(_with_mat(c, {"type": el_type, "area_m2": max(bb[0] * bb[1], 0.01), "height_m": bb[2]}))
+        raw[el_type] += 1
     for b in f.by_type("IfcBeam"):
         length = qty(b, "Length")
         if length is not None:
@@ -308,8 +324,20 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
                 continue
             length = max(bb[0], bb[1])
         if 0 < length <= 30:
-            out.append(_with_mat(b, {"type": "beam", "length_m": length}))
-            raw["beam"] += 1
+            el_type = "riostra" if _is_foundation(b) else "beam"
+            out.append(_with_mat(b, {"type": el_type, "length_m": length}))
+            raw[el_type] += 1
+    # Fundaciones EXPLÍCITAS (archivos bien exportados): zapatas y pilotes.
+    for ft in list(f.by_type("IfcFooting")) + list(f.by_type("IfcPile")):
+        area = qty(ft, "GrossArea", "NetArea")
+        if area is not None:
+            area = area * scale * scale
+        else:
+            bb = bbox(ft)
+            area = bb[0] * bb[1] if bb else None
+        if area and 0 < area <= 100:
+            out.append(_with_mat(ft, {"type": "pozo", "area_m2": area}))
+            raw["pozo"] += 1
 
     # --- Escaleras: contadas, sin medidas ---
     # En los "Assembled Stair" de Revit la geometría vive en los IfcMember del
@@ -338,6 +366,36 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         if any(k in name for k in ("PLUG", "SOCKET", "OUTLET", "TOMACORRIENTE")):
             out.append({"type": "boca_electrica"})
             raw["boca_electrica"] += 1
+
+    # --- Armaduras (IfcReinforcingBar): acero EXACTO por atributos ---
+    # BarLength × CrossSectionArea × 7850 kg/m³ = kilos reales de hierro.
+    # Sin atributos, la barra se cuenta igual (sin kg, no se inventa).
+    for rb in f.by_type("IfcReinforcingBar"):
+        L = _num(getattr(rb, "BarLength", None)) * scale
+        A = _num(getattr(rb, "CrossSectionArea", None)) * scale * scale
+        d = {"type": "armadura"}
+        if 0 < L <= 100:
+            d["length_m"] = L
+            if A > 0:
+                d["kg"] = L * A * 7850.0
+        out.append(d)
+        raw["armadura"] += 1
+
+    # --- Equipos de climatización (calderas/calefactores): contados ---
+    for dev in f.by_type("IfcEnergyConversionDevice"):
+        out.append({"type": "equipo_hvac"})
+        raw["equipo_hvac"] += 1
+
+    # --- Cielorrasos (IfcCovering CEILING): contados, con área si la traen ---
+    for cv in f.by_type("IfcCovering"):
+        if str(getattr(cv, "PredefinedType", "")) != "CEILING":
+            continue
+        area = qty(cv, "GrossArea", "NetArea", "GrossCeilingArea")
+        d = {"type": "cielorraso"}
+        if area is not None and 0 < area * scale * scale <= SLAB_MAX_M ** 2:
+            d["area_m2"] = area * scale * scale
+        out.append(d)
+        raw["cielorraso"] += 1
 
     # --- Metadata del edificio (para autocompletar el Paso 5) ---
     spaces = f.by_type("IfcSpace")
@@ -484,6 +542,8 @@ def process_ifc(plan_id: int) -> None:
                     geom["subtype"] = e["subtype"]
                 if e.get("material"):
                     geom["material"] = e["material"]  # visible en el visor/debug
+                if e.get("kg"):
+                    geom["kg"] = round(e["kg"], 2)  # acero exacto (armaduras)
                 de = DetectedElement(
                     plan_id=plan_id, page=1, type=e["type"], geometry=geom,
                     length_m=e.get("length_m"), area_m2=e.get("area_m2"),
