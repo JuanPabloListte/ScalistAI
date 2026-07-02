@@ -110,6 +110,36 @@ def _build_ifc(tmp: Path, with_spaces: bool) -> Path:
               profile=profile, depth=2.8)
     run("geometry.assign_representation", f, product=col, representation=rep)
 
+    # Fundaciones CAMUFLADAS (como en los Revit reales): pilote modelado como
+    # columna "SOE-Columns..." y zapata como viga "...:ZAPATA". Deben ir a
+    # pozo/riostra (rubro fundación), no a column/beam.
+    pil = run("root.create_entity", f, ifc_class="IfcColumn", name="SOE-Columns-CRHConcrete")
+    run("spatial.assign_container", f, products=[pil], relating_structure=st1)
+    run("geometry.edit_object_placement", f, product=pil)
+    pprof = f.createIfcRectangleProfileDef("AREA", None, None, 0.4, 0.4)
+    prep = run("geometry.add_profile_representation", f, context=body,
+               profile=pprof, depth=8.0)
+    run("geometry.assign_representation", f, product=pil, representation=prep)
+    zap = run("root.create_entity", f, ifc_class="IfcBeam", name="Hormigón-Viga rectangular:ZAPATA")
+    run("spatial.assign_container", f, products=[zap], relating_structure=st1)
+    _qto(zap, "Qto_BeamBaseQuantities", {"Length": 6.5})
+
+    # Armadura con atributos (kg exactos: L × A × 7850) y una sin atributos
+    # (se cuenta, sin inventar kg).
+    rb = run("root.create_entity", f, ifc_class="IfcReinforcingBar", name="Rebar Bar")
+    rb.BarLength, rb.CrossSectionArea, rb.NominalDiameter = 2.0, 0.0001, 0.011
+    run("spatial.assign_container", f, products=[rb], relating_structure=st1)
+    rb2 = run("root.create_entity", f, ifc_class="IfcReinforcingBar", name="Rebar sin datos")
+    run("spatial.assign_container", f, products=[rb2], relating_structure=st1)
+
+    # Equipo HVAC + cielorraso con área.
+    boiler = run("root.create_entity", f, ifc_class="IfcEnergyConversionDevice", name="Caldera")
+    run("spatial.assign_container", f, products=[boiler], relating_structure=st1)
+    ceil = run("root.create_entity", f, ifc_class="IfcCovering",
+               name="cieloraso revoque", predefined_type="CEILING")
+    run("spatial.assign_container", f, products=[ceil], relating_structure=st1)
+    _qto(ceil, "Qto_CoveringBaseQuantities", {"GrossArea": 22.5})
+
     # Artefactos MEP y escalera: el modelo trae los ARTEFACTOS aunque no las
     # redes. Sanitario + luminaria (FlowTerminal, clasificados por nombre),
     # toma (proxy genérico con keyword PLUG) y una escalera armada.
@@ -185,6 +215,26 @@ def test_parse_sin_spaces_area_estimada():
     assert len(g.get("escalera", [])) == 1
     assert "area_m2" not in g["escalera"][0], "la escalera no debe inventar área"
 
+    # Fundaciones camufladas reclasificadas: el pilote SOE va a "pozo" (no
+    # column) y la viga ZAPATA a "riostra" (no beam).
+    assert len(g.get("pozo", [])) == 1, f"pilote SOE: {g.get('pozo')}"
+    assert abs(g["pozo"][0]["area_m2"] - 0.16) < 0.02      # sección 0.4×0.4
+    assert len(g.get("riostra", [])) == 1
+    assert abs(g["riostra"][0]["length_m"] - 6.5) < 1e-6
+    # La columna y viga comunes NO se contaminaron (siguen 1 y 1).
+    assert len(g["column"]) == 1 and len(g["beam"]) == 1
+
+    # Armaduras: kg exacto solo cuando hay atributos (2.0 × 0.0001 × 7850 = 1.57).
+    arms = g.get("armadura", [])
+    assert len(arms) == 2, f"armaduras: {arms}"
+    with_kg = [a for a in arms if "kg" in a]
+    assert len(with_kg) == 1 and abs(with_kg[0]["kg"] - 1.57) < 0.01
+
+    # HVAC contado; cielorraso con área de quantity.
+    assert len(g.get("equipo_hvac", [])) == 1
+    assert len(g.get("cielorraso", [])) == 1
+    assert abs(g["cielorraso"][0]["area_m2"] - 22.5) < 1e-6
+
     # Área ESTIMADA: huella max(losa 50, techo 55)=55 × 2 pisos habitables
     # (TECHOS excluido; si la losa de 999 m² entrara, la huella sería 999).
     rooms = g["room"]
@@ -196,8 +246,9 @@ def test_parse_sin_spaces_area_estimada():
     assert abs(meta["area_cubierta_m2"] - 110.0) < 0.1
     assert meta["pisos"] == 2 and meta["ambientes"] == 0 and meta["banos"] == 0
 
-    # Conteo real de entidades del archivo (para el retry por yield).
-    assert meta["entities"] == {"wall": 2, "beam": 1, "column": 1, "slab": 3}
+    # Conteo real de entidades del archivo (para el retry por yield). Incluye
+    # las fundaciones camufladas (pilote = IfcColumn, zapata = IfcBeam crudos).
+    assert meta["entities"] == {"wall": 2, "beam": 2, "column": 2, "slab": 3}
 
 
 def test_parse_con_spaces_area_exacta():

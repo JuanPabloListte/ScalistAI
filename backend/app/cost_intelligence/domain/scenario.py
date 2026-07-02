@@ -12,7 +12,7 @@ La mano de obra se separa de los materiales mirando `RecipeComponent.is_labor`
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Iterable, Optional
 
@@ -71,6 +71,10 @@ class Scenario:
     label: str
     totals: ScenarioTotals
     lines: tuple[MaterialLine, ...]
+    # Costo directo (materiales + MO) por entity_type. Permite descontar de los
+    # rubros paramétricos lo que el modelo YA computó exacto de esa disciplina
+    # (fundaciones, artefactos) sin depender de categorías de material.
+    entity_costs: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +113,8 @@ class ScenarioCalculator:
         duration_days = Decimal("0")
         # material_id -> [name, qty_acumulada, unit_price, unit]
         lines: dict[int, list] = {}
+        # entity_type -> costo directo acumulado (materiales + MO), en Decimal.
+        entity_costs: dict[str, Decimal] = {}
 
         for m in measurements:
             # Receta ASIGNADA a este elemento (override) o la default del tipo.
@@ -130,6 +136,9 @@ class ScenarioCalculator:
             for c in recipe.components:
                 qty = base_qty * c.consumption * (_ONE + c.waste)
                 cost = c.unit_price * qty
+                entity_costs[m.entity_type] = (
+                    entity_costs.get(m.entity_type, Decimal("0")) + cost.amount
+                )
                 if c.is_labor:
                     labor_cost = labor_cost + cost
                     if c.unit.lower() == "hs":
@@ -157,4 +166,5 @@ class ScenarioCalculator:
             labor_hours=labor_hours,
             duration_days=duration_days,
         )
-        return Scenario(label=label, totals=totals, lines=material_lines)
+        return Scenario(label=label, totals=totals, lines=material_lines,
+                        entity_costs={k: float(v) for k, v in entity_costs.items()})

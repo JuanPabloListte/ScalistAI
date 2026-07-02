@@ -449,6 +449,9 @@ export type BudgetTakeoff = {
   columns: number; beams_ml: number; roof_m2: number; cloaca_ml: number;
   electricidad_ml: number; rooms: number; floor_m2: number;
   sanitarios?: number; bocas_electricas?: number; escaleras?: number;
+  pilotes?: number; zapatas_ml?: number;
+  armaduras?: number; armadura_kg?: number;
+  equipos_hvac?: number; cielorrasos?: number;
 };
 export type SalePriceBreakdown = {
   direct: number; overhead: number; profit: number; iva: number; total: number;
