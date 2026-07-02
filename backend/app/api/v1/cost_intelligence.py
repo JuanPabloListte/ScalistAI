@@ -310,6 +310,16 @@ def update_parametric_rubros(
 
 _OPENING_TYPES = ("opening", "door", "window", "sliding_door")
 
+# Solapamiento rubro paramétrico → categorías de material que el modelo YA
+# computa exacto para esa misma disciplina. El estimado se descuenta de esto
+# para no doble-contar (el % cubría la instalación completa; el modelo aporta
+# los artefactos + su conexión, y el paramétrico queda como la red faltante).
+# Categorías = Material.category de las recetas por unidad (ver seed_assemblies).
+_PARAMETRIC_OVERLAP: dict[str, tuple[str, ...]] = {
+    "inst_electrica": ("Inst. Eléctrica",),
+    "inst_sanitaria": ("Inst. Sanitaria", "Sanitarios"),
+}
+
 
 @router.get("/plans/{plan_id}/budget-summary", response_model=ProjectBudgetSummary)
 def budget_summary(
@@ -379,9 +389,24 @@ def budget_summary(
     # Rubros PARAMÉTRICOS: lo que el modelo no trae (fundaciones, instalaciones,
     # terminaciones) estimado como % sobre la obra gris. Estimación explícita,
     # editable por org; se marcan como parametric=True para diferenciarlos.
+    #
+    # SOLAPAMIENTO: el % estima la instalación COMPLETA de una disciplina, pero
+    # el modelo BIM ya computa EXACTO una parte (artefactos sanitarios, bocas
+    # eléctricas y sus conexiones). Para no contar dos veces, a cada rubro se le
+    # descuenta lo ya computado exacto de su disciplina (piso en 0). Así el
+    # estimado representa solo la RED faltante, no modelada.
     prubros = repo.parametric_rubros(user.organization_id)
-    parametric_cats = [(r["label"], obra_gris * r["pct"])
-                       for r in prubros if r.get("pct", 0) > 0]
+    parametric_cats = []
+    for r in prubros:
+        pct = r.get("pct", 0)
+        if pct <= 0:
+            continue
+        estimate = obra_gris * pct
+        already_exact = sum(cat_totals.get(c, 0.0)
+                            for c in _PARAMETRIC_OVERLAP.get(r["key"], ()))
+        net = max(0.0, estimate - already_exact)
+        if net > 0:
+            parametric_cats.append((r["label"], net))
     parametric_total = float(sum(t for _, t in parametric_cats))
     direct = obra_gris + parametric_total
     db.commit()
