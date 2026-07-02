@@ -308,11 +308,21 @@ export default function PresupuestoPage() {
       )}
 
       {(data.parametric_total ?? 0) > 0 && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/[0.04] dark:text-amber-200">
-          ⚠ Los rubros marcados <b>≈ estimado</b> (${fmtARS(data.parametric_total ?? 0)}) no salen del modelo:
-          son fundaciones, instalaciones y terminaciones calculadas como % de la obra gris. La estructura,
-          mampostería y aberturas sí son cómputo exacto. Ajustá los % con "Ajustar estimados".
-        </p>
+        <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/[0.04] dark:text-amber-200">
+          <p>
+            ⚠ Los rubros marcados <b>≈ estimado</b> (${fmtARS(data.parametric_total ?? 0)}) no salen del modelo:
+            son fundaciones, instalaciones y terminaciones calculadas como % de la obra gris. La estructura,
+            mampostería y aberturas sí son cómputo exacto. Ajustá los % con "Ajustar estimados".
+          </p>
+          {((data.takeoff.sanitarios ?? 0) > 0 || (data.takeoff.bocas_electricas ?? 0) > 0) && (
+            <p className="text-amber-700/90 dark:text-amber-300/80">
+              Nota: las instalaciones aparecen en dos partes. Lo que el modelo trae
+              (artefactos sanitarios, bocas eléctricas y sus conexiones) se computa <b>exacto</b>
+              en los rubros de arriba; el <b>≈ estimado</b> de instalaciones cubre solo la <b>red faltante</b>
+              (cañerías y cableado generales, no modelados) — ya se le descontó lo exacto, no hay doble conteo.
+            </p>
+          )}
+        </div>
       )}
 
       <p className="text-center text-xs text-slate-400">
