@@ -35,9 +35,9 @@ export default function LoginPage() {
       subtitle="Ingresá para seguir con tus cómputos y presupuestos."
       footer={
         <>
-          ¿No tenés cuenta?{" "}
-          <Link href="/register" className="font-semibold text-brand-400 transition hover:text-brand-300">
-            Creá una gratis
+          ¿Todavía no tenés acceso?{" "}
+          <Link href="/#cotizacion" className="font-semibold text-brand-400 transition hover:text-brand-300">
+            Solicitá una demo
           </Link>
         </>
       }

@@ -7,32 +7,14 @@ from app.core.database import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
 from app.core.deps import get_current_user
-from app.schemas.user import Token, UserCreate, UserRead, UserUpdate
+from app.schemas.user import Token, UserRead, UserUpdate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
-@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def register(payload: UserCreate, db: Session = Depends(get_db)) -> User:
-    existing = db.scalar(select(User).where(User.email == payload.email))
-    if existing:
-        raise HTTPException(status_code=400, detail="El email ya está registrado")
-    from app.models.organization import Organization
-    
-    org = Organization(name=f"Organización de {payload.email}")
-    db.add(org)
-    db.flush()
-    
-    user = User(
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-        organization_id=org.id,
-        org_role="admin"
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+# Sin auto-registro público: las cuentas las crea el superadmin (panel admin →
+# organizaciones/usuarios) o el admin de cada org (Equipo). El onboarding es
+# manual por diseño (el dueño reparte credenciales), así que NO hay endpoint
+# /register.
 
 
 @router.post("/login", response_model=Token)
