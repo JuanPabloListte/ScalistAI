@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ArrowRight } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { AuthShell, authButtonClass, authInputClass } from "@/components/auth/auth-shell";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,44 +30,56 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6">
-      <form
-        onSubmit={handleSubmit}
-        className="flex w-full max-w-sm flex-col gap-4 rounded-xl bg-white p-8 shadow dark:bg-slate-800 dark:shadow-slate-950/50"
-      >
-        <h1 className="text-2xl font-bold text-brand dark:text-sky-400">Ingresar</h1>
-        <input
-          type="email"
-          required
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
-        />
-        <input
-          type="password"
-          required
-          minLength={8}
-          placeholder="Contraseña"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400"
-        />
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-md bg-brand py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-        >
-          {loading ? "Ingresando..." : "Ingresar"}
+    <AuthShell
+      title="Bienvenido de nuevo"
+      subtitle="Ingresá para seguir con tus cómputos y presupuestos."
+      footer={
+        <>
+          ¿No tenés cuenta?{" "}
+          <Link href="/register" className="font-semibold text-brand-400 transition hover:text-brand-300">
+            Creá una gratis
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="font-medium text-slate-300">Email</span>
+          <input
+            type="email"
+            required
+            placeholder="tu@estudio.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={authInputClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="font-medium text-slate-300">Contraseña</span>
+          <input
+            type="password"
+            required
+            minLength={8}
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={authInputClass}
+          />
+        </label>
+        {error && (
+          <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {error}
+          </p>
+        )}
+        <button type="submit" disabled={loading} className={authButtonClass}>
+          {loading ? "Ingresando…" : (
+            <>
+              Ingresar
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
         </button>
-        <a
-          href="/register"
-          className="text-center text-sm text-brand hover:underline dark:text-sky-400"
-        >
-          ¿No tenés cuenta? Registrate
-        </a>
       </form>
-    </main>
+    </AuthShell>
   );
 }
