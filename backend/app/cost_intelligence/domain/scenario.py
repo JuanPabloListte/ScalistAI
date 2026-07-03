@@ -75,6 +75,10 @@ class Scenario:
     # rubros paramétricos lo que el modelo YA computó exacto de esa disciplina
     # (fundaciones, artefactos) sin depender de categorías de material.
     entity_costs: dict = field(default_factory=dict)
+    # Costo por (entity_type -> {material_id: costo}), con material_id=-1 para
+    # la mano de obra. Permite re-agrupar rubros por entidad (ej. mostrar las
+    # fundaciones como línea propia sacándolas de Hormigón/Aceros genéricos).
+    entity_material_costs: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +119,8 @@ class ScenarioCalculator:
         lines: dict[int, list] = {}
         # entity_type -> costo directo acumulado (materiales + MO), en Decimal.
         entity_costs: dict[str, Decimal] = {}
+        # entity_type -> {material_id (o -1 = MO): costo}, para re-agrupar rubros.
+        entity_material: dict[str, dict[int, Decimal]] = {}
 
         for m in measurements:
             # Receta ASIGNADA a este elemento (override) o la default del tipo.
@@ -139,6 +145,9 @@ class ScenarioCalculator:
                 entity_costs[m.entity_type] = (
                     entity_costs.get(m.entity_type, Decimal("0")) + cost.amount
                 )
+                _mid = -1 if c.is_labor else c.material_id
+                em = entity_material.setdefault(m.entity_type, {})
+                em[_mid] = em.get(_mid, Decimal("0")) + cost.amount
                 if c.is_labor:
                     labor_cost = labor_cost + cost
                     if c.unit.lower() == "hs":
@@ -166,5 +175,11 @@ class ScenarioCalculator:
             labor_hours=labor_hours,
             duration_days=duration_days,
         )
-        return Scenario(label=label, totals=totals, lines=material_lines,
-                        entity_costs={k: float(v) for k, v in entity_costs.items()})
+        return Scenario(
+            label=label, totals=totals, lines=material_lines,
+            entity_costs={k: float(v) for k, v in entity_costs.items()},
+            entity_material_costs={
+                e: {mid: float(v) for mid, v in d.items()}
+                for e, d in entity_material.items()
+            },
+        )
