@@ -318,6 +318,10 @@ _OPENING_TYPES = ("opening", "door", "window", "sliding_door")
 # recetas), no por categoría de material: las fundaciones comparten categorías
 # (áridos, cemento) con toda la obra y el descuento por categoría descontaría
 # de más o de menos.
+# Entidades de FUNDACIÓN (pilotes/zapatas, a veces camufladas como columnas/
+# vigas). Se agrupan en su propia línea de costo y se descuentan del estimado.
+_FOUNDATION_ENTITIES = ("pozo", "riostra")
+
 _PARAMETRIC_OVERLAP_ENTITIES: dict[str, tuple[str, ...]] = {
     "inst_electrica": ("boca_electrica", "electricidad"),
     "inst_sanitaria": ("sanitario", "cloaca"),
@@ -350,11 +354,28 @@ def budget_summary(
     mat_ids = [ln.material_id for ln in scenario.lines]
     cat_by_id = dict(db.execute(
         select(Material.id, Material.category).where(Material.id.in_(mat_ids))).all()) if mat_ids else {}
+    # Las FUNDACIONES (pilotes/zapatas del modelo, tipos pozo/riostra) se sacan
+    # de las categorías genéricas (Hormigón/Aceros/MO) y se muestran como línea
+    # propia "Fundaciones (del modelo)" — así el conteo de la card (23 pilotes)
+    # tiene un costo exacto visible, en vez de disuelto. Sin doble conteo: el
+    # mismo monto se descuenta del % paramétrico de fundaciones (más abajo).
+    emc = getattr(scenario, "entity_material_costs", {}) or {}
+
+    def _foundation_share(material_id: int) -> float:
+        return sum(emc.get(e, {}).get(material_id, 0.0) for e in _FOUNDATION_ENTITIES)
+
     cat_totals: dict[str, float] = defaultdict(float)
     for ln in scenario.lines:
-        cat_totals[cat_by_id.get(ln.material_id) or "Otros"] += float(ln.total.amount)
-    if labor_total > 0:
-        cat_totals["Mano de Obra"] += labor_total
+        net = float(ln.total.amount) - _foundation_share(ln.material_id)
+        if net > 1:  # el resto es dust de redondeo (categoría 100% fundación)
+            cat_totals[cat_by_id.get(ln.material_id) or "Otros"] += net
+    net_labor = labor_total - _foundation_share(-1)
+    if net_labor > 1:
+        cat_totals["Mano de Obra"] += net_labor
+    foundation_exact = float(sum(
+        sum(d.values()) for e, d in emc.items() if e in _FOUNDATION_ENTITIES))
+    if foundation_exact > 1:
+        cat_totals["Fundaciones (del modelo)"] += foundation_exact
 
     # Takeoff de cantidades desde los elementos aprobados.
     els = db.scalars(select(DetectedElement).where(
