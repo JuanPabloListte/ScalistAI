@@ -322,6 +322,9 @@ _PARAMETRIC_OVERLAP_ENTITIES: dict[str, tuple[str, ...]] = {
     "inst_electrica": ("boca_electrica", "electricidad"),
     "inst_sanitaria": ("sanitario", "cloaca"),
     "fundaciones": ("pozo", "riostra"),
+    # El modelo ya computa exacto las terminaciones de los ambientes (piso,
+    # cielorraso, revoque+pintura interior, zócalo). El % cubre lo faltante.
+    "terminaciones": ("room_floor", "room_ceiling", "room_wall", "room_perimeter"),
 }
 
 
