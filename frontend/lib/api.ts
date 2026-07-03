@@ -466,11 +466,7 @@ export type ProjectBudgetSummary = {
 };
 
 export const api = {
-  register: (email: string, password: string) =>
-    request<{ id: number; email: string }>("/api/v1/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
+  // Sin registro público: las cuentas las crea el admin (panel / equipo).
 
   login: async (email: string, password: string) => {
     const body = new URLSearchParams({ username: email, password });

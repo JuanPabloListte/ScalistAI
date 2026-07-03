@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 
 import { AppSidebar } from "@/components/app-sidebar";
 
-const PUBLIC_PATHS = ["/", "/login", "/register"];
+const PUBLIC_PATHS = ["/", "/login"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

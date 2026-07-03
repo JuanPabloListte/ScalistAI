@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Marco visual compartido de las pantallas de autenticación (login/register).
- * Reusa la estética de la landing: fondo slate-950 con grilla "blueprint",
+ * Marco visual de la pantalla de login (reutilizable para cualquier pantalla
+ * de autenticación). Reusa la estética de la landing: slate-950 con grilla
  * glows animados y el logo enlazando al home. El formulario se pasa como
  * children dentro de una card oscura.
  */
