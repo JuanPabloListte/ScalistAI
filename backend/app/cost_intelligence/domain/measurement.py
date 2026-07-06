@@ -62,6 +62,11 @@ _BASIS: dict[str, tuple[str, str]] = {
     "boca_electrica": ("unit", "un"),   # boca/luminaria/toma completa
 }
 
+# Fuente de verdad de los `applies_to` válidos de una receta (Assembly). Los
+# schemas los consumen para validar sin quedar desactualizados: agregar un tipo
+# acá lo habilita en toda la app (medición + validación de assemblies).
+VALID_ENTITY_TYPES: tuple[str, ...] = tuple(_BASIS.keys())
+
 
 def unit_for(applies_to: str) -> Optional[str]:
     """Unidad de la medida de esa receta, o None si el tipo no se reconoce."""

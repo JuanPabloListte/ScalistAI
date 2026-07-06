@@ -1,5 +1,13 @@
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.cost_intelligence.domain.measurement import VALID_ENTITY_TYPES
 from app.schemas.material import MaterialRead
+
+# Patrón de `applies_to` derivado de la ÚNICA fuente de verdad (measurement).
+# Antes estaba hardcodeado y quedó desactualizado al sumar tipos nuevos
+# (room_ceiling/pozo/sanitario/boca_electrica): el response_model tiraba 500
+# al serializar recetas ya existentes en la DB.
+_APPLIES_TO_PATTERN = "^(" + "|".join(VALID_ENTITY_TYPES) + ")$"
 
 class AssemblyMaterialBase(BaseModel):
     material_id: int
@@ -17,7 +25,7 @@ class AssemblyMaterialRead(AssemblyMaterialBase):
 
 class AssemblyBase(BaseModel):
     name: str
-    applies_to: str = Field(..., pattern="^(wall|room_floor|room_wall|room_perimeter|opening|opening_perimeter|beam|roof|column|riostra|cloaca|electricidad|escalera)$")
+    applies_to: str = Field(..., pattern=_APPLIES_TO_PATTERN)
     daily_yield: float | None = Field(0.0, description="Rendimiento diario (ej. m2/día)")
     stage: str | None = Field(None, description="Rubro/etapa de obra (ej. Mampostería)")
     stage_order: int | None = Field(0, description="Orden de la etapa en el cronograma")
