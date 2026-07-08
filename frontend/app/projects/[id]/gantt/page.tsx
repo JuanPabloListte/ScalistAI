@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, type Project, type ScheduleResponse, type CashflowPoint } from "@/lib/api";
+import { api, type Project, type ScheduleResponse, type CashflowPoint, type WorkPlanData, type WorkPlanVersion } from "@/lib/api";
 
 const STAGE_COLORS: Record<string, string> = {
   "Fundación": "#0ea5e9",
@@ -29,27 +29,52 @@ export default function ProjectGanttPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [schedule, setSchedule] = useState<ScheduleResponse | null>(null);
+  const [plan, setPlan] = useState<WorkPlanData | null>(null);
+  const [versions, setVersions] = useState<WorkPlanVersion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [crews, setCrews] = useState<number>(1);
 
   const load = useCallback(() => {
     setLoading(true);
-    // Una sola llamada: la curva de inversión se deriva del cronograma en el
-    // cliente (evita recomputar el schedule en el backend → más rápido).
-    Promise.all([
-      api.getProject(projectId),
-      api.getSchedule(projectId, { startDate, crews }),
-    ])
-      .then(([proj, sched]) => {
+    // Regla de verdad única: si el proyecto tiene un plan de obra persistido
+    // (borrador o baseline), manda el plan; el cálculo al vuelo es simulación.
+    Promise.all([api.getProject(projectId), api.getWorkPlan(projectId)])
+      .then(async ([proj, wpState]) => {
         setProject(proj);
-        setSchedule(sched);
+        setVersions(wpState.versions);
+        if (wpState.plan) {
+          setPlan(wpState.plan);
+          setSchedule(wpState.plan);
+        } else {
+          setPlan(null);
+          setSchedule(await api.getSchedule(projectId, { startDate, crews }));
+        }
       })
+      .catch((e) => setError(String((e as Error)?.message ?? e)))
       .finally(() => setLoading(false));
   }, [projectId, startDate, crews]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function act(fn: () => Promise<WorkPlanData>) {
+    setActing(true);
+    setError(null);
+    try {
+      const p = await fn();
+      setPlan(p);
+      setSchedule(p);
+      const st = await api.getWorkPlan(projectId);
+      setVersions(st.versions);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setActing(false);
+    }
+  }
 
   // Curva de inversión: distribuye el costo de cada tarea en sus días y agrega
   // por mes (misma lógica que el backend, pero sin una segunda llamada).
@@ -104,22 +129,94 @@ export default function ProjectGanttPage() {
         </button>
         <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">Cronograma de obra</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Calculado de los cómputos y el rendimiento (rendimiento diario) de cada sistema constructivo.
+          Generado de los cómputos del plano y el rendimiento diario de cada sistema constructivo.
         </p>
       </header>
 
-      {/* Controles */}
+      {/* Estado del plan de obra: simulación → borrador → baseline congelado */}
+      <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border p-4 ${
+        plan?.status === "active"
+          ? "border-green-300 bg-green-50 dark:border-green-500/30 dark:bg-green-500/10"
+          : plan?.status === "draft"
+            ? "border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10"
+            : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      }`}>
+        {plan ? (
+          <>
+            <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${
+              plan.status === "active"
+                ? "bg-green-600 text-white"
+                : "bg-amber-500 text-white"
+            }`}>
+              {plan.status === "active" ? `Plan activo · v${plan.version}` : `Borrador · v${plan.version}`}
+            </span>
+            <span className="text-sm text-slate-600 dark:text-slate-300">
+              {plan.status === "active"
+                ? `Baseline congelado el ${plan.frozen_at ? fmtDate(plan.frozen_at.slice(0, 10)) : "—"} — inmutable; para cambiarlo, reprogramá una versión nueva.`
+                : "Revisá tareas y fechas; al congelar se convierte en el baseline contra el que se mide la obra."}
+            </span>
+            <div className="ml-auto flex gap-2">
+              {plan.status === "draft" && (
+                <>
+                  <button onClick={() => act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))} disabled={acting}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">
+                    Regenerar borrador
+                  </button>
+                  <button onClick={() => act(() => api.freezeWorkPlan(plan.plan_id))} disabled={acting}
+                    className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-50">
+                    {acting ? "…" : "Congelar baseline"}
+                  </button>
+                </>
+              )}
+              {plan.status === "active" && (
+                <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
+                  className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50 dark:text-green-400 dark:hover:bg-green-500/10">
+                  {acting ? "…" : "Reprogramar (nueva versión)"}
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="rounded-full bg-slate-500 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">Simulación</span>
+            <span className="text-sm text-slate-600 dark:text-slate-300">
+              Cronograma calculado al vuelo. Generá el plan de obra para congelar un baseline y empezar el seguimiento.
+            </span>
+            <button onClick={() => act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))} disabled={acting}
+              className="ml-auto rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500 disabled:opacity-50">
+              {acting ? "Generando…" : "Generar plan de obra"}
+            </button>
+          </>
+        )}
+        {versions.length > 1 && (
+          <div className="w-full text-xs text-slate-500 dark:text-slate-400">
+            Historial: {versions.map((v) => `v${v.version} (${v.status === "active" ? "activo" : v.status === "draft" ? "borrador" : "reemplazado"})`).join(" · ")}
+          </div>
+        )}
+        {error && <div className="w-full text-sm text-red-600 dark:text-red-400">{error}</div>}
+      </div>
+
+      {/* Controles (aplican a la simulación o al regenerar el borrador) */}
       <div className="mb-6 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
-          Inicio de obra
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-            className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
-        </label>
-        <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
-          Cuadrillas (paralelo)
-          <input type="number" min={1} max={10} value={crews} onChange={(e) => setCrews(Math.max(1, Number(e.target.value)))}
-            className="mt-1 w-28 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
-        </label>
+        {plan?.status !== "active" && (
+          <>
+            <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              Inicio de obra
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
+            </label>
+            <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              Cuadrillas (paralelo)
+              <input type="number" min={1} max={10} value={crews} onChange={(e) => setCrews(Math.max(1, Number(e.target.value)))}
+                className="mt-1 w-28 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
+            </label>
+          </>
+        )}
+        {plan?.status === "active" && (
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Inicio: <strong>{fmtDate(plan.start_date)}</strong> · Cuadrillas: <strong>{plan.crews}</strong>
+          </div>
+        )}
         {schedule && (
           <div className="ml-auto flex gap-6 text-right">
             <div>

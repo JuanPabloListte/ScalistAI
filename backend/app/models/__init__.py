@@ -12,5 +12,6 @@ from app.models.simulation import Simulation
 from app.models.macro_series import MacroSeries
 from app.models.cost_settings import CostSettings
 from app.models.material_group import MaterialGroup
+from app.models.work_plan import ActualCost, ProgressEntry, WorkPlan, WorkTask
 
-__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries", "CostSettings", "MaterialGroup"]
+__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries", "CostSettings", "MaterialGroup", "WorkPlan", "WorkTask", "ProgressEntry", "ActualCost"]
