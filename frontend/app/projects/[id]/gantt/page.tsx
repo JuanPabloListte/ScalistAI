@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, type Project, type ScheduleResponse, type CashflowPoint, type WorkPlanData, type WorkPlanVersion } from "@/lib/api";
+import { api, type Project, type ScheduleResponse, type CashflowPoint, type WorkPlanData, type WorkPlanVersion, type WorkProgress } from "@/lib/api";
 
 const STAGE_COLORS: Record<string, string> = {
   "Fundación": "#0ea5e9",
@@ -31,6 +31,7 @@ export default function ProjectGanttPage() {
   const [schedule, setSchedule] = useState<ScheduleResponse | null>(null);
   const [plan, setPlan] = useState<WorkPlanData | null>(null);
   const [versions, setVersions] = useState<WorkPlanVersion[]>([]);
+  const [progress, setProgress] = useState<WorkProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +50,9 @@ export default function ProjectGanttPage() {
         if (wpState.plan) {
           setPlan(wpState.plan);
           setSchedule(wpState.plan);
+          if (wpState.plan.status === "active") {
+            api.getWorkProgress(projectId).then(setProgress).catch(() => setProgress(null));
+          }
         } else {
           setPlan(null);
           setSchedule(await api.getSchedule(projectId, { startDate, crews }));
@@ -169,10 +173,16 @@ export default function ProjectGanttPage() {
                 </>
               )}
               {plan.status === "active" && (
-                <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
-                  className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50 dark:text-green-400 dark:hover:bg-green-500/10">
-                  {acting ? "…" : "Reprogramar (nueva versión)"}
-                </button>
+                <>
+                  <Link href={`/projects/${projectId}/obra`}
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500">
+                    Registrar avances →
+                  </Link>
+                  <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
+                    className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50 dark:text-green-400 dark:hover:bg-green-500/10">
+                    {acting ? "…" : "Reprogramar (nueva versión)"}
+                  </button>
+                </>
               )}
             </div>
           </>
@@ -245,21 +255,38 @@ export default function ProjectGanttPage() {
           {/* Gantt */}
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="min-w-[760px]">
+              {/* Línea de HOY (solo con plan congelado: hay fechas reales) */}
               {tasks.map((t) => {
                 const color = STAGE_COLORS[t.stage] || fallbackColor;
+                const prog = progress?.tasks.find((p) => p.name === t.assembly);
                 return (
                   <div key={t.assembly} className="flex items-center gap-4 border-b border-slate-100 py-3 last:border-0 dark:border-slate-800/60">
                     <div className="w-64 shrink-0">
-                      <div className="font-semibold text-slate-800 dark:text-slate-200">{t.assembly}</div>
+                      <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
+                        <span className="truncate">{t.assembly}</span>
+                        {prog && prog.pct > 0 && (
+                          <span className={`shrink-0 rounded px-1.5 text-[10px] font-bold ${prog.pct >= 100 ? "bg-green-500/15 text-green-600" : "bg-brand-500/15 text-brand-600 dark:text-brand-400"}`}>
+                            {prog.pct}%
+                          </span>
+                        )}
+                        {prog && prog.delay_days > 0 && (
+                          <span className="shrink-0 rounded bg-red-500/15 px-1.5 text-[10px] font-bold text-red-600 dark:text-red-400">+{prog.delay_days}d</span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 text-xs text-slate-500">
                         <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
                         {t.stage} · {t.quantity.toLocaleString("es-AR")} {t.unit} · {t.duration_days}d
                       </div>
                     </div>
                     <div className="relative h-7 flex-1 rounded bg-slate-100 dark:bg-slate-800">
-                      <div className="absolute flex h-full items-center justify-end rounded-md px-2 text-[10px] font-semibold text-white shadow-sm"
+                      <div className="absolute flex h-full items-center justify-end overflow-hidden rounded-md px-2 text-[10px] font-semibold text-white shadow-sm"
                         style={{ ...barStyle(t.start_date, t.duration_days), background: color }}
-                        title={`${fmtDate(t.start_date)} → ${fmtDate(t.end_date)} · $${fmtARS(t.cost)}`}>
+                        title={`${fmtDate(t.start_date)} → ${fmtDate(t.end_date)} · $${fmtARS(t.cost)}${prog ? ` · avance real ${prog.pct}%` : ""}`}>
+                        {/* barra doble: el AVANCE REAL como franja inferior clara */}
+                        {prog && prog.pct > 0 && (
+                          <div className="absolute bottom-0 left-0 h-1.5 rounded-bl-md bg-white/90"
+                               style={{ width: `${Math.min(100, prog.pct)}%` }} />
+                        )}
                         ${fmtARS(t.cost)}
                       </div>
                     </div>
