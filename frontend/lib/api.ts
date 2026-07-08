@@ -331,6 +331,29 @@ export type WorkPlanState = {
   versions: WorkPlanVersion[];
 };
 
+export type TaskProgress = {
+  task_id: number; name: string; stage: string; stage_order: number;
+  qty_planned: number; qty_done: number; unit: string; pct: number;
+  planned_start: string; planned_end: string; projected_end: string;
+  delay_days: number; real_yield: number | null; cost_planned: number;
+  status: string; n_entries: number;
+};
+
+export type WorkProgress = {
+  plan_id: number; version: number; as_of: string;
+  tasks: TaskProgress[];
+  stages: { stage: string; stage_order: number; pct: number; ev: number;
+            cost_planned: number; delay_days: number; n_tareas: number }[];
+  totals: { pct_fisico: number; ev: number; pv: number; bac: number;
+            spi: number | null; delay_days: number;
+            planned_end: string; projected_end: string };
+};
+
+export type ProgressEntryRow = {
+  id: number; date: string; qty_done: number; note: string | null;
+  created_at: string | null;
+};
+
 // ---- Admin / Team ----
 
 export type OrgUser = {
@@ -947,6 +970,17 @@ export const api = {
     request<WorkPlanData>(`/api/v1/work-plans/${planId}/freeze`, { method: "POST" }),
   rebaselineWorkPlan: (projectId: number) =>
     request<WorkPlanData>(`/api/v1/projects/${projectId}/work-plan/rebaseline`, { method: "POST" }),
+  getWorkProgress: (projectId: number) =>
+    request<WorkProgress>(`/api/v1/projects/${projectId}/work-progress`),
+  addProgress: (taskId: number, data: { qtyDone: number; date?: string; note?: string }) =>
+    request<WorkProgress>(`/api/v1/work-tasks/${taskId}/progress`, {
+      method: "POST",
+      body: JSON.stringify({ qty_done: data.qtyDone, date: data.date, note: data.note }),
+    }),
+  listProgress: (taskId: number) =>
+    request<ProgressEntryRow[]>(`/api/v1/work-tasks/${taskId}/progress`),
+  deleteProgress: (entryId: number) =>
+    request<void>(`/api/v1/work-progress/${entryId}`, { method: "DELETE" }),
 
   // ----- Cronograma (Gantt) + curva de inversión -----
   getSchedule: (projectId: number, opts?: { startDate?: string; crews?: number; overlapPct?: number }) => {

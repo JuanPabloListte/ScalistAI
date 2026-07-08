@@ -117,6 +117,32 @@ def test_full_lifecycle():
         assert draft2.status == "superseded" and clone.status == "active"
         versions = wp.list_versions(project.id, db)
         assert [v.status for v in versions] == ["active", "superseded"]
+
+        # --- Etapa 2: avance físico por CANTIDADES ---
+        import datetime as _dt
+
+        from app.models.work_plan import ProgressEntry
+        from app.services.work_progress import plan_progress
+
+        s3 = wp.serialize(clone)
+        muro2 = next(t for t in s3["tasks"] if t["unit"] == "m²" and abs(t["quantity"] - 28.0) < 0.1)
+        today = _dt.date(2026, 8, 5)
+        # 2 días de trabajo: 8 + 6 = 14 m² de 28 → 50%, rinde 7 m²/día
+        db.add(ProgressEntry(task_id=muro2["id"], date=_dt.date(2026, 8, 3), qty_done=8))
+        db.add(ProgressEntry(task_id=muro2["id"], date=_dt.date(2026, 8, 4), qty_done=6))
+        db.flush()
+        db.refresh(clone)
+        prog = plan_progress(clone, db, today=today)
+        tp = next(t for t in prog["tasks"] if t["task_id"] == muro2["id"])
+        assert tp["pct"] == 50.0 and tp["qty_done"] == 14.0
+        assert tp["real_yield"] == 7.0 and tp["status"] == "en curso"
+        # proyección: faltan 14 m² a 7/día = 2 días desde hoy (ancla max(último, hoy))
+        assert tp["projected_end"] == (today + _dt.timedelta(days=2)).isoformat()
+        # EV de obra: pct ponderado por costo (el muro pesa lo suyo, no 50% plano)
+        totals = prog["totals"]
+        assert 0 < totals["pct_fisico"] <= 50.0
+        assert abs(totals["ev"] - sum(
+            t["cost_planned"] * t["pct"] / 100 for t in prog["tasks"])) < 0.01
     finally:
         db.rollback()
         db.close()

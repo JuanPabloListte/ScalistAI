@@ -122,6 +122,101 @@ def rebaseline_plan(
     return wp.serialize(plan)
 
 
+class ProgressCreate(BaseModel):
+    date: Optional[str] = None      # ISO; default hoy
+    qty_done: float = Field(..., gt=0)
+    note: Optional[str] = None
+
+
+@router.get("/projects/{project_id}/work-progress")
+def get_work_progress(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Avance físico del plan ACTIVO: % por tarea/etapa/obra (valor ganado),
+    rendimiento real observado y fin proyectado. 404 si no hay baseline."""
+    from app.services.work_progress import plan_progress
+
+    _project_guard(project_id, db, user)
+    active = next((p for p in wp.list_versions(project_id, db)
+                   if p.status == "active"), None)
+    if active is None:
+        raise HTTPException(status_code=404,
+                            detail="No hay baseline activo: congelá el plan de obra primero.")
+    db.refresh(active)  # carga tasks
+    return plan_progress(active, db)
+
+
+@router.post("/work-tasks/{task_id}/progress")
+def add_progress(
+    task_id: int,
+    payload: ProgressCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Registra avance FÍSICO en unidades de obra ("hoy 45 m²"). Solo sobre
+    el baseline activo. Append-only: corregir = borrar el registro erróneo."""
+    from app.models.work_plan import ProgressEntry
+
+    task = db.get(WorkTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    plan = _plan_guard(task.work_plan_id, db, user)
+    if plan.status != "active":
+        raise HTTPException(status_code=409,
+                            detail="El avance se registra sobre el baseline activo (congelá el plan primero).")
+    entry = ProgressEntry(
+        task_id=task_id,
+        date=dt.date.fromisoformat(payload.date) if payload.date else dt.date.today(),
+        qty_done=payload.qty_done, note=payload.note, created_by=user.id,
+    )
+    db.add(entry)
+    db.commit()
+    from app.services.work_progress import plan_progress
+    db.refresh(plan)
+    return plan_progress(plan, db)
+
+
+@router.get("/work-tasks/{task_id}/progress")
+def list_progress(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    from app.models.work_plan import ProgressEntry
+    from sqlalchemy import select as _select
+
+    task = db.get(WorkTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    _plan_guard(task.work_plan_id, db, user)
+    return [{
+        "id": e.id, "date": e.date.isoformat(), "qty_done": e.qty_done,
+        "note": e.note, "created_at": e.created_at.isoformat() if e.created_at else None,
+    } for e in db.scalars(_select(ProgressEntry)
+                          .where(ProgressEntry.task_id == task_id)
+                          .order_by(ProgressEntry.date.desc(), ProgressEntry.id.desc())).all()]
+
+
+@router.delete("/work-progress/{entry_id}", status_code=204)
+def delete_progress(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """Borra un registro erróneo (la corrección honesta en un log append-only)."""
+    from app.models.work_plan import ProgressEntry
+
+    entry = db.get(ProgressEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    task = db.get(WorkTask, entry.task_id)
+    _plan_guard(task.work_plan_id, db, user)
+    db.delete(entry)
+    db.commit()
+
+
 @router.patch("/work-tasks/{task_id}")
 def patch_task(
     task_id: int,
