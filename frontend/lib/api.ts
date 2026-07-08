@@ -310,6 +310,27 @@ export type CashflowPoint = {
   accumulated: number;
 };
 
+// ---- Plan de obra persistido (módulo Obra) ----
+
+export type WorkPlanData = ScheduleResponse & {
+  plan_id: number;
+  version: number;
+  status: "draft" | "active" | "superseded" | "closed";
+  frozen_at: string | null;
+  crews: number;
+  overlap_pct: number;
+};
+
+export type WorkPlanVersion = {
+  plan_id: number; version: number; status: string;
+  frozen_at: string | null; created_at: string | null;
+};
+
+export type WorkPlanState = {
+  plan: WorkPlanData | null;
+  versions: WorkPlanVersion[];
+};
+
 // ---- Admin / Team ----
 
 export type OrgUser = {
@@ -910,6 +931,22 @@ export const api = {
       `/api/v1/plans/${planId}/materials-summary${qs}`,
     );
   },
+
+  // ----- Plan de obra persistido (módulo Obra) -----
+  getWorkPlan: (projectId: number) =>
+    request<WorkPlanState>(`/api/v1/projects/${projectId}/work-plan`),
+  createWorkPlanDraft: (projectId: number, opts: { startDate?: string; crews?: number; overlapPct?: number }) =>
+    request<WorkPlanData>(`/api/v1/projects/${projectId}/work-plan/draft`, {
+      method: "POST",
+      body: JSON.stringify({
+        start_date: opts.startDate, crews: opts.crews ?? 1,
+        overlap_pct: opts.overlapPct ?? 0,
+      }),
+    }),
+  freezeWorkPlan: (planId: number) =>
+    request<WorkPlanData>(`/api/v1/work-plans/${planId}/freeze`, { method: "POST" }),
+  rebaselineWorkPlan: (projectId: number) =>
+    request<WorkPlanData>(`/api/v1/projects/${projectId}/work-plan/rebaseline`, { method: "POST" }),
 
   // ----- Cronograma (Gantt) + curva de inversión -----
   getSchedule: (projectId: number, opts?: { startDate?: string; crews?: number; overlapPct?: number }) => {

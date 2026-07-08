@@ -38,7 +38,7 @@ def _area_for_cost(el: DetectedElement, applies_to: str,
                 if _opening_overlaps_wall(op, el, scale):
                     area -= (op.length_m or 0.0) * (op.height_m or 2.1)
         return max(area, 0.0)
-    if applies_to in ("room_floor", "roof", "escalera") and el.area_m2:
+    if applies_to in ("room_floor", "room_ceiling", "roof", "escalera") and el.area_m2:
         return el.area_m2
     if applies_to in ("room_wall",) and el.length_m:
         return (el.length_m or 0.0) * (el.height_m or 2.8)
@@ -49,28 +49,30 @@ def _area_for_cost(el: DetectedElement, applies_to: str,
         return (el.length_m or 0.0) * (el.height_m or 2.1)
     if applies_to in ("column", "pozo"):
         return el.area_m2 or 0.0
+    if applies_to in ("sanitario", "boca_electrica"):
+        return 1.0  # artefactos: 1 unidad por elemento
     return 0.0
 
 
 def _qty_for_duration(el: DetectedElement, applies_to: str) -> float:
-    """Cantidad en la unidad del rendimiento (daily_yield). Columnas y aberturas
-    se cuentan por unidad; el resto por su medida (m²/ml)."""
-    if applies_to in ("column", "opening", "pozo"):
+    """Cantidad en la unidad del rendimiento (daily_yield). Columnas, aberturas
+    y artefactos se cuentan por unidad; el resto por su medida (m²/ml)."""
+    if applies_to in ("column", "opening", "pozo", "sanitario", "boca_electrica"):
         return 1.0
-    if applies_to == "wall":
+    if applies_to in ("wall", "room_wall"):
         return (el.length_m or 0.0) * (el.height_m or 2.8)
-    if applies_to in ("room_floor", "roof", "escalera"):
+    if applies_to in ("room_floor", "room_ceiling", "roof", "escalera"):
         return el.area_m2 or 0.0
-    if applies_to in ("room_perimeter", "opening_perimeter", "beam", "room_wall",
+    if applies_to in ("room_perimeter", "opening_perimeter", "beam",
                       "riostra", "cloaca", "electricidad"):
         return el.length_m or 0.0
     return 0.0
 
 
 def _unit_for(applies_to: str) -> str:
-    if applies_to in ("column", "opening", "pozo"):
+    if applies_to in ("column", "opening", "pozo", "sanitario", "boca_electrica"):
         return "un"
-    if applies_to in ("room_perimeter", "opening_perimeter", "beam", "room_wall",
+    if applies_to in ("room_perimeter", "opening_perimeter", "beam",
                       "riostra", "cloaca", "electricidad"):
         return "ml"
     return "m²"
@@ -113,10 +115,35 @@ def compute_schedule(project_id: int, db: Session,
         if el.type == "opening":
             openings_by_page[el.page].append(el)
 
+    # Recetas DEFAULT por applies_to (mismo criterio que el presupuesto): un
+    # elemento sin receta asignada usa la default de la org para su tipo. Sin
+    # este fallback, el cronograma solo veía los elementos con asignación
+    # explícita (p.ej. el matching por material BIM) y salía casi vacío,
+    # descuadrado del presupuesto.
+    from app.cost_intelligence.infrastructure.persistence.measurement_provider import (
+        _TYPE_TO_ENTITIES,
+    )
+    defaults: dict[str, Assembly] = {}
+    if project.organization_id:
+        for asm in db.scalars(
+            select(Assembly)
+            .where(Assembly.organization_id == project.organization_id,
+                   Assembly.is_default_alternative.is_(True))
+            .options(selectinload(Assembly.assembly_materials)
+                     .selectinload(AssemblyMaterial.material))
+        ).all():
+            defaults.setdefault(asm.applies_to, asm)
+
+    def _assemblies_for(el: DetectedElement) -> list[Assembly]:
+        if el.assemblies:
+            return list(el.assemblies)
+        return [defaults[e] for e in _TYPE_TO_ENTITIES.get(el.type, ())
+                if e in defaults]
+
     # Agregar por assembly: cantidad (duración) + costo
     agg: dict[int, dict] = {}
     for el in elements:
-        for asm in el.assemblies:
+        for asm in _assemblies_for(el):
             a = agg.setdefault(asm.id, {
                 "assembly": asm, "qty": 0.0, "cost": 0.0,
             })

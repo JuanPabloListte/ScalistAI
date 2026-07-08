@@ -12,6 +12,7 @@ from app.api.v1 import (
     team,
     organization,
     ai_providers,
+    work_plans,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -26,3 +27,4 @@ api_router.include_router(team.router)
 api_router.include_router(organization.router)
 api_router.include_router(ai_providers.router)
 api_router.include_router(cost_intelligence.router)
+api_router.include_router(work_plans.router)
