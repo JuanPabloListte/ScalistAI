@@ -275,6 +275,8 @@ export type MaterialSummaryItem = {
 
 // ---- Cronograma + curva de inversión ----
 
+export type WorkTaskAssignee = { user_id: number; email: string };
+
 export type ScheduleTask = {
   assembly: string;
   stage: string;
@@ -285,6 +287,19 @@ export type ScheduleTask = {
   cost: number;
   start_date: string;
   end_date: string;
+  // Presentes cuando vienen del plan persistido (no del cálculo al vuelo).
+  id?: number;
+  depends_on?: number[];
+  source?: string;
+  status?: string;      // pending|in_progress|in_review|completed|blocked|cancelled
+  priority?: string;    // low|medium|high|critical
+  description?: string | null;
+  assignees?: WorkTaskAssignee[];
+};
+
+export type WorkTaskHistoryRow = {
+  id: number; field: string; old_value: string | null; new_value: string | null;
+  note: string | null; author_email: string | null; created_at: string | null;
 };
 
 export type ScheduleStage = {
@@ -1219,11 +1234,38 @@ export const api = {
       body: JSON.stringify(items),
     });
   },
-  updateWorkTask: (taskId: number, payload: { name?: string; planned_start?: string; duration_days?: number }) =>
+  updateWorkTask: (taskId: number, payload: {
+    name?: string; planned_start?: string; duration_days?: number; depends_on?: number[];
+    status?: string; priority?: string; assignee_ids?: number[];
+    description?: string | null; note?: string;
+  }) =>
     request<WorkPlanData>(`/api/v1/work-tasks/${taskId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  createWorkTask: (planId: number, payload: {
+    name: string; stage?: string; stage_order?: number; planned_start?: string;
+    duration_days?: number; unit?: string; qty_planned?: number; cost_planned?: number;
+    depends_on?: number[]; priority?: string; status?: string;
+    assignee_ids?: number[]; description?: string | null; note?: string;
+  }) =>
+    request<WorkPlanData>(`/api/v1/work-plans/${planId}/work-tasks`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getTaskHistory: (taskId: number) =>
+    request<WorkTaskHistoryRow[]>(`/api/v1/work-tasks/${taskId}/history`),
+  deleteWorkTask: async (taskId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/work-tasks/${taskId}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok && res.status !== 204) {
+      const detail = await res.json().catch(() => null);
+      throw new Error(detail?.detail || `No se pudo eliminar (HTTP ${res.status})`);
+    }
+  },
   downloadWorkReport: async (projectId: number, projectName?: string) => {
     const token = getToken();
     const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/work-report.pdf`, {
