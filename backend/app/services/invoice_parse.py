@@ -5,8 +5,11 @@ las leemos con PyMuPDF de forma DETERMINÍSTICA (extraemos lo impreso, no
 inventamos nada). Coherente con "solo data real": el parser PROPONE monto/
 fecha/proveedor; el humano revisa y confirma antes de crear el ActualCost.
 
-No es OCR de imagen: si el PDF no tiene texto (factura escaneada), se devuelve
-ok=False con un motivo claro (OCR de imagen queda como mejora futura).
+Si el PDF NO tiene capa de texto (factura escaneada / foto), caemos a OCR con
+tesseract (rasterizamos las páginas y las leemos). El OCR también extrae, no
+fabrica; se marca `source="ocr"` para avisar que conviene revisar con más ojo.
+Si tesseract no está disponible o la imagen es ilegible, ok=False (nunca se
+inventa un monto).
 """
 from __future__ import annotations
 
@@ -45,9 +48,41 @@ def _parse_date(d: str, m: str, y: str) -> dt.date | None:
         return None
 
 
+def _ocr_pdf(pdf_bytes: bytes) -> str:
+    """OCR de las páginas (facturas escaneadas). Rasteriza con PyMuPDF a 300 DPI
+    y corre tesseract en español (fallback a idioma por defecto). '' si tesseract
+    no está instalado o falla — nunca inventa texto."""
+    try:
+        import io
+
+        import pytesseract
+        from PIL import Image
+    except Exception:  # noqa: BLE001 — pytesseract/PIL no disponibles
+        return ""
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception:  # noqa: BLE001
+        return ""
+    parts: list[str] = []
+    try:
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            try:
+                parts.append(pytesseract.image_to_string(img, lang="spa"))
+            except Exception:  # noqa: BLE001 — paquete de idioma spa ausente
+                parts.append(pytesseract.image_to_string(img))
+    except Exception:  # noqa: BLE001 — tesseract no instalado en el sistema
+        return ""
+    finally:
+        doc.close()
+    return "\n".join(parts)
+
+
 def parse_invoice(pdf_bytes: bytes) -> dict:
-    """Extrae una propuesta de costo desde el texto de la factura. Nunca
-    fabrica: si no encuentra un dato lo deja en None y ofrece candidatos."""
+    """Extrae una propuesta de costo desde la factura. Primero la capa de texto
+    del PDF; si no hay, OCR. Nunca fabrica: si no encuentra un dato lo deja en
+    None y ofrece candidatos."""
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         text = "\n".join(p.get_text() for p in doc)
@@ -55,11 +90,25 @@ def parse_invoice(pdf_bytes: bytes) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": f"No se pudo leer el PDF: {exc}"}
 
+    source = "text"
     if len(text.strip()) < 10:
-        return {"ok": False, "reason": (
-            "El PDF no tiene texto legible (¿factura escaneada como imagen?). "
-            "El OCR de imágenes no está soportado todavía: cargá el costo a mano.")}
+        ocr = _ocr_pdf(pdf_bytes)
+        if len(ocr.strip()) < 10:
+            return {"ok": False, "reason": (
+                "El PDF no tiene texto y no se pudo leer por OCR (imagen ilegible o "
+                "tesseract no disponible). Cargá el costo a mano.")}
+        text, source = ocr, "ocr"
 
+    result = _extract_fields(text)
+    result["source"] = source
+    if source == "ocr":
+        result["note"] = ("Leído por OCR de una factura escaneada — revisá monto y "
+                          "fecha con atención antes de guardar.")
+    return result
+
+
+def _extract_fields(text: str) -> dict:
+    """Heurísticas de extracción sobre el texto (venga de la capa PDF o del OCR)."""
     # --- Montos ---
     amounts = [(_to_float_ar(mm.group(1)), mm.start()) for mm in _MONEY.finditer(text)]
     amounts = [(v, pos) for v, pos in amounts if v is not None and v > 0]
