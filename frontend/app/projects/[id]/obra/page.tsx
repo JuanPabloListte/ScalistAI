@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, type WorkProgress, type TaskProgress, type ProgressEntryRow } from "@/lib/api";
+import { CostosTab } from "@/components/obra/costos-tab";
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -141,6 +142,7 @@ export default function ObraPage() {
   const [progress, setProgress] = useState<WorkProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"fisico" | "costos">("fisico");
 
   const load = useCallback(() => {
     api.getWorkProgress(projectId)
@@ -179,10 +181,27 @@ export default function ObraPage() {
       <header className="mb-6">
         <button onClick={() => router.back()} className="text-sm font-medium text-slate-500 hover:text-brand-600">← Volver</button>
         <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">Avance de obra</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">Seguimiento de obra</h1>
           <span className="text-xs text-slate-500">Plan v{progress.version} · al {fmtDate(progress.as_of)}</span>
         </div>
+        <div className="mt-4 flex gap-1 border-b border-slate-200 dark:border-slate-800">
+          {([["fisico", "Avance físico"], ["costos", "Costos"]] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+                tab === k
+                  ? "border-brand-600 text-brand-600 dark:text-brand-400"
+                  : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
       </header>
+
+      {tab === "costos" ? (
+        <CostosTab projectId={projectId} progress={progress} />
+      ) : (
+      <>
 
       {/* KPIs */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -232,6 +251,8 @@ export default function ObraPage() {
         El % se deriva de las cantidades registradas contra el cómputo exacto del plano —
         acá no se estima a ojo. El fin proyectado usa el rendimiento real observado de cada tarea.
       </p>
+      </>
+      )}
     </main>
   );
 }

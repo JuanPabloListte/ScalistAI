@@ -143,6 +143,26 @@ def test_full_lifecycle():
         assert 0 < totals["pct_fisico"] <= 50.0
         assert abs(totals["ev"] - sum(
             t["cost_planned"] * t["pct"] / 100 for t in prog["tasks"])) < 0.01
+
+        # --- Etapa 3: costo real + EVM + ajuste por IPC ---
+        from app.models.work_plan import ActualCost
+        from app.services.work_cost import cost_summary
+
+        ev = totals["ev"]
+        # Gasto real = 2× el valor ganado → CPI 0.5, CV negativo (sobrecosto).
+        db.add(ActualCost(project_id=project.id, date=today, amount=ev * 2,
+                          kind="material", stage="Mampostería"))
+        db.flush()
+        db.refresh(clone)
+        cs = cost_summary(clone, db, today=today)
+        e = cs["evm"]
+        assert abs(e["ev"] - ev) < 1 and abs(e["ac"] - ev * 2) < 1
+        assert abs(e["cpi"] - 0.5) < 0.01           # $1 gastado → $0.5 de avance
+        assert e["cv"] < 0                           # sobrecosto
+        assert e["eac"] > e["bac"]                   # proyecta terminar sobre presupuesto
+        assert cs["by_kind"]["material"] == round(ev * 2, 2)
+        # la curva S trae plan y real
+        assert any("real" in pt for pt in cs["curve"])
     finally:
         db.rollback()
         db.close()
