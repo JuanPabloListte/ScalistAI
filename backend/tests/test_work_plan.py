@@ -367,6 +367,65 @@ def test_work_report_pdf():
         db.close()
 
 
+def test_comitente_share_link():
+    """Link solo-lectura del comitente: crear/rotar/revocar (autenticado) +
+    acceso público sin login que sirve el reporte SIN financieros."""
+    import datetime as _dt
+
+    import fitz
+    from fastapi.testclient import TestClient
+
+    from app.core.database import SessionLocal
+    from app.core.deps import get_current_user
+    from app.main import app
+    from app.models import Project, User
+    from app.services import work_plan as wp
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        user = db.get(User, project.user_id)
+        draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
+        wp.freeze(draft, db)
+        db.commit()
+
+        app.dependency_overrides[get_current_user] = lambda: user
+        c = TestClient(app)
+        anon = TestClient(app)  # sin override → simula público, pero el override es global…
+        try:
+            assert c.get(f"/api/v1/projects/{project.id}/share-link").json()["token"] is None
+            tok = c.post(f"/api/v1/projects/{project.id}/share-link").json()["token"]
+            assert tok and len(tok) >= 32
+            # rotar revoca el anterior
+            tok2 = c.post(f"/api/v1/projects/{project.id}/share-link").json()["token"]
+            assert tok2 != tok
+
+            # acceso público SIN auth (se limpia el override para el cliente anónimo)
+            app.dependency_overrides.clear()
+            assert anon.get(f"/api/v1/public/obra/{tok}").status_code == 404  # viejo revocado
+            summ = anon.get(f"/api/v1/public/obra/{tok2}")
+            assert summ.status_code == 200 and summ.json()["has_report"] is True
+            pdf = anon.get(f"/api/v1/public/obra/{tok2}/report.pdf")
+            assert pdf.status_code == 200 and pdf.content[:5] == b"%PDF-"
+            # el reporte público NO filtra financieros
+            text = "".join(p.get_text() for p in fitz.open(stream=pdf.content, filetype="pdf"))
+            for leak in ("Estado financiero", "CPI", "Presupuesto", "BAC"):
+                assert leak not in text, f"el reporte público filtra «{leak}»"
+
+            # revocar (requiere auth de nuevo) → público deja de resolver
+            app.dependency_overrides[get_current_user] = lambda: user
+            assert c.delete(f"/api/v1/projects/{project.id}/share-link").status_code == 204
+            app.dependency_overrides.clear()
+            assert anon.get(f"/api/v1/public/obra/{tok2}").status_code == 404
+            assert anon.get("/api/v1/public/obra/inexistente").status_code == 404
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        d2 = SessionLocal()
+        d2.delete(d2.get(Project, project.id)); d2.commit(); d2.close()
+        db.rollback(); db.close()
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

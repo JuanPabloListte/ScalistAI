@@ -80,6 +80,7 @@ export default function ProjectGanttPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [crews, setCrews] = useState<number>(1);
@@ -376,6 +377,24 @@ export default function ProjectGanttPage() {
     setError(null);
     try {
       await api.downloadWorkReport(projectId, project?.name);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setActing(false);
+    }
+  }
+
+  // Genera/reutiliza el link de solo lectura del comitente y lo copia.
+  async function shareWithClient() {
+    setActing(true);
+    setError(null);
+    try {
+      let link = await api.getShareLink(projectId);
+      if (!link.token) link = await api.createShareLink(projectId);
+      const url = api.publicReportUrl(link.token!);
+      try { await navigator.clipboard.writeText(url); } catch { /* clipboard no disponible */ }
+      setShareMsg(`Link del comitente copiado: ${url}`);
+      setTimeout(() => setShareMsg(null), 6000);
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
@@ -785,6 +804,10 @@ export default function ProjectGanttPage() {
                     className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">
                     {acting ? "…" : "Reporte PDF"}
                   </button>
+                  <button onClick={shareWithClient} disabled={acting}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">
+                    {acting ? "…" : "Compartir con comitente"}
+                  </button>
                   <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
                     className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50 dark:text-green-400 dark:hover:bg-green-500/10">
                     {acting ? "…" : "Reprogramar (nueva versión)"}
@@ -810,6 +833,7 @@ export default function ProjectGanttPage() {
             Historial: {versions.map((v) => `v${v.version} (${v.status === "active" ? "activo" : v.status === "draft" ? "borrador" : "reemplazado"})`).join(" · ")}
           </div>
         )}
+        {shareMsg && <div className="w-full text-sm text-green-700 dark:text-green-400 break-all">{shareMsg}</div>}
         {error && <div className="w-full text-sm text-red-600 dark:text-red-400">{error}</div>}
       </div>
 
