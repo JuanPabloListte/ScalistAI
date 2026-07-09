@@ -84,21 +84,32 @@ class WorkTask(Base):
     # editable sobre el plan activo sin romper la inmutabilidad del cronograma.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     priority: Mapped[str] = mapped_column(String(8), nullable=False, default="medium")
-    assignee_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     work_plan: Mapped["WorkPlan"] = relationship(back_populates="tasks")
     # Nav de solo lectura a la receta (para pre-acopio / recalibración de
     # rendimientos). Sin back_populates: Assembly no necesita conocer sus tareas.
     assembly: Mapped["object | None"] = relationship(
         "Assembly", foreign_keys=[assembly_id], viewonly=True)
-    assignee: Mapped["object | None"] = relationship(
-        "User", foreign_keys=[assignee_id], viewonly=True, lazy="selectin")
+    # Responsables (N por tarea, fiel al Gantt): M2M vía work_task_assignees.
+    # No-viewonly → asignar la lista sincroniza las filas de la tabla puente.
+    assignees: Mapped[list["object"]] = relationship(
+        "User", secondary="work_task_assignees", lazy="selectin")
     progress_entries: Mapped[list["ProgressEntry"]] = relationship(
         back_populates="task", cascade="all, delete-orphan")
     events: Mapped[list["WorkTaskEvent"]] = relationship(
         back_populates="task", cascade="all, delete-orphan",
         order_by="WorkTaskEvent.created_at.desc(), WorkTaskEvent.id.desc()")
+
+
+class WorkTaskAssignee(Base):
+    """Tabla puente tarea↔responsable (varios responsables por tarea)."""
+    __tablename__ = "work_task_assignees"
+
+    work_task_id: Mapped[int] = mapped_column(
+        ForeignKey("work_tasks.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
 
 
 class ProgressEntry(Base):

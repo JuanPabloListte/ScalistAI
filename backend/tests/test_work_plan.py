@@ -249,15 +249,16 @@ def test_jira_workflow_fields():
 
         draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
         t = draft.tasks[0]
-        assert t.status == "pending" and t.priority == "medium"
+        assert t.status == "pending" and t.priority == "medium" and t.assignees == []
 
-        # flujo sobre borrador
+        # flujo sobre borrador (varios responsables, descripción)
         wp.edit_task(t, draft, org_id,
-                     {"status": "in_progress", "priority": "high", "assignee_id": me,
-                      "note": "arranca la cuadrilla"}, me, db)
-        assert t.status == "in_progress" and t.priority == "high" and t.assignee_id == me
+                     {"status": "in_progress", "priority": "high", "assignee_ids": [me],
+                      "description": "muro perimetral", "note": "arranca la cuadrilla"}, me, db)
+        assert t.status == "in_progress" and t.priority == "high"
+        assert [u.id for u in t.assignees] == [me] and t.description == "muro perimetral"
         fields = {e.field for e in t.events}
-        assert {"status", "priority", "assignee"} <= fields
+        assert {"status", "priority", "assignee", "description"} <= fields
         st_ev = next(e for e in t.events if e.field == "status")
         assert st_ev.old_value == "pending" and st_ev.new_value == "in_progress"
         assert st_ev.note == "arranca la cuadrilla"
@@ -274,20 +275,26 @@ def test_jira_workflow_fields():
         assert t.status == "in_review"
 
         # serialize expone los campos nuevos. expire_all() emula el commit del
-        # endpoint (recarga la relación assignee para traer el email).
+        # endpoint (recarga la relación assignees para traer los emails).
         db.expire_all()
         s = wp.serialize(draft)
         st = next(x for x in s["tasks"] if x["id"] == t.id)
         assert st["status"] == "in_review" and st["priority"] == "high"
-        assert st["assignee_id"] == me and st["assignee_email"] is not None
+        assert [a["user_id"] for a in st["assignees"]] == [me]
+        assert st["assignees"][0]["email"] and st["description"] == "muro perimetral"
+
+        # desasignar todos con lista vacía
+        wp.edit_task(t, draft, org_id, {"assignee_ids": []}, me, db)
+        assert t.assignees == []
 
         # tarea manual (change order) encadenada a t: arranca a t.fin + 1 día
         manual = wp.create_manual_task(
             draft, org_id,
             {"name": "Imprevisto: apuntalar", "stage": "Estructura", "stage_order": 2,
-             "duration_days": 3, "depends_on": [t.id], "priority": "critical"}, me, db)
+             "duration_days": 3, "depends_on": [t.id], "priority": "critical",
+             "assignee_ids": [me]}, me, db)
         assert manual.source == "manual" and manual.status == "pending"
-        assert manual.priority == "critical"
+        assert manual.priority == "critical" and [u.id for u in manual.assignees] == [me]
         assert manual.planned_start == t.planned_end + _dt.timedelta(days=1)
         assert manual.planned_end == manual.planned_start + _dt.timedelta(days=3)
         assert any(e.field == "created" for e in manual.events)

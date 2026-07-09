@@ -181,7 +181,9 @@ def build_work_report_pdf(project_name: str, plan: dict, progress: dict,
     totals = progress.get("totals", {})
     evm = cost.get("evm", {})
     inflation = cost.get("inflation")
-    assignee_by_id = {t["id"]: t.get("assignee_email") for t in plan.get("tasks", [])}
+    assignee_by_id = {
+        t["id"]: ", ".join(a["email"].split("@")[0] for a in t.get("assignees", []))
+        for t in plan.get("tasks", [])}
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=32, leftMargin=32,

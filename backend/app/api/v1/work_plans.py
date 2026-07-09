@@ -53,7 +53,8 @@ class TaskPatch(BaseModel):
     # Flujo de ejecución (editable también sobre el baseline activo).
     status: Optional[str] = Field(None, pattern="^(pending|in_progress|in_review|completed|blocked|cancelled)$")
     priority: Optional[str] = Field(None, pattern="^(low|medium|high|critical)$")
-    assignee_id: Optional[int] = None  # 0 o -1 desasigna
+    assignee_ids: Optional[list[int]] = None  # lista completa; [] desasigna a todos
+    description: Optional[str] = None
     note: Optional[str] = None         # comentario libre para el historial
 
 
@@ -423,7 +424,8 @@ class TaskCreate(BaseModel):
     depends_on: list[int] = Field(default_factory=list)
     priority: str = Field("medium", pattern="^(low|medium|high|critical)$")
     status: str = Field("pending", pattern="^(pending|in_progress|in_review|completed|blocked|cancelled)$")
-    assignee_id: Optional[int] = None
+    assignee_ids: list[int] = Field(default_factory=list)
+    description: Optional[str] = None
     note: Optional[str] = None
 
 
