@@ -140,12 +140,17 @@ def compute_schedule(project_id: int, db: Session,
         return [defaults[e] for e in _TYPE_TO_ENTITIES.get(el.type, ())
                 if e in defaults]
 
-    # Agregar por assembly: cantidad (duración) + costo
-    agg: dict[int, dict] = {}
+    # Agregar por (assembly, NIVEL): cantidad (duración) + costo. En proyectos
+    # BIM cada elemento trae su storey → una tarea por receta y por piso
+    # ("Mampostería — PB" ≠ "— Piso 1"). Sin nivel (PDF/DXF), level=None y el
+    # comportamiento es el histórico: una tarea por receta.
+    agg: dict[tuple, dict] = {}
     for el in elements:
+        level = getattr(el, "level", None)
         for asm in _assemblies_for(el):
-            a = agg.setdefault(asm.id, {
+            a = agg.setdefault((asm.id, level), {
                 "assembly": asm, "qty": 0.0, "cost": 0.0,
+                "level": level, "level_order": getattr(el, "level_order", None),
             })
             a["qty"] += _qty_for_duration(el, asm.applies_to)
             base = _area_for_cost(el, asm.applies_to, openings_by_page, page_scales)
@@ -160,8 +165,10 @@ def compute_schedule(project_id: int, db: Session,
         asm = info["assembly"]
         yield_ = asm.daily_yield or 0.0
         duration = math.ceil(info["qty"] / (yield_ * crews)) if yield_ > 0 and info["qty"] > 0 else 1
+        label = f"{asm.name} — {info['level']}" if info["level"] else asm.name
         tasks.append({
-            "assembly": asm.name, "assembly_id": asm.id,
+            "assembly": label, "assembly_id": asm.id,
+            "level": info["level"], "level_order": info["level_order"],
             "stage": asm.stage or "Sin etapa",
             "stage_order": asm.stage_order or 0,
             "quantity": round(info["qty"], 1), "unit": _unit_for(asm.applies_to),
@@ -169,8 +176,11 @@ def compute_schedule(project_id: int, db: Session,
             "daily_cost": round(info["cost"] / max(1, duration), 2),
         })
 
-    # Programar por etapa (en orden); tareas de una etapa en paralelo.
-    tasks.sort(key=lambda t: (t["stage_order"], t["assembly"]))
+    # Programar por etapa (en orden). Dentro de una etapa: las tareas SIN nivel
+    # corren en paralelo desde el inicio (comportamiento histórico); las tareas
+    # POR NIVEL corren en secuencia de pisos (no hacés la mampostería de P1
+    # antes de terminar la de PB).
+    tasks.sort(key=lambda t: (t["stage_order"], t["level_order"] if t["level_order"] is not None else -1, t["assembly"]))
     stages_map: dict[tuple, list] = defaultdict(list)
     for t in tasks:
         stages_map[(t["stage_order"], t["stage"])].append(t)
@@ -179,10 +189,29 @@ def compute_schedule(project_id: int, db: Session,
     stages_out = []
     for (order, stage), stage_tasks in sorted(stages_map.items()):
         stage_start = cursor
-        stage_dur = max(t["duration_days"] for t in stage_tasks)
-        for t in stage_tasks:
+        unleveled = [t for t in stage_tasks if t["level_order"] is None]
+        leveled = [t for t in stage_tasks if t["level_order"] is not None]
+
+        for t in unleveled:
             t["start_date"] = stage_start.isoformat()
             t["end_date"] = (stage_start + dt.timedelta(days=t["duration_days"])).isoformat()
+
+        lvl_cursor = stage_start
+        by_level: dict[int, list] = defaultdict(list)
+        for t in leveled:
+            by_level[t["level_order"]].append(t)
+        for lo in sorted(by_level):
+            grp = by_level[lo]
+            for t in grp:
+                t["start_date"] = lvl_cursor.isoformat()
+                t["end_date"] = (lvl_cursor + dt.timedelta(days=t["duration_days"])).isoformat()
+            lvl_cursor += dt.timedelta(days=max(t["duration_days"] for t in grp))
+
+        stage_dur = max(
+            max((t["duration_days"] for t in unleveled), default=0),
+            (lvl_cursor - stage_start).days,
+            1,
+        )
         stage_end = stage_start + dt.timedelta(days=stage_dur)
         stages_out.append({
             "stage": stage, "stage_order": order,
