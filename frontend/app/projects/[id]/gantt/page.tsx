@@ -37,6 +37,22 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "2-digit" });
 }
 
+// Mapeo entre las etiquetas en español de la UI y los enums del backend.
+const STATUS_ES_TO_EN: Record<string, string> = {
+  "Pendiente": "pending", "En progreso": "in_progress", "En revisión": "in_review",
+  "Completada": "completed", "Bloqueada": "blocked", "Cancelada": "cancelled",
+};
+const STATUS_EN_TO_ES: Record<string, TaskJiraMetadata["status"]> = {
+  pending: "Pendiente", in_progress: "En progreso", in_review: "En revisión",
+  completed: "Completada", blocked: "Bloqueada", cancelled: "Cancelada",
+};
+const PRIORITY_ES_TO_EN: Record<string, string> = {
+  "Baja": "low", "Media": "medium", "Alta": "high", "Crítica": "critical",
+};
+const PRIORITY_EN_TO_ES: Record<string, TaskJiraMetadata["priority"]> = {
+  low: "Baja", medium: "Media", high: "Alta", critical: "Crítica",
+};
+
 type TaskJiraMetadata = {
   status: "Pendiente" | "En progreso" | "En revisión" | "Completada" | "Bloqueada" | "Cancelada";
   priority: "Baja" | "Media" | "Alta" | "Crítica";
@@ -75,6 +91,7 @@ export default function ProjectGanttPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [activeModalTab, setActiveModalTab] = useState<"detail" | "responsibles" | "history">("detail");
+  const [taskHistory, setTaskHistory] = useState<{ date: string; change: string }[] | null>(null);
 
   // Top Filter states
   const [searchTerm, setSearchTerm] = useState("");
@@ -129,17 +146,46 @@ export default function ProjectGanttPage() {
           if (wpState.plan.status === "active") {
             api.getWorkProgress(projectId).then(setProgress).catch(() => setProgress(null));
           }
+          // Verdad del servidor: sembrar la metadata Jira desde el plan
+          // persistido (estado/prioridad/responsables/descripción). Preserva
+          // ajustes locales que el backend aún no modela (overrides, historial
+          // de sesión, motivo de bloqueo).
+          setJiraMetadata((prev) => {
+            const seeded: Record<string, TaskJiraMetadata> = {};
+            for (const t of wpState.plan!.tasks) {
+              if (typeof t.id !== "number") continue;
+              const local = prev[t.assembly] || ({} as Partial<TaskJiraMetadata>);
+              seeded[t.assembly] = {
+                status: STATUS_EN_TO_ES[t.status || "pending"] || "Pendiente",
+                priority: PRIORITY_EN_TO_ES[t.priority || "medium"] || "Media",
+                isBlocked: local.isBlocked ?? (t.status === "blocked"),
+                blockedReason: local.blockedReason ?? "",
+                assignees: (t.assignees || []).map(a => a.email.split('@')[0]),
+                description: t.description || "",
+                history: local.history || [
+                  { date: new Date().toLocaleDateString("es-AR"), change: "Sincronizada con el plan." },
+                ],
+                startDateOverride: local.startDateOverride,
+                endDateOverride: local.endDateOverride,
+                durationOverride: local.durationOverride,
+              };
+            }
+            return seeded;
+          });
         } else {
           setPlan(null);
           setSchedule(await api.getSchedule(projectId, { startDate, crews }));
+          // Sin plan persistido (simulación): la metadata vive local.
+          if (typeof window !== "undefined") {
+            const jm = localStorage.getItem(`gantt_jira_metadata_${projectId}`);
+            if (jm) setJiraMetadata(JSON.parse(jm));
+          }
         }
 
-        // LocalStorage loading
+        // Tareas manuales (aún locales; se muestran junto al plan).
         if (typeof window !== "undefined") {
           const mt = localStorage.getItem(`gantt_manual_tasks_${projectId}`);
           if (mt) setManualTasks(JSON.parse(mt));
-          const jm = localStorage.getItem(`gantt_jira_metadata_${projectId}`);
-          if (jm) setJiraMetadata(JSON.parse(jm));
         }
       })
       .catch((e) => setError(String((e as Error)?.message ?? e)))
@@ -165,6 +211,17 @@ export default function ProjectGanttPage() {
     }
     return list;
   }, [team]);
+
+  // Nombre visible (prefijo del email) ↔ id de usuario, para persistir
+  // responsables por id en el backend.
+  const idByName = useMemo(() => {
+    const m: Record<string, number> = {};
+    team.forEach(u => { m[u.email.split('@')[0]] = u.id; });
+    return m;
+  }, [team]);
+  const namesToIds = useCallback(
+    (names: string[]) => names.map(n => idByName[n]).filter((x): x is number => typeof x === "number"),
+    [idByName]);
 
   const getTaskMeta = useCallback((taskName: string): TaskJiraMetadata => {
     const defaultMeta: TaskJiraMetadata = {
@@ -207,7 +264,7 @@ export default function ProjectGanttPage() {
         cost: t.cost,
         quantity: t.quantity,
         unit: t.unit,
-        isManual: false,
+        isManual: t.source === "manual",
         taskId: (t as any).id || (t as any).task_id || idx + 1,
       };
     });
@@ -373,64 +430,7 @@ export default function ProjectGanttPage() {
     return orders[stage] !== undefined ? orders[stage] : 10;
   };
 
-  const handleAddTask = () => {
-    if (!newAssembly.trim()) return;
-    if (allTasks.some(t => t.assembly === newAssembly)) {
-      alert("Ya existe una tarea con ese nombre");
-      return;
-    }
-
-    // Predecessor snaps the start date of B to end date of A
-    let finalStartDate = newStartDate;
-    if (newPredecessor) {
-      const predTask = allTasks.find(t => t.assembly === newPredecessor);
-      if (predTask) {
-        finalStartDate = predTask.end_date;
-      }
-    }
-
-    const startDateObj = new Date(finalStartDate + "T00:00:00");
-    const endDateObj = new Date(startDateObj.getTime() + newDuration * 86400000);
-    const newEndDateStr = endDateObj.toISOString().slice(0, 10);
-
-    const task = {
-      assembly: newAssembly,
-      stage: newStage,
-      stage_order: getStageOrder(newStage),
-      duration_days: newDuration,
-      start_date: finalStartDate,
-      end_date: newEndDateStr,
-      cost: 0,
-      quantity: 1,
-      unit: "un"
-    };
-
-    saveManualTasks([...manualTasks, task]);
-    
-    const updatedMeta = { ...jiraMetadata };
-    updatedMeta[newAssembly] = {
-      status: newStatus,
-      priority: newPriority,
-      isBlocked: newIsBlocked,
-      blockedReason: newBlockedReason,
-      assignees: newAssignees,
-      description: newDescription,
-      history: [
-        { date: new Date().toLocaleDateString("es-AR"), change: "Tarea creada manualmente con campos avanzados." }
-      ]
-    };
-    if (newPredecessor) {
-      updatedMeta[newAssembly].startDateOverride = finalStartDate;
-      updatedMeta[newAssembly].endDateOverride = newEndDateStr;
-      updatedMeta[newAssembly].durationOverride = newDuration;
-      updatedMeta[newAssembly].history.push({
-        date: new Date().toLocaleDateString("es-AR"),
-        change: `Dependencia creada vinculada a tarea "${newPredecessor}".`
-      });
-    }
-    saveJiraMetadata(updatedMeta);
-    
-    // Reset form states
+  const resetAddForm = () => {
     setIsAddModalOpen(false);
     setNewAssembly("");
     setNewDescription("");
@@ -442,21 +442,90 @@ export default function ProjectGanttPage() {
     setNewBlockedReason("");
   };
 
-  const handleDeleteTask = (taskName: string) => {
-    if (confirm(`¿Estás seguro de eliminar la tarea "${taskName}"?`)) {
-      saveManualTasks(manualTasks.filter(t => t.assembly !== taskName));
-      const updatedMeta = { ...jiraMetadata };
-      delete updatedMeta[taskName];
-      saveJiraMetadata(updatedMeta);
-      setIsDrawerOpen(false);
-      setActiveTask(null);
+  const handleAddTask = async () => {
+    if (!newAssembly.trim()) return;
+    if (allTasks.some(t => t.assembly === newAssembly)) {
+      alert("Ya existe una tarea con ese nombre");
+      return;
     }
+
+    const predTask = newPredecessor ? allTasks.find(t => t.assembly === newPredecessor) : null;
+
+    // Con plan persistido: la tarea manual (change order) se crea en el backend.
+    if (plan) {
+      const depends_on = predTask && typeof predTask.taskId === "number" ? [predTask.taskId] : [];
+      try {
+        await api.createWorkTask(plan.plan_id, {
+          name: newAssembly, stage: newStage, stage_order: getStageOrder(newStage),
+          planned_start: newPredecessor ? undefined : newStartDate,
+          duration_days: newDuration, unit: "un",
+          priority: PRIORITY_ES_TO_EN[newPriority],
+          status: newIsBlocked ? "blocked" : STATUS_ES_TO_EN[newStatus],
+          assignee_ids: namesToIds(newAssignees),
+          description: newDescription || null, depends_on,
+        });
+        resetAddForm();
+        load();  // reseed plan + metadata desde el servidor
+      } catch (e) {
+        setError(String((e as Error)?.message ?? e));
+      }
+      return;
+    }
+
+    // Sin plan (simulación): la tarea vive local.
+    const finalStartDate = predTask ? predTask.end_date : newStartDate;
+    const startDateObj = new Date(finalStartDate + "T00:00:00");
+    const endDateObj = new Date(startDateObj.getTime() + newDuration * 86400000);
+    const newEndDateStr = endDateObj.toISOString().slice(0, 10);
+
+    saveManualTasks([...manualTasks, {
+      assembly: newAssembly, stage: newStage, stage_order: getStageOrder(newStage),
+      duration_days: newDuration, start_date: finalStartDate, end_date: newEndDateStr,
+      cost: 0, quantity: 1, unit: "un",
+    }]);
+    const updatedMeta = { ...jiraMetadata };
+    updatedMeta[newAssembly] = {
+      status: newStatus, priority: newPriority, isBlocked: newIsBlocked,
+      blockedReason: newBlockedReason, assignees: newAssignees, description: newDescription,
+      history: [{ date: new Date().toLocaleDateString("es-AR"), change: "Tarea creada (simulación)." }],
+    };
+    if (predTask) {
+      updatedMeta[newAssembly].startDateOverride = finalStartDate;
+      updatedMeta[newAssembly].endDateOverride = newEndDateStr;
+      updatedMeta[newAssembly].durationOverride = newDuration;
+    }
+    saveJiraMetadata(updatedMeta);
+    resetAddForm();
+  };
+
+  const handleDeleteTask = async (taskName: string) => {
+    if (!confirm(`¿Estás seguro de eliminar la tarea "${taskName}"?`)) return;
+    const task = allTasks.find(t => t.assembly === taskName);
+    // Tarea del plan (id numérico): borrar en el backend (solo manuales).
+    if (task && typeof task.taskId === "number") {
+      try {
+        await api.deleteWorkTask(task.taskId);
+        setIsDrawerOpen(false);
+        setActiveTask(null);
+        load();
+      } catch (e) {
+        setError(String((e as Error)?.message ?? e));
+      }
+      return;
+    }
+    // Tarea local (simulación).
+    saveManualTasks(manualTasks.filter(t => t.assembly !== taskName));
+    const updatedMeta = { ...jiraMetadata };
+    delete updatedMeta[taskName];
+    saveJiraMetadata(updatedMeta);
+    setIsDrawerOpen(false);
+    setActiveTask(null);
   };
 
   const updateTaskMetaField = (taskName: string, field: string, value: any, changeText: string) => {
     const updatedMeta = { ...jiraMetadata };
     const current = getTaskMeta(taskName);
-    
+
     updatedMeta[taskName] = {
       ...current,
       [field]: value,
@@ -466,9 +535,63 @@ export default function ProjectGanttPage() {
       ]
     };
     saveJiraMetadata(updatedMeta);
-    
+
     if (activeTask && activeTask.assembly === taskName) {
       setActiveTask((prev: any) => ({ ...prev, [field]: value }));
+    }
+
+    // Write-through al backend para los campos que el plan persiste
+    // (estado/prioridad/responsables/descripción). Solo sobre tareas del plan
+    // (id numérico); las manuales/simulación quedan locales.
+    const task = allTasks.find(t => t.assembly === taskName);
+    const taskId = task && typeof task.taskId === "number" ? task.taskId : null;
+    if (taskId === null) return;
+
+    let payload: Record<string, any> | null = null;
+    if (field === "status") payload = { status: STATUS_ES_TO_EN[value] };
+    else if (field === "priority") payload = { priority: PRIORITY_ES_TO_EN[value] };
+    else if (field === "description") payload = { description: value || null };
+    else if (field === "assignees") payload = { assignee_ids: namesToIds(value as string[]) };
+    else if (field === "isBlocked" && value === true) payload = { status: "blocked" };
+    if (!payload) return;
+
+    api.updateWorkTask(taskId, payload)
+      .then((updated) => { setPlan(updated); setSchedule(updated); })
+      .catch((e) => setError(String((e as Error)?.message ?? e)));
+  };
+
+  // Historial real del backend (si la tarea es del plan). Traduce cada evento
+  // a una línea legible en español.
+  const describeEvent = (r: { field: string; old_value: string | null; new_value: string | null; note: string | null }) => {
+    const st = (v: string | null) => (v && STATUS_EN_TO_ES[v]) || v || "—";
+    const pr = (v: string | null) => (v && PRIORITY_EN_TO_ES[v]) || v || "—";
+    switch (r.field) {
+      case "status": return `Estado: ${st(r.old_value)} → ${st(r.new_value)}${r.note ? ` (${r.note})` : ""}`;
+      case "priority": return `Prioridad: ${pr(r.old_value)} → ${pr(r.new_value)}`;
+      case "assignee": return `Responsables: ${r.new_value || "—"}`;
+      case "description": return "Descripción modificada";
+      case "name": return `Nombre: ${r.old_value} → ${r.new_value}`;
+      case "planned_start": return `Inicio: ${r.old_value} → ${r.new_value}`;
+      case "duration_days": return `Duración: ${r.old_value} → ${r.new_value} días`;
+      case "depends_on": return "Dependencias actualizadas";
+      case "created": return "Tarea creada";
+      case "comment": return r.note || "Comentario";
+      default: return r.field;
+    }
+  };
+
+  const openTask = (t: any) => {
+    setActiveTask(t);
+    setIsDrawerOpen(true);
+    setActiveModalTab("detail");
+    setTaskHistory(null);
+    if (typeof t.taskId === "number") {
+      api.getTaskHistory(t.taskId)
+        .then((rows) => setTaskHistory(rows.map((r) => ({
+          date: r.created_at ? new Date(r.created_at).toLocaleDateString("es-AR") : "",
+          change: describeEvent(r),
+        }))))
+        .catch(() => setTaskHistory(null));
     }
   };
 
@@ -859,11 +982,7 @@ export default function ProjectGanttPage() {
                       return (
                         <div 
                           key={t.assembly} 
-                          onDoubleClick={() => {
-                            setActiveTask(t);
-                            setIsDrawerOpen(true);
-                            setActiveModalTab("detail");
-                          }}
+                          onDoubleClick={() => openTask(t)}
                           className="flex h-10 items-center px-3 text-xs bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer group"
                         >
                           <div className="w-8 shrink-0 font-mono text-slate-400">{id}</div>
@@ -1067,11 +1186,7 @@ export default function ProjectGanttPage() {
                           return (
                             <div 
                               key={t.assembly} 
-                              onDoubleClick={() => {
-                                setActiveTask(t);
-                                setIsDrawerOpen(true);
-                                setActiveModalTab("detail");
-                              }}
+                              onDoubleClick={() => openTask(t)}
                               className="flex h-10 items-center relative hover:bg-slate-50/50 dark:hover:bg-slate-800/10 transition-colors cursor-pointer"
                             >
                               
@@ -1378,7 +1493,7 @@ export default function ProjectGanttPage() {
                   <div className="space-y-3">
                     <label className="font-semibold text-slate-500 dark:text-slate-400 text-sm block">Historial de Cambios</label>
                     <div className="space-y-2 divide-y divide-slate-100 dark:divide-slate-800/50 max-h-[45vh] overflow-y-auto pr-1">
-                      {(meta.history || []).map((h, i) => (
+                      {(taskHistory ?? meta.history ?? []).map((h, i) => (
                         <div key={i} className="flex gap-3 text-xs pt-2 font-mono">
                           <span className="shrink-0 text-slate-400 dark:text-slate-500 font-bold">{h.date}</span>
                           <span className="text-slate-700 dark:text-slate-300">{h.change}</span>
