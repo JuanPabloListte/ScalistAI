@@ -20,6 +20,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
+# Estados de flujo (tipo Jira) que fija el usuario a mano — independientes del
+# avance físico derivado de cantidades. "blocked"/"cancelled" no se auto-calculan.
+WORKFLOW_STATUSES = ("pending", "in_progress", "in_review",
+                     "completed", "blocked", "cancelled")
+TASK_PRIORITIES = ("low", "medium", "high", "critical")
+
 
 class WorkPlan(Base):
     """Una versión del cronograma de obra de un proyecto.
@@ -74,13 +80,25 @@ class WorkTask(Base):
     depends_on: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
 
+    # Flujo de trabajo (tipo Jira): metadata de EJECUCIÓN, no del baseline —
+    # editable sobre el plan activo sin romper la inmutabilidad del cronograma.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    priority: Mapped[str] = mapped_column(String(8), nullable=False, default="medium")
+    assignee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     work_plan: Mapped["WorkPlan"] = relationship(back_populates="tasks")
     # Nav de solo lectura a la receta (para pre-acopio / recalibración de
     # rendimientos). Sin back_populates: Assembly no necesita conocer sus tareas.
     assembly: Mapped["object | None"] = relationship(
         "Assembly", foreign_keys=[assembly_id], viewonly=True)
+    assignee: Mapped["object | None"] = relationship(
+        "User", foreign_keys=[assignee_id], viewonly=True, lazy="selectin")
     progress_entries: Mapped[list["ProgressEntry"]] = relationship(
         back_populates="task", cascade="all, delete-orphan")
+    events: Mapped[list["WorkTaskEvent"]] = relationship(
+        back_populates="task", cascade="all, delete-orphan",
+        order_by="WorkTaskEvent.created_at.desc(), WorkTaskEvent.id.desc()")
 
 
 class ProgressEntry(Base):
@@ -102,6 +120,29 @@ class ProgressEntry(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     task: Mapped["WorkTask"] = relationship(back_populates="progress_entries")
+
+
+class WorkTaskEvent(Base):
+    """Historial de cambios de una tarea (pestaña "Historial" del detalle):
+    quién cambió qué y cuándo. Un evento por campo modificado; los comentarios
+    sueltos van con field="comment". Append-only, base de la trazabilidad."""
+    __tablename__ = "work_task_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_task_id: Mapped[int] = mapped_column(
+        ForeignKey("work_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    field: Mapped[str] = mapped_column(String(32), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task: Mapped["WorkTask"] = relationship(back_populates="events")
+    author: Mapped["object | None"] = relationship(
+        "User", foreign_keys=[created_by], viewonly=True, lazy="selectin")
 
 
 class ActualCost(Base):
