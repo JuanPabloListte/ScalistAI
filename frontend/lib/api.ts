@@ -1219,5 +1219,30 @@ export const api = {
       body: JSON.stringify(items),
     });
   },
+  updateWorkTask: (taskId: number, payload: { name?: string; planned_start?: string; duration_days?: number }) =>
+    request<WorkPlanData>(`/api/v1/work-tasks/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  downloadWorkReport: async (projectId: number, projectName?: string) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/work-report.pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null);
+      throw new Error(detail?.detail || `No se pudo generar el reporte (HTTP ${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safe = (projectName || `proyecto_${projectId}`).replace(/[^a-zA-Z0-9-_]/g, "_").slice(0, 60);
+    a.download = `obra_${safe}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
