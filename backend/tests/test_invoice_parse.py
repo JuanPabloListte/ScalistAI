@@ -77,6 +77,54 @@ def test_total_preferido_sobre_maximo():
     assert r["ok"] and r["amount"] == 45800.0, r["amount"]
 
 
+def _image_pdf(lines: list[str]) -> bytes:
+    """PDF que contiene la factura como IMAGEN (sin capa de texto): rasteriza un
+    PDF de texto y re-embebe el PNG. Fuerza el camino OCR."""
+    import fitz
+
+    src = fitz.open(stream=_pdf(lines), filetype="pdf")
+    pix = src.load_page(0).get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
+    png = pix.tobytes("png")
+    src.close()
+
+    out = fitz.open()
+    page = out.new_page(width=pix.width * 72 / 300, height=pix.height * 72 / 300)
+    page.insert_image(page.rect, stream=png)
+    data = out.tobytes()
+    out.close()
+    return data
+
+
+def test_ocr_factura_escaneada():
+    """Factura como imagen (sin texto) → se lee por OCR y se marca source=ocr.
+    Se salta si tesseract no está instalado en el sistema."""
+    import shutil
+
+    from app.services.invoice_parse import parse_invoice
+
+    if shutil.which("tesseract") is None:
+        print("      (saltado: tesseract no instalado)")
+        return
+
+    pdf = _image_pdf([
+        "Corralon Sur SA",
+        "Fecha: 20/05/2026",
+        "TOTAL: 532.100,00",
+    ])
+    # sanity: el PDF no tiene capa de texto
+    import fitz
+    d = fitz.open(stream=pdf, filetype="pdf")
+    assert len("".join(p.get_text() for p in d).strip()) < 10
+    d.close()
+
+    r = parse_invoice(pdf)
+    assert r["ok"] is True and r["source"] == "ocr", r
+    # el OCR puede errar algún dígito; exigimos que haya extraído un monto y una
+    # fecha plausibles (no que sean exactos).
+    assert r["amount"] is not None and r["amount"] > 0, f"OCR no extrajo monto: {r}"
+    assert r["date_candidates"], f"OCR no extrajo fecha: {r}"
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

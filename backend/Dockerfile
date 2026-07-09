@@ -58,6 +58,13 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # rq sin invalidar la caché del install grande de requirements.txt.
 RUN pip install --no-cache-dir rq==1.16.2
 
+# OCR de facturas escaneadas (fallback cuando el PDF no trae capa de texto).
+# Capa tardía a propósito: tesseract + pytesseract sin recompilar torch & cía.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-spa \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir pytesseract==0.3.13
+
 COPY . .
 
 RUN chmod +x /app/scripts/start.sh || true
