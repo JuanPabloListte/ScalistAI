@@ -8,16 +8,18 @@ cronograma calculado, así el Gantt del frontend reusa el render.
 from __future__ import annotations
 
 import datetime as dt
+import secrets
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Project, User
-from app.models.work_plan import WorkPlan, WorkTask
+from app.models.work_plan import ObraShareLink, WorkPlan, WorkTask
 from app.services import work_plan as wp
 
 router = APIRouter(tags=["work-plans"])
@@ -276,6 +278,34 @@ def get_work_alerts(
     return build_alerts(active, db)
 
 
+def _render_report(project: Project, db: Session, public: bool) -> bytes:
+    """Genera el PDF del reporte del baseline activo. `public` omite lo
+    financiero (para el link del comitente). 404 si no hay baseline."""
+    from app.services.work_alerts import build_alerts
+    from app.services.work_cost import cost_summary
+    from app.services.work_progress import plan_progress
+    from app.services.work_report import build_work_report_pdf
+
+    active = next((p for p in wp.list_versions(project.id, db)
+                   if p.status == "active"), None)
+    if active is None:
+        raise HTTPException(status_code=404,
+                            detail="No hay baseline activo: congelá el plan de obra primero.")
+    db.refresh(active)
+    return build_work_report_pdf(
+        project.name, wp.serialize(active), plan_progress(active, db),
+        cost_summary(active, db), build_alerts(active, db), public=public)
+
+
+def _pdf_response(pdf: bytes, project_name: str, inline: bool):
+    from fastapi.responses import StreamingResponse
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in project_name)[:60]
+    disp = "inline" if inline else "attachment"
+    return StreamingResponse(
+        iter([pdf]), media_type="application/pdf",
+        headers={"Content-Disposition": f'{disp}; filename="obra_{safe}.pdf"'})
+
+
 @router.get("/projects/{project_id}/work-report.pdf")
 def get_work_report(
     project_id: int,
@@ -283,30 +313,118 @@ def get_work_report(
     user: User = Depends(get_current_user),
 ):
     """Reporte ejecutivo de obra en PDF (avance físico + EVM ajustado por IPC +
-    alertas + detalle de tareas). Entregable para imprimir/enviar al comitente.
-    404 si no hay baseline activo."""
-    from fastapi.responses import StreamingResponse
-
-    from app.services.work_alerts import build_alerts
-    from app.services.work_cost import cost_summary
-    from app.services.work_progress import plan_progress
-    from app.services.work_report import build_work_report_pdf
-
+    alertas + detalle de tareas). Entregable interno. 404 si no hay baseline."""
     project = _project_guard(project_id, db, user)
-    active = next((p for p in wp.list_versions(project_id, db)
+    return _pdf_response(_render_report(project, db, public=False), project.name, inline=False)
+
+
+# ---- Link solo-lectura para el comitente -------------------------------------
+
+def _active_share_link(project_id: int, db: Session) -> ObraShareLink | None:
+    return db.scalars(
+        select(ObraShareLink).where(
+            ObraShareLink.project_id == project_id,
+            ObraShareLink.revoked_at.is_(None))
+        .order_by(ObraShareLink.id.desc())).first()
+
+
+def _share_payload(link: ObraShareLink | None) -> dict:
+    if link is None:
+        return {"token": None, "report_url": None, "created_at": None}
+    return {
+        "token": link.token,
+        "report_url": f"/api/v1/public/obra/{link.token}/report.pdf",
+        "created_at": link.created_at.isoformat() if link.created_at else None,
+    }
+
+
+@router.get("/projects/{project_id}/share-link")
+def get_share_link(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Devuelve el link activo de solo lectura del proyecto (o token=None)."""
+    _project_guard(project_id, db, user)
+    return _share_payload(_active_share_link(project_id, db))
+
+
+@router.post("/projects/{project_id}/share-link")
+def create_share_link(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Crea (o rota) el link de solo lectura. Revoca el anterior: un token
+    activo por proyecto. El token es opaco (256 bits)."""
+    _project_guard(project_id, db, user)
+    existing = _active_share_link(project_id, db)
+    if existing is not None:
+        existing.revoked_at = dt.datetime.now(dt.UTC)
+    link = ObraShareLink(
+        project_id=project_id, token=secrets.token_urlsafe(32), created_by=user.id)
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return _share_payload(link)
+
+
+@router.delete("/projects/{project_id}/share-link", status_code=204)
+def revoke_share_link(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """Revoca el link activo (el comitente deja de poder ver el reporte)."""
+    _project_guard(project_id, db, user)
+    link = _active_share_link(project_id, db)
+    if link is not None:
+        link.revoked_at = dt.datetime.now(dt.UTC)
+        db.commit()
+
+
+def _project_from_token(token: str, db: Session) -> Project:
+    """Resuelve un token público → proyecto. Sin auth: el token ES la
+    credencial. 404 si no existe o fue revocado."""
+    link = db.scalars(select(ObraShareLink).where(
+        ObraShareLink.token == token, ObraShareLink.revoked_at.is_(None))).first()
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link no válido o revocado.")
+    project = db.get(Project, link.project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado.")
+    return project
+
+
+@router.get("/public/obra/{token}")
+def public_obra_summary(token: str, db: Session = Depends(get_db)) -> dict:
+    """Resumen PÚBLICO de avance para el comitente (sin login, sin financieros):
+    % físico, cronograma y fecha proyectada."""
+    from app.services.work_progress import plan_progress
+
+    project = _project_from_token(token, db)
+    active = next((p for p in wp.list_versions(project.id, db)
                    if p.status == "active"), None)
     if active is None:
-        raise HTTPException(status_code=404,
-                            detail="No hay baseline activo: congelá el plan de obra primero.")
+        return {"project": project.name, "has_report": False}
     db.refresh(active)
-    pdf = build_work_report_pdf(
-        project.name, wp.serialize(active),
-        plan_progress(active, db), cost_summary(active, db),
-        build_alerts(active, db))
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in project.name)[:60]
-    return StreamingResponse(
-        iter([pdf]), media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="obra_{safe}.pdf"'})
+    prog = plan_progress(active, db)
+    tot = prog["totals"]
+    return {
+        "project": project.name, "has_report": True, "as_of": prog["as_of"],
+        "pct_fisico": tot["pct_fisico"], "spi": tot["spi"],
+        "planned_end": tot["planned_end"], "projected_end": tot["projected_end"],
+        "delay_days": tot["delay_days"],
+        "report_url": f"/api/v1/public/obra/{token}/report.pdf",
+    }
+
+
+@router.get("/public/obra/{token}/report.pdf")
+def public_obra_report(token: str, db: Session = Depends(get_db)):
+    """Reporte de avance PÚBLICO (sin login, sin financieros del contratista).
+    Se abre inline en el navegador."""
+    project = _project_from_token(token, db)
+    return _pdf_response(_render_report(project, db, public=True), project.name, inline=True)
 
 
 @router.get("/projects/{project_id}/actual-costs")

@@ -1266,6 +1266,22 @@ export const api = {
       throw new Error(detail?.detail || `No se pudo eliminar (HTTP ${res.status})`);
     }
   },
+  getShareLink: (projectId: number) =>
+    request<{ token: string | null; report_url: string | null; created_at: string | null }>(
+      `/api/v1/projects/${projectId}/share-link`),
+  createShareLink: (projectId: number) =>
+    request<{ token: string | null; report_url: string | null; created_at: string | null }>(
+      `/api/v1/projects/${projectId}/share-link`, { method: "POST" }),
+  revokeShareLink: async (projectId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/share-link`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok && res.status !== 204) throw new Error(`No se pudo revocar (HTTP ${res.status})`);
+  },
+  // URL pública absoluta del reporte del comitente (para copiar/compartir).
+  publicReportUrl: (token: string) => `${API_URL}/api/v1/public/obra/${token}/report.pdf`,
   downloadWorkReport: async (projectId: number, projectName?: string) => {
     const token = getToken();
     const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/work-report.pdf`, {

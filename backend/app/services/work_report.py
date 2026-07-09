@@ -106,24 +106,27 @@ def _styles() -> dict:
     }
 
 
-def _kpi_row(st: dict, totals: dict, evm: dict, inflation: dict | None) -> Table:
-    """Fila de tarjetas KPI (avance, cronograma, costo, fin, desvío real)."""
+def _kpi_row(st: dict, totals: dict, evm: dict, inflation: dict | None,
+            public: bool = False) -> Table:
+    """Fila de tarjetas KPI. En modo público se omiten las de costo (CPI y
+    desvío real) — el comitente ve avance físico y cronograma, no financieros."""
     cpi = evm.get("cpi")
     spi = totals.get("spi")
     delay = totals.get("delay_days", 0)
     real_var = inflation.get("real_variance") if inflation else evm.get("cv")
 
     cards = [
-        ("Avance físico", f"{totals.get('pct_fisico', 0)}%", "valor ganado / presupuesto"),
+        ("Avance físico", f"{totals.get('pct_fisico', 0)}%", "obra ejecutada"),
         ("Cronograma (SPI)", _fmt(spi) if spi is not None else "—",
          "≥1 en fecha" if spi is not None else "sin datos"),
-        ("Costo (CPI)", _fmt(cpi) if cpi is not None else "—",
-         "≥1 eficiente" if cpi is not None else "sin costos"),
         ("Fin proyectado", totals.get("projected_end", "—"),
          f"plan {totals.get('planned_end', '—')}" + (f" · +{delay}d" if delay else "")),
-        ("Desvío real (s/IPC)", _fmt_compact(real_var) if real_var is not None else "—",
-         "inflación aparte" if inflation else "nominal"),
     ]
+    if not public:
+        cards.insert(2, ("Costo (CPI)", _fmt(cpi) if cpi is not None else "—",
+                         "≥1 eficiente" if cpi is not None else "sin costos"))
+        cards.append(("Desvío real (s/IPC)", _fmt_compact(real_var) if real_var is not None else "—",
+                      "inflación aparte" if inflation else "nominal"))
     styles = _styles()
     data = [[
         Table([[Paragraph(lbl, styles["kpi_label"])],
@@ -137,7 +140,7 @@ def _kpi_row(st: dict, totals: dict, evm: dict, inflation: dict | None) -> Table
               ]))
         for (lbl, val, hint) in cards
     ]]
-    t = Table(data, colWidths=[103] * 5)
+    t = Table(data, colWidths=[517 / len(cards)] * len(cards))
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), _ZEBRA),
         ("BOX", (0, 0), (-1, -1), 0.5, _LINE),
@@ -173,10 +176,14 @@ def _table(header: list[str], rows: list[list], widths: list[float],
 
 
 def build_work_report_pdf(project_name: str, plan: dict, progress: dict,
-                          cost: dict, alerts: dict) -> bytes:
+                          cost: dict, alerts: dict, public: bool = False) -> bytes:
     """Arma el PDF ejecutivo. Todos los argumentos son dicts ya calculados:
     `plan`=serialize(WorkPlan), `progress`=plan_progress, `cost`=cost_summary,
-    `alerts`=build_alerts. Devuelve los bytes del PDF."""
+    `alerts`=build_alerts. Devuelve los bytes del PDF.
+
+    `public=True` (link del comitente): omite todo lo financiero (EVM, IPC,
+    presupuestos, sobrecosto/pre-acopio, recalibración) — solo avance físico,
+    cronograma y retrasos."""
     styles = _styles()
     totals = progress.get("totals", {})
     evm = cost.get("evm", {})
@@ -202,73 +209,77 @@ def build_work_report_pdf(project_name: str, plan: dict, progress: dict,
         styles["sub"]))
 
     # --- Resumen ejecutivo (KPIs) ---
-    story.append(_kpi_row(plan, totals, evm, inflation))
+    story.append(_kpi_row(plan, totals, evm, inflation, public=public))
 
-    # --- Estado financiero (EVM + IPC) ---
-    story.append(Paragraph("Estado financiero (valor ganado)", styles["h2"]))
-    evm_rows = [[
-        Paragraph("Presupuesto (BAC)", styles["body"]),
-        Paragraph(_fmt(evm.get("bac"), "$"), styles["body_r"]),
-        Paragraph("Valor ganado (EV)", styles["body"]),
-        Paragraph(_fmt(evm.get("ev"), "$"), styles["body_r"]),
-    ], [
-        Paragraph("Costo real (AC)", styles["body"]),
-        Paragraph(_fmt(evm.get("ac"), "$"), styles["body_r"]),
-        Paragraph("Estimado al finalizar (EAC)", styles["body"]),
-        Paragraph(_fmt(evm.get("eac"), "$"), styles["body_r"]),
-    ], [
-        Paragraph("Variación de costo (CV)", styles["body"]),
-        Paragraph(_fmt(evm.get("cv"), "$"), styles["body_r"]),
-        Paragraph("Sobre presupuesto proyectado", styles["body"]),
-        Paragraph(_fmt(evm.get("over_budget_at_completion"), "$"), styles["body_r"]),
-    ]]
-    et = Table(evm_rows, colWidths=[150, 105, 165, 95])
-    et.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.4, _LINE),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("BACKGROUND", (0, 0), (0, -1), _ZEBRA),
-        ("BACKGROUND", (2, 0), (2, -1), _ZEBRA),
-    ]))
-    story.append(et)
+    # --- Estado financiero (EVM + IPC) — omitido en el link del comitente ---
+    if not public:
+        evm_rows = [[
+            Paragraph("Presupuesto (BAC)", styles["body"]),
+            Paragraph(_fmt(evm.get("bac"), "$"), styles["body_r"]),
+            Paragraph("Valor ganado (EV)", styles["body"]),
+            Paragraph(_fmt(evm.get("ev"), "$"), styles["body_r"]),
+        ], [
+            Paragraph("Costo real (AC)", styles["body"]),
+            Paragraph(_fmt(evm.get("ac"), "$"), styles["body_r"]),
+            Paragraph("Estimado al finalizar (EAC)", styles["body"]),
+            Paragraph(_fmt(evm.get("eac"), "$"), styles["body_r"]),
+        ], [
+            Paragraph("Variación de costo (CV)", styles["body"]),
+            Paragraph(_fmt(evm.get("cv"), "$"), styles["body_r"]),
+            Paragraph("Sobre presupuesto proyectado", styles["body"]),
+            Paragraph(_fmt(evm.get("over_budget_at_completion"), "$"), styles["body_r"]),
+        ]]
+        et = Table(evm_rows, colWidths=[150, 105, 165, 95])
+        et.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.4, _LINE),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("BACKGROUND", (0, 0), (0, -1), _ZEBRA),
+            ("BACKGROUND", (2, 0), (2, -1), _ZEBRA),
+        ]))
+        story.append(Paragraph("Estado financiero (valor ganado)", styles["h2"]))
+        story.append(et)
+        if inflation:
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(
+                f"<b>Ajuste por inflación (IPC INDEC):</b> el IPC acumuló "
+                f"<b>{_fmt(inflation.get('accum_pct'))}%</b> desde el baseline "
+                f"({inflation.get('ipc_base_date')} → {inflation.get('ipc_now_date')}). "
+                f"De la diferencia contra lo gastado, {_fmt(inflation.get('inflation_gap'), '$')} "
+                f"es atribuible a inflación y <b>{_fmt(inflation.get('real_variance'), '$')} "
+                f"es desvío real</b> (tu gestión, no los precios).",
+                styles["alert_d"]))
 
-    if inflation:
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(
-            f"<b>Ajuste por inflación (IPC INDEC):</b> el IPC acumuló "
-            f"<b>{_fmt(inflation.get('accum_pct'))}%</b> desde el baseline "
-            f"({inflation.get('ipc_base_date')} → {inflation.get('ipc_now_date')}). "
-            f"De la diferencia contra lo gastado, {_fmt(inflation.get('inflation_gap'), '$')} "
-            f"es atribuible a inflación y <b>{_fmt(inflation.get('real_variance'), '$')} "
-            f"es desvío real</b> (tu gestión, no los precios).",
-            styles["alert_d"]))
-    else:
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(
-            "Ajuste por IPC no disponible (baseline reciente o sin serie INDEC cargada).",
-            styles["alert_d"]))
-
-    # --- Avance por etapa ---
+    # --- Avance por etapa (sin columna de presupuesto en modo público) ---
     stages = progress.get("stages", [])
     if stages:
         story.append(Paragraph("Avance por etapa", styles["h2"]))
         rows = []
         for sgt in stages:
             delay = sgt.get("delay_days", 0)
-            rows.append([
+            row = [
                 Paragraph(sgt.get("stage", "—"), styles["body"]),
                 Paragraph(f"{sgt.get('pct', 0)}%", styles["body_r"]),
-                Paragraph(_fmt(sgt.get("cost_planned"), "$"), styles["body_r"]),
-                Paragraph(str(sgt.get("n_tareas", 0)), styles["body_r"]),
-                Paragraph(f"+{delay}d" if delay else "en fecha", styles["body_r"]),
-            ])
-        story.append(_table(
-            ["Etapa", "Avance", "Presupuesto", "Tareas", "Atraso"],
-            rows, [170, 70, 130, 65, 90], aligns=[0, 2, 2, 2, 2]))
+            ]
+            if not public:
+                row.append(Paragraph(_fmt(sgt.get("cost_planned"), "$"), styles["body_r"]))
+            row.append(Paragraph(str(sgt.get("n_tareas", 0)), styles["body_r"]))
+            row.append(Paragraph(f"+{delay}d" if delay else "en fecha", styles["body_r"]))
+            rows.append(row)
+        if public:
+            story.append(_table(["Etapa", "Avance", "Tareas", "Atraso"],
+                                rows, [230, 90, 90, 105], aligns=[0, 2, 2, 2]))
+        else:
+            story.append(_table(["Etapa", "Avance", "Presupuesto", "Tareas", "Atraso"],
+                                rows, [170, 70, 130, 65, 90], aligns=[0, 2, 2, 2, 2]))
 
     # --- Alertas ---
     alist = alerts.get("alerts", [])
     crit = alerts.get("critical_path", [])
+    # En modo público solo se muestran retrasos (las de costo/pre-acopio son
+    # información financiera del contratista).
+    if public:
+        alist = [a for a in alist if a.get("type") == "retraso"]
     story.append(Paragraph("Alertas y anticipación", styles["h2"]))
     if crit:
         story.append(Paragraph(
@@ -277,7 +288,9 @@ def build_work_report_pdf(project_name: str, plan: dict, progress: dict,
             f"empuja la fecha final.", styles["alert_d"]))
         story.append(Spacer(1, 4))
     if not alist:
-        story.append(Paragraph("Sin alertas: la obra está dentro de holgura y presupuesto.",
+        story.append(Paragraph("Sin alertas de cronograma: la obra está dentro de holgura."
+                               if public else
+                               "Sin alertas: la obra está dentro de holgura y presupuesto.",
                                styles["body"]))
     else:
         rows = []
@@ -309,8 +322,8 @@ def build_work_report_pdf(project_name: str, plan: dict, progress: dict,
         ]))
         story.append(at)
 
-    # --- Recalibración de rendimientos ---
-    ys = alerts.get("yield_suggestions", [])
+    # --- Recalibración de rendimientos (interno, no en el link del comitente) ---
+    ys = [] if public else alerts.get("yield_suggestions", [])
     if ys:
         story.append(Paragraph("Recalibración de rendimientos", styles["h2"]))
         story.append(Paragraph(
