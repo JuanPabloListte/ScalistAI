@@ -214,9 +214,11 @@ def generate_draft(project_id: int, db: Session, *,
     db.add(plan)
     db.flush()
 
-    # Crear tareas; luego cablear depends_on etapa→etapa con ids reales.
-    by_stage: dict[int, list[WorkTask]] = {}
-    # `assembly` en el dict de compute_schedule es el NOMBRE (str).
+    # Crear tareas; luego cablear depends_on con ids reales. Dos planos:
+    # etapa→etapa (como siempre) y, dentro de una etapa, nivel k−1 → nivel k
+    # (proyectos BIM: la mampostería de P1 depende de la de PB).
+    by_stage: dict[int, list[tuple[WorkTask, int | None]]] = {}
+    # `assembly` en el dict de compute_schedule es el NOMBRE (str, ya con nivel).
     for t in sched["tasks"]:
         task = WorkTask(
             work_plan_id=plan.id, assembly_id=t.get("assembly_id"),
@@ -228,14 +230,25 @@ def generate_draft(project_id: int, db: Session, *,
             cost_planned=t["cost"], source="auto",
         )
         db.add(task)
-        by_stage.setdefault(t["stage_order"], []).append(task)
+        by_stage.setdefault(t["stage_order"], []).append((task, t.get("level_order")))
     db.flush()
 
     orders = sorted(by_stage)
-    for i, order in enumerate(orders[1:], start=1):
-        prev_ids = [t.id for t in by_stage[orders[i - 1]]]
-        for task in by_stage[order]:
-            task.depends_on = prev_ids
+    for i, order in enumerate(orders):
+        prev_stage_ids = ([t.id for t, _ in by_stage[orders[i - 1]]] if i > 0 else [])
+        here = by_stage[order]
+        levels = sorted({lo for _, lo in here if lo is not None})
+        first = levels[0] if levels else None
+        ids_by_level = {lo: [t.id for t, l in here if l == lo] for lo in levels}
+        for task, lo in here:
+            if lo is None or lo == first:
+                # Sin nivel (o el nivel más bajo): depende de la etapa anterior.
+                if prev_stage_ids:
+                    task.depends_on = prev_stage_ids
+            else:
+                # Nivel k: depende de las tareas del nivel anterior de SU etapa.
+                prev_lo = levels[levels.index(lo) - 1]
+                task.depends_on = ids_by_level[prev_lo]
     db.flush()
     return plan
 

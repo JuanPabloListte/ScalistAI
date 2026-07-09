@@ -205,12 +205,50 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
     out: list[dict] = []
     raw = Counter()
 
+    # --- Niveles (IfcBuildingStorey) ordenados por elevación ---
+    # level_order 0 = el piso más bajo. Con esto el cronograma puede secuenciar
+    # "Mampostería — PB" antes que "— Piso 1" (tareas por nivel).
+    storeys = sorted(f.by_type("IfcBuildingStorey"),
+                     key=lambda st: _num(getattr(st, "Elevation", 0.0)))
+    storey_order = {st.id(): i for i, st in enumerate(storeys)}
+    storey_name = {st.id(): (st.Name or f"Nivel {i + 1}")
+                   for i, st in enumerate(storeys)}
+
+    def _up(node):
+        """Padre espacial: contención (RelContained) o agregación (Decomposes —
+        los IfcSpace se AGREGAN al storey, no se contienen)."""
+        nxt = UE.get_container(node)
+        if nxt is not None:
+            return nxt
+        for rel in getattr(node, "Decomposes", None) or []:
+            return rel.RelatingObject
+        return None
+
+    def _level_of(el):
+        """(nombre, orden) del storey del elemento; (None, None) si no se puede
+        resolver. Sube por el árbol espacial (un artefacto puede vivir en un
+        IfcSpace, que a su vez decompone al storey)."""
+        try:
+            cont = _up(el)
+            hops = 0
+            while cont is not None and not cont.is_a("IfcBuildingStorey") and hops < 5:
+                cont = _up(cont)
+                hops += 1
+        except Exception:  # noqa: BLE001
+            return None, None
+        if cont is None or not cont.is_a("IfcBuildingStorey"):
+            return None, None
+        return storey_name.get(cont.id()), storey_order.get(cont.id())
+
     def _with_mat(el, d: dict) -> dict:
-        """Agrega el material BIM al dict del elemento (si el modelo lo trae).
-        Después se usa para auto-asignar la receta (ladrillo vs piedra...)."""
+        """Agrega material BIM (para auto-asignar receta) y nivel (storey) al
+        dict del elemento."""
         mat = _material_name(el)
         if mat:
             d["material"] = mat
+        lvl, lo = _level_of(el)
+        if lvl is not None:
+            d["level"], d["level_order"] = lvl, lo
         return d
 
     # --- Aberturas: medida directa (exacta), sin geometría ---
@@ -288,7 +326,9 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             else:
                 area = area * scale * scale
             if area and math.isfinite(area) and 0 < area <= SLAB_MAX_M ** 2:
-                out.append({"type": "room", "area_m2": area, "length_m": 4 * area ** 0.5, "height_m": DEFAULT_HEIGHT_M})
+                out.append(_with_mat(sp, {"type": "room", "area_m2": area,
+                                          "length_m": 4 * area ** 0.5,
+                                          "height_m": DEFAULT_HEIGHT_M}))
                 raw["room"] += 1
     elif floor_slab_areas:
         # --- Sin IfcSpace: ESTIMAMOS el área cubierta ---
@@ -296,10 +336,17 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         # niveles: sumarlas infla el área varias veces. En su lugar usamos
         # HUELLA (la losa más grande, ~footprint del edificio) × pisos habitables.
         # Es determinístico y no depende de la geometría flaky de losas rotas.
+        # Cada piso estimado hereda el nombre del storey habitable que le toca.
         footprint = max(max(floor_slab_areas), roof_area)
-        for _ in range(max(1, n_floors)):
-            out.append({"type": "room", "area_m2": footprint, "length_m": 4 * footprint ** 0.5,
-                        "height_m": DEFAULT_HEIGHT_M, "subtype": "estimated_floor"})
+        hab = [st for st in storeys
+               if not any(k in (st.Name or "").upper() for k in _AUX_STOREY_KW)] or storeys
+        for i in range(max(1, n_floors)):
+            d = {"type": "room", "area_m2": footprint, "length_m": 4 * footprint ** 0.5,
+                 "height_m": DEFAULT_HEIGHT_M, "subtype": "estimated_floor"}
+            if i < len(hab):
+                d["level"] = hab[i].Name or f"Nivel {i + 1}"
+                d["level_order"] = storey_order.get(hab[i].id(), i)
+            out.append(d)
             raw["room(estimated)"] += 1
 
     # --- Columnas (sección < 2m) y vigas (sección < 1.5m) ---
@@ -344,7 +391,7 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
     # conjunto y no es agregable en coordenadas locales (juntar bboxes locales
     # de members no da la escalera). Se cuenta el elemento sin inventar área.
     for st_el in f.by_type("IfcStair"):
-        out.append({"type": "escalera"})
+        out.append(_with_mat(st_el, {"type": "escalera"}))
         raw["escalera"] += 1
 
     # --- Artefactos MEP: el modelo trae ARTEFACTOS aunque no las redes ---
@@ -355,16 +402,16 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
     for ft in f.by_type("IfcFlowTerminal"):
         name = _norm(getattr(ft, "Name", "") or "")
         if any(k in name for k in _SANITARY_KW):
-            out.append({"type": "sanitario"})
+            out.append(_with_mat(ft, {"type": "sanitario"}))
             raw["sanitario"] += 1
         elif any(k in name for k in _ELEC_FIXTURE_KW):
-            out.append({"type": "boca_electrica"})
+            out.append(_with_mat(ft, {"type": "boca_electrica"}))
             raw["boca_electrica"] += 1
     # Tomas/llaves suelen venir como proxies genéricos: solo keywords inequívocas.
     for px in f.by_type("IfcBuildingElementProxy"):
         name = _norm(getattr(px, "Name", "") or "")
         if any(k in name for k in ("PLUG", "SOCKET", "OUTLET", "TOMACORRIENTE")):
-            out.append({"type": "boca_electrica"})
+            out.append(_with_mat(px, {"type": "boca_electrica"}))
             raw["boca_electrica"] += 1
 
     # --- Armaduras (IfcReinforcingBar): acero EXACTO por atributos ---
@@ -378,12 +425,12 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
             d["length_m"] = L
             if A > 0:
                 d["kg"] = L * A * 7850.0
-        out.append(d)
+        out.append(_with_mat(rb, d))
         raw["armadura"] += 1
 
     # --- Equipos de climatización (calderas/calefactores): contados ---
     for dev in f.by_type("IfcEnergyConversionDevice"):
-        out.append({"type": "equipo_hvac"})
+        out.append(_with_mat(dev, {"type": "equipo_hvac"}))
         raw["equipo_hvac"] += 1
 
     # --- Cielorrasos (IfcCovering CEILING): contados, con área si la traen ---
@@ -394,7 +441,7 @@ def parse_ifc(path: str) -> tuple[list[dict], dict]:
         d = {"type": "cielorraso"}
         if area is not None and 0 < area * scale * scale <= SLAB_MAX_M ** 2:
             d["area_m2"] = area * scale * scale
-        out.append(d)
+        out.append(_with_mat(cv, d))
         raw["cielorraso"] += 1
 
     # --- Metadata del edificio (para autocompletar el Paso 5) ---
@@ -549,6 +596,7 @@ def process_ifc(plan_id: int) -> None:
                     length_m=e.get("length_m"), area_m2=e.get("area_m2"),
                     height_m=e.get("height_m"), source="ifc",
                     is_candidate=False, confidence=1.0,
+                    level=e.get("level"), level_order=e.get("level_order"),
                 )
                 # Material BIM → receta (solo tipos con receta directa; los
                 # rooms usan recetas compuestas room_* y quedan al default).

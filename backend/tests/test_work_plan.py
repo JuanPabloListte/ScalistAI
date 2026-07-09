@@ -367,6 +367,58 @@ def test_work_report_pdf():
         db.close()
 
 
+def test_bim_tasks_por_nivel():
+    """Proyectos BIM: una tarea por (receta, nivel), niveles en secuencia y
+    dependencia FS nivel k−1 → k dentro de la etapa. Elementos sin nivel
+    conservan el comportamiento histórico (una tarea por receta)."""
+    import datetime as _dt
+
+    from app.core.database import SessionLocal
+    from app.models import DetectedElement, Plan
+    from app.services import work_plan as wp
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        plan_row = db.scalars(select(Plan).where(Plan.project_id == project.id)).first()
+        # El muro de _setup queda SIN nivel; agregamos muros BIM en dos pisos.
+        db.add_all([
+            DetectedElement(plan_id=plan_row.id, page=1, type="wall", geometry={},
+                            length_m=20.0, height_m=2.8, source="ifc", is_candidate=False,
+                            level="Planta Baja", level_order=0),
+            DetectedElement(plan_id=plan_row.id, page=1, type="wall", geometry={},
+                            length_m=12.0, height_m=2.8, source="ifc", is_candidate=False,
+                            level="Piso 1", level_order=1),
+        ])
+        db.flush()
+
+        draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
+        s = wp.serialize(draft)
+        names = [t["assembly"] for t in s["tasks"]]
+
+        pb = next((t for t in s["tasks"] if t["assembly"].endswith("— Planta Baja")), None)
+        p1 = next((t for t in s["tasks"] if t["assembly"].endswith("— Piso 1")), None)
+        assert pb is not None and p1 is not None, f"faltan tareas por nivel: {names}"
+        # el muro sin nivel de _setup sigue generando su tarea propia (28 m²)
+        sin_nivel = [t for t in s["tasks"] if t["unit"] == "m²" and "—" not in t["assembly"]]
+        assert sin_nivel, f"desapareció la tarea sin nivel: {names}"
+
+        # cantidades por nivel (20×2.8=56 / 12×2.8=33.6)
+        assert abs(pb["quantity"] - 56.0) < 0.1 and abs(p1["quantity"] - 33.6) < 0.1
+
+        # secuencia de pisos: P1 arranca cuando termina PB
+        assert p1["start_date"] >= pb["end_date"], (pb, p1)
+        # dependencia FS por nivel
+        assert pb["id"] in p1["depends_on"], f"P1 no depende de PB: {p1['depends_on']}"
+        # el nivel más bajo depende de la etapa anterior (la viga)
+        viga = next(t for t in s["tasks"] if t["unit"] == "ml")
+        assert viga["id"] in pb["depends_on"]
+    finally:
+        db.rollback()
+        db.close()
+
+
 def test_comitente_share_link():
     """Link solo-lectura del comitente: crear/rotar/revocar (autenticado) +
     acceso público sin login que sirve el reporte SIN financieros."""
