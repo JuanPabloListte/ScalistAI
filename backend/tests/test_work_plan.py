@@ -168,15 +168,77 @@ def test_full_lifecycle():
         db.close()
 
 
+def test_etapa4_cpm_alerts():
+    """CPM + alertas + recalibración de rendimientos sobre un plan congelado.
+
+    - Camino crítico: viga (Estructura) → muro (Mampostería) encadenadas.
+    - Retraso que importa: el muro rinde por debajo del plan y se atrasa más
+      que su holgura → alerta 'retraso'.
+    - Sobrecosto: gasto real >> valor ganado → CPI bajo → alerta 'sobrecosto'.
+    - Recalibración: 3+ días de avance con rendimiento real ≠ receta → sugerencia.
+    """
+    import datetime as _dt
+
+    from app.core.database import SessionLocal
+    from app.models.work_plan import ActualCost, ProgressEntry
+    from app.services import work_plan as wp
+    from app.services.work_alerts import build_alerts
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1), crews=1)
+        wp.freeze(draft, db)
+        s = wp.serialize(draft)
+        muro = next(t for t in s["tasks"] if t["unit"] == "m²" and abs(t["quantity"] - 28.0) < 0.1)
+        viga = next(t for t in s["tasks"] if t["unit"] == "ml" and abs(t["quantity"] - 40.0) < 0.1)
+        # el muro (etapa posterior) depende de la viga → cadena crítica
+        assert viga["id"] in muro["depends_on"]
+
+        # 3 días de avance lento en el muro: 4+4+4 = 12 de 28 → rinde 4/día
+        # (plan 10/día) → recalibración -60% y proyección atrasada.
+        for d, q in [(3, 4), (4, 4), (5, 4)]:
+            db.add(ProgressEntry(task_id=muro["id"], date=_dt.date(2026, 8, d), qty_done=q))
+        # gasto real muy por encima del avance → CPI bajo.
+        db.add(ActualCost(project_id=project.id, date=_dt.date(2026, 8, 5),
+                          amount=5_000_000, kind="material", stage="Mampostería"))
+        db.flush()
+        db.refresh(draft)
+
+        today = _dt.date(2026, 8, 6)
+        r = build_alerts(draft, db, today=today)
+
+        # camino crítico incluye viga y muro
+        assert viga["id"] in r["critical_path"] and muro["id"] in r["critical_path"]
+        assert r["project_duration"] >= 1
+
+        types = {a["type"] for a in r["alerts"]}
+        assert "sobrecosto" in types, f"esperaba alerta de sobrecosto: {types}"
+        assert "retraso" in types, f"esperaba alerta de retraso: {types}"
+
+        # recalibración: el muro rinde 4/día, muy por debajo de la receta
+        # (la default de la org, sea cual sea su daily_yield) → sugerencia negativa
+        ys = next((y for y in r["yield_suggestions"] if abs(y["real_yield"] - 4.0) < 0.1), None)
+        assert ys is not None, f"esperaba recalibración del muro: {r['yield_suggestions']}"
+        assert ys["planned_yield"] > 0 and ys["diff_pct"] < -50
+    finally:
+        db.rollback()
+        db.close()
+
+
 if __name__ == "__main__":
+    tests = sorted((n, f) for n, f in globals().items()
+                   if n.startswith("test_") and callable(f))
     failed = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"  ok    {name}")
-            except AssertionError as exc:
-                failed += 1
-                print(f"  FAIL  {name}: {exc}")
-    print(f"\n{'1' if not failed else '0'}/1 tests pasaron" if False else f"\n{1 - failed}/1 tests pasaron")
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"  ok    {name}")
+        except AssertionError as exc:
+            failed += 1
+            print(f"  FAIL  {name}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            print(f"  ERROR {name}: {type(exc).__name__}: {exc}")
+    print(f"\n{len(tests) - failed}/{len(tests)} tests pasaron")
     sys.exit(1 if failed else 0)

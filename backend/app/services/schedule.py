@@ -161,7 +161,8 @@ def compute_schedule(project_id: int, db: Session,
         yield_ = asm.daily_yield or 0.0
         duration = math.ceil(info["qty"] / (yield_ * crews)) if yield_ > 0 and info["qty"] > 0 else 1
         tasks.append({
-            "assembly": asm.name, "stage": asm.stage or "Sin etapa",
+            "assembly": asm.name, "assembly_id": asm.id,
+            "stage": asm.stage or "Sin etapa",
             "stage_order": asm.stage_order or 0,
             "quantity": round(info["qty"], 1), "unit": _unit_for(asm.applies_to),
             "duration_days": max(1, duration), "cost": round(info["cost"], 2),

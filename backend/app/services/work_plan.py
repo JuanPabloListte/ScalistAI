@@ -89,7 +89,7 @@ def generate_draft(project_id: int, db: Session, *,
     # `assembly` en el dict de compute_schedule es el NOMBRE (str).
     for t in sched["tasks"]:
         task = WorkTask(
-            work_plan_id=plan.id,
+            work_plan_id=plan.id, assembly_id=t.get("assembly_id"),
             name=t["assembly"], stage=t["stage"], stage_order=t["stage_order"],
             qty_planned=t["quantity"], unit=t["unit"],
             duration_days=t["duration_days"],
