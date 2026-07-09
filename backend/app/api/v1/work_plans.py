@@ -452,6 +452,27 @@ def create_task(
     return wp.serialize(plan)
 
 
+@router.delete("/work-tasks/{task_id}", status_code=204)
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """Elimina una tarea MANUAL (change order). Las tareas del cómputo
+    (source="auto") son el cronograma: no se borran sueltas — se cambian
+    reprogramando una versión nueva."""
+    task = db.get(WorkTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    _plan_guard(task.work_plan_id, db, user)
+    if task.source != "manual":
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se eliminan tareas manuales; las del cronograma se cambian reprogramando.")
+    db.delete(task)
+    db.commit()
+
+
 @router.get("/work-tasks/{task_id}/history")
 def get_task_history(
     task_id: int,
