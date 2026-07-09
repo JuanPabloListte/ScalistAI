@@ -217,6 +217,107 @@ def delete_progress(
     db.commit()
 
 
+class ActualCostCreate(BaseModel):
+    date: Optional[str] = None
+    amount: float = Field(..., gt=0)
+    kind: str = Field("material", pattern="^(material|mano_obra|otro)$")
+    work_task_id: Optional[int] = None
+    stage: Optional[str] = None
+    note: Optional[str] = None
+
+
+@router.get("/projects/{project_id}/work-cost")
+def get_work_cost(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Avance FINANCIERO del baseline activo: EVM (PV/EV/AC/CPI/SPI/EAC),
+    desvío ajustado por IPC (inflación vs desvío real) y curva S plan/real/
+    proyección."""
+    from app.services.work_cost import cost_summary
+
+    _project_guard(project_id, db, user)
+    active = next((p for p in wp.list_versions(project_id, db)
+                   if p.status == "active"), None)
+    if active is None:
+        raise HTTPException(status_code=404,
+                            detail="No hay baseline activo: congelá el plan de obra primero.")
+    db.refresh(active)
+    return cost_summary(active, db)
+
+
+@router.get("/projects/{project_id}/actual-costs")
+def list_actual_costs(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    from app.models.work_plan import ActualCost
+    from sqlalchemy import select as _select
+
+    _project_guard(project_id, db, user)
+    return [{
+        "id": a.id, "date": a.date.isoformat(), "amount": a.amount,
+        "kind": a.kind, "work_task_id": a.work_task_id, "stage": a.stage,
+        "note": a.note,
+    } for a in db.scalars(_select(ActualCost)
+                          .where(ActualCost.project_id == project_id)
+                          .order_by(ActualCost.date.desc(), ActualCost.id.desc())).all()]
+
+
+@router.post("/projects/{project_id}/actual-costs")
+def add_actual_cost(
+    project_id: int,
+    payload: ActualCostCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Registra un costo REAL (factura, jornal, otro). Devuelve el resumen
+    financiero actualizado."""
+    from app.models.work_plan import ActualCost, WorkTask
+    from app.services.work_cost import cost_summary
+
+    _project_guard(project_id, db, user)
+    stage = payload.stage
+    if payload.work_task_id is not None:
+        task = db.get(WorkTask, payload.work_task_id)
+        if task is None or db.get(WorkPlan, task.work_plan_id).project_id != project_id:
+            raise HTTPException(status_code=400, detail="Tarea inválida para este proyecto")
+        stage = stage or task.stage
+    cost = ActualCost(
+        project_id=project_id,
+        date=dt.date.fromisoformat(payload.date) if payload.date else dt.date.today(),
+        amount=payload.amount, kind=payload.kind,
+        work_task_id=payload.work_task_id, stage=stage,
+        note=payload.note, created_by=user.id,
+    )
+    db.add(cost)
+    db.commit()
+    active = next((p for p in wp.list_versions(project_id, db)
+                   if p.status == "active"), None)
+    if active is None:
+        return {}
+    db.refresh(active)
+    return cost_summary(active, db)
+
+
+@router.delete("/actual-costs/{cost_id}", status_code=204)
+def delete_actual_cost(
+    cost_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    from app.models.work_plan import ActualCost
+
+    cost = db.get(ActualCost, cost_id)
+    if cost is None:
+        raise HTTPException(status_code=404, detail="Costo no encontrado")
+    _project_guard(cost.project_id, db, user)
+    db.delete(cost)
+    db.commit()
+
+
 @router.patch("/work-tasks/{task_id}")
 def patch_task(
     task_id: int,
