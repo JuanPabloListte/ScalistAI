@@ -19,8 +19,127 @@ import datetime as dt
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.work_plan import WorkPlan, WorkTask
+from app.models.work_plan import WorkPlan, WorkTask, WorkTaskEvent
 from app.services.schedule import compute_schedule
+
+
+def record_event(db: Session, task: WorkTask, field: str,
+                 old, new, user_id: int | None = None,
+                 note: str | None = None) -> WorkTaskEvent:
+    """Anota un cambio en el historial de la tarea (append-only). `old`/`new`
+    se guardan como texto; None se preserva para distinguir "sin valor"."""
+    ev = WorkTaskEvent(
+        work_task_id=task.id, field=field,
+        old_value=None if old is None else str(old),
+        new_value=None if new is None else str(new),
+        note=note, created_by=user_id,
+    )
+    db.add(ev)
+    return ev
+
+
+def _resolve_assignee(assignee_id: int | None, org_id: int | None,
+                      db: Session) -> int | None:
+    """Valida que el responsable pertenezca a la organización. None o ≤0 → sin
+    responsable (desasignar). ValueError si el usuario es de otra org."""
+    from app.models.user import User
+    if assignee_id is None or assignee_id <= 0:
+        return None
+    member = db.get(User, assignee_id)
+    if member is None or member.organization_id != org_id:
+        raise ValueError("El responsable no pertenece a tu organización.")
+    return assignee_id
+
+
+_BASELINE_KEYS = ("name", "planned_start", "duration_days", "depends_on")
+
+
+def edit_task(task: WorkTask, plan: WorkPlan, org_id: int | None,
+              patch: dict, user_id: int | None, db: Session) -> None:
+    """Aplica cambios a una tarea y los registra en el historial.
+
+    Dos planos: BASELINE (nombre/fecha/duración/deps) solo sobre borrador
+    (PermissionError si el plan está congelado); FLUJO (estado/prioridad/
+    responsable/comentario) también sobre el baseline activo. `patch` trae solo
+    las claves enviadas (exclude_unset) para no pisar campos con defaults."""
+    if any(k in patch for k in _BASELINE_KEYS) and plan.status != "draft":
+        raise PermissionError(
+            "El cronograma congelado no se edita: usá 'Reprogramar' para crear "
+            "una versión nueva. (Estado, prioridad y responsable sí se pueden "
+            "cambiar sobre el plan activo.)")
+
+    if patch.get("name") is not None and patch["name"] != task.name:
+        record_event(db, task, "name", task.name, patch["name"], user_id)
+        task.name = patch["name"]
+    if patch.get("planned_start") is not None:
+        new_start = dt.date.fromisoformat(patch["planned_start"])
+        if new_start != task.planned_start:
+            record_event(db, task, "planned_start", task.planned_start.isoformat(),
+                         new_start.isoformat(), user_id)
+            task.planned_start = new_start
+    if patch.get("duration_days") is not None and patch["duration_days"] != task.duration_days:
+        record_event(db, task, "duration_days", task.duration_days,
+                     patch["duration_days"], user_id)
+        task.duration_days = patch["duration_days"]
+    if patch.get("depends_on") is not None and patch["depends_on"] != (task.depends_on or []):
+        record_event(db, task, "depends_on", task.depends_on or [],
+                     patch["depends_on"], user_id)
+        task.depends_on = patch["depends_on"] or None
+    task.planned_end = task.planned_start + dt.timedelta(days=task.duration_days)
+
+    note = patch.get("note")
+    if patch.get("status") is not None and patch["status"] != task.status:
+        record_event(db, task, "status", task.status, patch["status"], user_id, note=note)
+        task.status = patch["status"]
+    if patch.get("priority") is not None and patch["priority"] != task.priority:
+        record_event(db, task, "priority", task.priority, patch["priority"], user_id)
+        task.priority = patch["priority"]
+    if "assignee_id" in patch:
+        new_assignee = _resolve_assignee(patch["assignee_id"], org_id, db)
+        if new_assignee != task.assignee_id:
+            record_event(db, task, "assignee", task.assignee_id, new_assignee, user_id)
+            task.assignee_id = new_assignee
+    # Comentario suelto (sin cambio de estado) → evento de comentario.
+    if note is not None and patch.get("status") is None:
+        record_event(db, task, "comment", None, None, user_id, note=note)
+    db.flush()
+
+
+def create_manual_task(plan: WorkPlan, org_id: int | None, data: dict,
+                       user_id: int | None, db: Session) -> WorkTask:
+    """Crea una tarea MANUAL (change order). Aditiva: se permite sobre borrador
+    y sobre el baseline activo sin alterar las tareas del cronograma congelado.
+    Sin `planned_start`, arranca al terminar su(s) predecesora(s) (finish-to-
+    start) o al inicio del plan. ValueError si una dependencia no es del plan."""
+    assignee_id = _resolve_assignee(data.get("assignee_id"), org_id, db)
+    deps = data.get("depends_on") or []
+    dep_tasks = [db.get(WorkTask, d) for d in deps]
+    if any(t is None or t.work_plan_id != plan.id for t in dep_tasks):
+        raise ValueError("Alguna dependencia no es una tarea de este plan.")
+
+    if data.get("planned_start"):
+        start = dt.date.fromisoformat(data["planned_start"])
+    elif dep_tasks:
+        start = max(t.planned_end for t in dep_tasks) + dt.timedelta(days=1)
+    else:
+        start = plan.start_date
+
+    duration = data.get("duration_days", 1)
+    task = WorkTask(
+        work_plan_id=plan.id, name=data["name"],
+        stage=data.get("stage", "Sin etapa"), stage_order=data.get("stage_order", 0),
+        qty_planned=data.get("qty_planned", 0.0), unit=data.get("unit", "un"),
+        duration_days=duration, planned_start=start,
+        planned_end=start + dt.timedelta(days=duration),
+        cost_planned=data.get("cost_planned", 0.0), depends_on=deps or None,
+        source="manual", status=data.get("status", "pending"),
+        priority=data.get("priority", "medium"), assignee_id=assignee_id,
+    )
+    db.add(task)
+    db.flush()
+    record_event(db, task, "created", None, data["name"], user_id, note=data.get("note"))
+    db.flush()
+    return task
 
 
 def get_current_plan(project_id: int, db: Session) -> WorkPlan | None:
@@ -158,6 +277,8 @@ def rebaseline(project_id: int, db: Session) -> WorkPlan:
             duration_days=t.duration_days,
             planned_start=t.planned_start, planned_end=t.planned_end,
             cost_planned=t.cost_planned, source=t.source,
+            # El flujo de ejecución sobrevive a la reprogramación.
+            status=t.status, priority=t.priority, assignee_id=t.assignee_id,
         )
         db.add(c)
         clones.append((c, t.depends_on))
@@ -182,6 +303,10 @@ def serialize(plan: WorkPlan) -> dict:
         "cost": t.cost_planned,
         "daily_cost": round(t.cost_planned / max(1, t.duration_days), 2),
         "depends_on": t.depends_on or [], "source": t.source,
+        # Flujo tipo Jira (metadata de ejecución).
+        "status": t.status, "priority": t.priority,
+        "assignee_id": t.assignee_id,
+        "assignee_email": t.assignee.email if t.assignee else None,
     } for t in plan.tasks]
 
     stages_map: dict[tuple, list[dict]] = {}

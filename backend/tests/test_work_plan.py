@@ -226,6 +226,84 @@ def test_etapa4_cpm_alerts():
         db.close()
 
 
+def test_jira_workflow_fields():
+    """Campos de flujo tipo Jira: estado/prioridad/responsable + historial.
+
+    - FLUJO editable sobre el baseline ACTIVO (no rompe inmutabilidad).
+    - BASELINE (duración) sobre activo → PermissionError.
+    - Cada cambio queda en el historial de la tarea.
+    - Tarea MANUAL: aditiva, arranca al terminar su predecesora (FS).
+    """
+    import datetime as _dt
+
+    from app.core.database import SessionLocal
+    from app.services import work_plan as wp
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        from app.models import User
+        from sqlalchemy import select
+        org_id = db.get(User, project.user_id).organization_id
+        me = project.user_id
+
+        draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
+        t = draft.tasks[0]
+        assert t.status == "pending" and t.priority == "medium"
+
+        # flujo sobre borrador
+        wp.edit_task(t, draft, org_id,
+                     {"status": "in_progress", "priority": "high", "assignee_id": me,
+                      "note": "arranca la cuadrilla"}, me, db)
+        assert t.status == "in_progress" and t.priority == "high" and t.assignee_id == me
+        fields = {e.field for e in t.events}
+        assert {"status", "priority", "assignee"} <= fields
+        st_ev = next(e for e in t.events if e.field == "status")
+        assert st_ev.old_value == "pending" and st_ev.new_value == "in_progress"
+        assert st_ev.note == "arranca la cuadrilla"
+
+        # congelar y probar inmutabilidad del baseline vs flujo
+        wp.freeze(draft, db)
+        try:
+            wp.edit_task(t, draft, org_id, {"duration_days": 99}, me, db)
+            raise AssertionError("editar duración sobre baseline activo debería fallar")
+        except PermissionError:
+            pass
+        # flujo SÍ se puede sobre el activo
+        wp.edit_task(t, draft, org_id, {"status": "in_review"}, me, db)
+        assert t.status == "in_review"
+
+        # serialize expone los campos nuevos. expire_all() emula el commit del
+        # endpoint (recarga la relación assignee para traer el email).
+        db.expire_all()
+        s = wp.serialize(draft)
+        st = next(x for x in s["tasks"] if x["id"] == t.id)
+        assert st["status"] == "in_review" and st["priority"] == "high"
+        assert st["assignee_id"] == me and st["assignee_email"] is not None
+
+        # tarea manual (change order) encadenada a t: arranca a t.fin + 1 día
+        manual = wp.create_manual_task(
+            draft, org_id,
+            {"name": "Imprevisto: apuntalar", "stage": "Estructura", "stage_order": 2,
+             "duration_days": 3, "depends_on": [t.id], "priority": "critical"}, me, db)
+        assert manual.source == "manual" and manual.status == "pending"
+        assert manual.priority == "critical"
+        assert manual.planned_start == t.planned_end + _dt.timedelta(days=1)
+        assert manual.planned_end == manual.planned_start + _dt.timedelta(days=3)
+        assert any(e.field == "created" for e in manual.events)
+
+        # dependencia inválida (tarea de otro plan / inexistente) → ValueError
+        try:
+            wp.create_manual_task(draft, org_id,
+                                  {"name": "x", "depends_on": [999999]}, me, db)
+            raise AssertionError("dependencia inexistente debería fallar")
+        except ValueError:
+            pass
+    finally:
+        db.rollback()
+        db.close()
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

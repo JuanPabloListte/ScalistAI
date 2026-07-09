@@ -45,9 +45,16 @@ class DraftRequest(BaseModel):
 
 
 class TaskPatch(BaseModel):
+    # Baseline (solo editable en borrador).
     name: Optional[str] = None
     duration_days: Optional[int] = Field(None, ge=1, le=730)
     planned_start: Optional[str] = None  # ISO
+    depends_on: Optional[list[int]] = None
+    # Flujo de ejecución (editable también sobre el baseline activo).
+    status: Optional[str] = Field(None, pattern="^(pending|in_progress|in_review|completed|blocked|cancelled)$")
+    priority: Optional[str] = Field(None, pattern="^(low|medium|high|critical)$")
+    assignee_id: Optional[int] = None  # 0 o -1 desasigna
+    note: Optional[str] = None         # comentario libre para el historial
 
 
 @router.get("/projects/{project_id}/work-plan")
@@ -346,24 +353,85 @@ def patch_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Edita una tarea de un BORRADOR (el baseline congelado es inmutable —
-    para cambiarlo: rebaseline)."""
+    """Edita una tarea. Dos planos separados:
+
+    - BASELINE (nombre, fecha, duración, dependencias): solo sobre un BORRADOR;
+      el cronograma congelado es inmutable (para cambiarlo: reprogramar).
+    - FLUJO (estado, prioridad, responsable, comentario): metadata de EJECUCIÓN,
+      editable también sobre el baseline activo — no altera el plan medido.
+
+    Cada cambio queda en el historial de la tarea (pestaña "Historial")."""
     task = db.get(WorkTask, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     plan = _plan_guard(task.work_plan_id, db, user)
-    if plan.status != "draft":
-        raise HTTPException(
-            status_code=409,
-            detail="El baseline congelado no se edita: usá 'Reprogramar' para crear una versión nueva.")
-
-    if payload.name is not None:
-        task.name = payload.name
-    if payload.planned_start is not None:
-        task.planned_start = dt.date.fromisoformat(payload.planned_start)
-    if payload.duration_days is not None:
-        task.duration_days = payload.duration_days
-    task.planned_end = task.planned_start + dt.timedelta(days=task.duration_days)
+    project = db.get(Project, plan.project_id)
+    try:
+        wp.edit_task(task, plan, project.organization_id,
+                     payload.model_dump(exclude_unset=True), user.id, db)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
     db.refresh(plan)
     return wp.serialize(plan)
+
+
+class TaskCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    stage: str = Field("Sin etapa", max_length=64)
+    stage_order: int = Field(0, ge=0, le=99)
+    planned_start: Optional[str] = None            # ISO; default = inicio del plan
+    duration_days: int = Field(1, ge=1, le=730)
+    unit: str = Field("un", max_length=16)
+    qty_planned: float = Field(0.0, ge=0)
+    cost_planned: float = Field(0.0, ge=0)
+    depends_on: list[int] = Field(default_factory=list)
+    priority: str = Field("medium", pattern="^(low|medium|high|critical)$")
+    status: str = Field("pending", pattern="^(pending|in_progress|in_review|completed|blocked|cancelled)$")
+    assignee_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+@router.post("/work-plans/{plan_id}/work-tasks")
+def create_task(
+    plan_id: int,
+    payload: TaskCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Crea una tarea MANUAL (change order / imprevisto de obra). Se permite
+    sobre borrador y sobre el baseline activo: es aditiva, no altera las tareas
+    del cronograma congelado. Si `planned_start` es None, arranca al terminar
+    su(s) predecesora(s) (o al inicio del plan si no tiene dependencias)."""
+    plan = _plan_guard(plan_id, db, user)
+    project = db.get(Project, plan.project_id)
+    try:
+        wp.create_manual_task(plan, project.organization_id,
+                              payload.model_dump(), user.id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    db.refresh(plan)
+    return wp.serialize(plan)
+
+
+@router.get("/work-tasks/{task_id}/history")
+def get_task_history(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Historial de cambios de la tarea (más reciente primero) para la pestaña
+    "Historial" del detalle."""
+    task = db.get(WorkTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    _plan_guard(task.work_plan_id, db, user)
+    return [{
+        "id": e.id, "field": e.field,
+        "old_value": e.old_value, "new_value": e.new_value, "note": e.note,
+        "author_email": e.author.email if e.author else None,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+    } for e in task.events]
