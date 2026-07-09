@@ -304,6 +304,62 @@ def test_jira_workflow_fields():
         db.close()
 
 
+def test_work_report_pdf():
+    """Reporte ejecutivo PDF end-to-end: arma un plan real con avance + costo y
+    genera el PDF, validando que sea un PDF con las secciones esperadas."""
+    import datetime as _dt
+
+    import fitz  # PyMuPDF (para leer el PDF generado)
+
+    from app.core.database import SessionLocal
+    from app.models.work_plan import ActualCost, ProgressEntry
+    from app.services import work_plan as wp
+    from app.services.work_alerts import build_alerts
+    from app.services.work_cost import cost_summary
+    from app.services.work_progress import plan_progress
+    from app.services.work_report import build_work_report_pdf, _fmt_compact
+
+    # el compacto entra en una tarjeta y respeta el formato AR
+    assert _fmt_compact(-10_980_000) == "-$11,0 M"
+    assert _fmt_compact(850_000) == "$850 k"
+    assert _fmt_compact(None) == "—"
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
+        wp.freeze(draft, db)
+        s = wp.serialize(draft)
+        muro = next(t for t in s["tasks"] if t["unit"] == "m²")
+        today = _dt.date(2026, 8, 6)
+        for d, q in [(3, 6), (4, 6)]:
+            db.add(ProgressEntry(task_id=muro["id"], date=_dt.date(2026, 8, d), qty_done=q))
+        db.add(ActualCost(project_id=project.id, date=today, amount=1_000_000,
+                          kind="material", stage="Mampostería"))
+        db.flush()
+        db.refresh(draft)
+
+        pdf = build_work_report_pdf(
+            "Proyecto Test", wp.serialize(draft),
+            plan_progress(draft, db, today=today),
+            cost_summary(draft, db, today=today),
+            build_alerts(draft, db, today=today))
+        assert pdf[:5] == b"%PDF-" and len(pdf) > 2000
+
+        doc = fitz.open(stream=pdf, filetype="pdf")
+        try:
+            assert doc.page_count >= 1
+            text = "".join(p.get_text() for p in doc)
+        finally:
+            doc.close()
+        for section in ("Reporte de obra", "Proyecto Test", "Estado financiero",
+                        "Avance por etapa", "Alertas", "Detalle de tareas"):
+            assert section in text, f"falta la sección «{section}» en el PDF"
+    finally:
+        db.rollback()
+        db.close()
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

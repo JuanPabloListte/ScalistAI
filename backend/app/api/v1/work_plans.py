@@ -275,6 +275,39 @@ def get_work_alerts(
     return build_alerts(active, db)
 
 
+@router.get("/projects/{project_id}/work-report.pdf")
+def get_work_report(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Reporte ejecutivo de obra en PDF (avance físico + EVM ajustado por IPC +
+    alertas + detalle de tareas). Entregable para imprimir/enviar al comitente.
+    404 si no hay baseline activo."""
+    from fastapi.responses import StreamingResponse
+
+    from app.services.work_alerts import build_alerts
+    from app.services.work_cost import cost_summary
+    from app.services.work_progress import plan_progress
+    from app.services.work_report import build_work_report_pdf
+
+    project = _project_guard(project_id, db, user)
+    active = next((p for p in wp.list_versions(project_id, db)
+                   if p.status == "active"), None)
+    if active is None:
+        raise HTTPException(status_code=404,
+                            detail="No hay baseline activo: congelá el plan de obra primero.")
+    db.refresh(active)
+    pdf = build_work_report_pdf(
+        project.name, wp.serialize(active),
+        plan_progress(active, db), cost_summary(active, db),
+        build_alerts(active, db))
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in project.name)[:60]
+    return StreamingResponse(
+        iter([pdf]), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="obra_{safe}.pdf"'})
+
+
 @router.get("/projects/{project_id}/actual-costs")
 def list_actual_costs(
     project_id: int,
