@@ -1285,25 +1285,13 @@ export const api = {
       amount_candidates: number[]; date_candidates: string[]; note?: string;
     }>;
   },
-  getShareLink: (projectId: number) =>
-    request<{ token: string | null; report_url: string | null; created_at: string | null }>(
-      `/api/v1/projects/${projectId}/share-link`),
-  createShareLink: (projectId: number) =>
-    request<{ token: string | null; report_url: string | null; created_at: string | null }>(
-      `/api/v1/projects/${projectId}/share-link`, { method: "POST" }),
-  revokeShareLink: async (projectId: number) => {
+  // Descarga directa del reporte PDF al disco del usuario (sin generar un link).
+  // audience="comitente" arma la versión sin financieros, para reenviarla vos
+  // mismo (mail/WhatsApp) sin exponer una URL pública.
+  downloadWorkReport: async (projectId: number, projectName?: string, audience: "interno" | "comitente" = "interno") => {
     const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/share-link`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) throw new Error(`No se pudo revocar (HTTP ${res.status})`);
-  },
-  // URL pública absoluta del reporte del comitente (para copiar/compartir).
-  publicReportUrl: (token: string) => `${API_URL}/api/v1/public/obra/${token}/report.pdf`,
-  downloadWorkReport: async (projectId: number, projectName?: string) => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/work-report.pdf`, {
+    const qs = audience === "comitente" ? "?audience=comitente" : "";
+    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/work-report.pdf${qs}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
@@ -1315,7 +1303,7 @@ export const api = {
     const a = document.createElement("a");
     a.href = url;
     const safe = (projectName || `proyecto_${projectId}`).replace(/[^a-zA-Z0-9-_]/g, "_").slice(0, 60);
-    a.download = `obra_${safe}.pdf`;
+    a.download = `obra_${safe}${audience === "comitente" ? "_comitente" : ""}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();

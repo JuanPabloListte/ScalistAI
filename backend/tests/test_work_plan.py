@@ -419,9 +419,10 @@ def test_bim_tasks_por_nivel():
         db.close()
 
 
-def test_comitente_share_link():
-    """Link solo-lectura del comitente: crear/rotar/revocar (autenticado) +
-    acceso público sin login que sirve el reporte SIN financieros."""
+def test_reporte_comitente_descarga_directa():
+    """El reporte para el comitente se DESCARGA directo (autenticado,
+    ?audience=comitente) — no hay link público ni token. Debe seguir sin
+    filtrar financieros; audience=interno (default) sí los trae."""
     import datetime as _dt
 
     import fitz
@@ -443,33 +444,30 @@ def test_comitente_share_link():
 
         app.dependency_overrides[get_current_user] = lambda: user
         c = TestClient(app)
-        anon = TestClient(app)  # sin override → simula público, pero el override es global…
         try:
-            assert c.get(f"/api/v1/projects/{project.id}/share-link").json()["token"] is None
-            tok = c.post(f"/api/v1/projects/{project.id}/share-link").json()["token"]
-            assert tok and len(tok) >= 32
-            # rotar revoca el anterior
-            tok2 = c.post(f"/api/v1/projects/{project.id}/share-link").json()["token"]
-            assert tok2 != tok
-
-            # acceso público SIN auth (se limpia el override para el cliente anónimo)
+            # sin auth → 401/403, no hay endpoint público que lo esquive
             app.dependency_overrides.clear()
-            assert anon.get(f"/api/v1/public/obra/{tok}").status_code == 404  # viejo revocado
-            summ = anon.get(f"/api/v1/public/obra/{tok2}")
-            assert summ.status_code == 200 and summ.json()["has_report"] is True
-            pdf = anon.get(f"/api/v1/public/obra/{tok2}/report.pdf")
-            assert pdf.status_code == 200 and pdf.content[:5] == b"%PDF-"
-            # el reporte público NO filtra financieros
-            text = "".join(p.get_text() for p in fitz.open(stream=pdf.content, filetype="pdf"))
-            for leak in ("Estado financiero", "CPI", "Presupuesto", "BAC"):
-                assert leak not in text, f"el reporte público filtra «{leak}»"
-
-            # revocar (requiere auth de nuevo) → público deja de resolver
+            anon = TestClient(app)
+            assert anon.get(f"/api/v1/projects/{project.id}/work-report.pdf").status_code in (401, 403)
             app.dependency_overrides[get_current_user] = lambda: user
-            assert c.delete(f"/api/v1/projects/{project.id}/share-link").status_code == 204
-            app.dependency_overrides.clear()
-            assert anon.get(f"/api/v1/public/obra/{tok2}").status_code == 404
-            assert anon.get("/api/v1/public/obra/inexistente").status_code == 404
+
+            interno = c.get(f"/api/v1/projects/{project.id}/work-report.pdf")
+            assert interno.status_code == 200
+            assert interno.headers["content-disposition"].startswith("attachment")
+            assert "CPI" in "".join(p.get_text() for p in
+                                    fitz.open(stream=interno.content, filetype="pdf"))
+
+            comitente = c.get(f"/api/v1/projects/{project.id}/work-report.pdf?audience=comitente")
+            assert comitente.status_code == 200
+            assert "attachment" in comitente.headers["content-disposition"]
+            assert "_comitente" in comitente.headers["content-disposition"]
+            text = "".join(p.get_text() for p in
+                           fitz.open(stream=comitente.content, filetype="pdf"))
+            for leak in ("Estado financiero", "CPI", "Presupuesto", "BAC"):
+                assert leak not in text, f"el reporte comitente filtra «{leak}»"
+
+            # ya no existen los endpoints de link público
+            assert anon.get("/api/v1/public/obra/cualquiercosa").status_code == 404
         finally:
             app.dependency_overrides.clear()
     finally:
