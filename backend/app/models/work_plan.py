@@ -75,6 +75,10 @@ class WorkTask(Base):
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
 
     work_plan: Mapped["WorkPlan"] = relationship(back_populates="tasks")
+    # Nav de solo lectura a la receta (para pre-acopio / recalibración de
+    # rendimientos). Sin back_populates: Assembly no necesita conocer sus tareas.
+    assembly: Mapped["object | None"] = relationship(
+        "Assembly", foreign_keys=[assembly_id], viewonly=True)
     progress_entries: Mapped[list["ProgressEntry"]] = relationship(
         back_populates="task", cascade="all, delete-orphan")
 

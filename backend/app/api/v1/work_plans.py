@@ -247,6 +247,27 @@ def get_work_cost(
     return cost_summary(active, db)
 
 
+@router.get("/projects/{project_id}/work-alerts")
+def get_work_alerts(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Alertas anticipadas del baseline activo: retrasos que empujan la obra
+    (holgura CPM), sobrecosto (CPI), pre-acopio (material subiendo > IPC) y
+    sugerencias de recalibración de rendimientos. 404 si no hay baseline."""
+    from app.services.work_alerts import build_alerts
+
+    _project_guard(project_id, db, user)
+    active = next((p for p in wp.list_versions(project_id, db)
+                   if p.status == "active"), None)
+    if active is None:
+        raise HTTPException(status_code=404,
+                            detail="No hay baseline activo: congelá el plan de obra primero.")
+    db.refresh(active)
+    return build_alerts(active, db)
+
+
 @router.get("/projects/{project_id}/actual-costs")
 def list_actual_costs(
     project_id: int,
