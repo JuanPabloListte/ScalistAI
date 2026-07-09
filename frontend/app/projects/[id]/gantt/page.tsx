@@ -80,7 +80,6 @@ export default function ProjectGanttPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [shareMsg, setShareMsg] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [crews, setCrews] = useState<number>(1);
@@ -384,17 +383,13 @@ export default function ProjectGanttPage() {
     }
   }
 
-  // Genera/reutiliza el link de solo lectura del comitente y lo copia.
-  async function shareWithClient() {
+  // Descarga directa (sin link) del reporte SIN financieros, para reenviarlo
+  // vos mismo al comitente por mail/WhatsApp.
+  async function downloadComitenteReport() {
     setActing(true);
     setError(null);
     try {
-      let link = await api.getShareLink(projectId);
-      if (!link.token) link = await api.createShareLink(projectId);
-      const url = api.publicReportUrl(link.token!);
-      try { await navigator.clipboard.writeText(url); } catch { /* clipboard no disponible */ }
-      setShareMsg(`Link del comitente copiado: ${url}`);
-      setTimeout(() => setShareMsg(null), 6000);
+      await api.downloadWorkReport(projectId, project?.name, "comitente");
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
@@ -746,50 +741,52 @@ export default function ProjectGanttPage() {
 
   return (
     <main className="mx-auto max-w-none px-6 md:px-10 py-10">
-      <header className="mb-6 flex justify-between items-end">
+      <header className="mb-6 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
           <button onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition hover:text-brand-600 dark:text-slate-400">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             Volver
           </button>
-          <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">Cronograma de obra</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Planificación profesional centralizada y gestión integrada de estados, prioridades y bloqueos.
+          <div className="flex items-center gap-3 mt-2">
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Cronograma de obra</h1>
+            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm border ${
+              plan?.status === "active"
+                ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/20 dark:text-green-400 dark:border-green-800/40"
+                : plan?.status === "draft"
+                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800/40"
+                  : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-950/20 dark:text-slate-400 dark:border-slate-800/40"
+            }`}>
+              {plan ? (plan.status === "active" ? `Activo · v${plan.version}` : `Borrador · v${plan.version}`) : "Simulación"}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-2">
+            <span>
+              {plan?.status === "active"
+                ? `Baseline congelado el ${plan.frozen_at ? fmtDate(plan.frozen_at.slice(0, 10)) : "—"}.`
+                : plan?.status === "draft"
+                  ? "Revisá tareas y fechas; al congelar se convierte en el baseline contra el que se mide la obra."
+                  : "Calculado al vuelo. Generá el plan de obra para congelar un baseline y empezar el seguimiento."}
+            </span>
+            {versions.length > 1 && (
+              <span className="border-l border-slate-200 dark:border-slate-800 pl-2 text-slate-400 dark:text-slate-500">
+                Historial: {versions.map((v) => `v${v.version} (${v.status === "active" ? "activo" : "histórico"})`).join(" · ")}
+              </span>
+            )}
           </p>
         </div>
-      </header>
 
-      {/* Estado del plan de obra: simulación → borrador → baseline congelado */}
-      <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border p-4 ${
-        plan?.status === "active"
-          ? "border-green-300 bg-green-50 dark:border-green-500/30 dark:bg-green-500/10"
-          : plan?.status === "draft"
-            ? "border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10"
-            : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-      }`}>
-        {plan ? (
-          <>
-            <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${
-              plan.status === "active"
-                ? "bg-green-600 text-white"
-                : "bg-amber-500 text-white"
-            }`}>
-              {plan.status === "active" ? `Plan activo · v${plan.version}` : `Borrador · v${plan.version}`}
-            </span>
-            <span className="text-sm text-slate-600 dark:text-slate-300">
-              {plan.status === "active"
-                ? `Baseline congelado el ${plan.frozen_at ? fmtDate(plan.frozen_at.slice(0, 10)) : "—"} — inmutable; para cambiarlo, reprogramá una versión nueva.`
-                : "Revisá tareas y fechas; al congelar se convierte en el baseline contra el que se mide la obra."}
-            </span>
-            <div className="ml-auto flex gap-2">
+        {/* Action Buttons in Header */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {plan ? (
+            <>
               {plan.status === "draft" && (
                 <>
                   <button onClick={() => act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))} disabled={acting}
-                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">
+                    className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50">
                     Regenerar borrador
                   </button>
                   <button onClick={() => act(() => api.freezeWorkPlan(plan.plan_id))} disabled={acting}
-                    className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-50">
+                    className="rounded-lg bg-green-600 hover:bg-green-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors disabled:opacity-50">
                     {acting ? "…" : "Congelar baseline"}
                   </button>
                 </>
@@ -797,45 +794,40 @@ export default function ProjectGanttPage() {
               {plan.status === "active" && (
                 <>
                   <Link href={`/projects/${projectId}/obra`}
-                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500">
+                    className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors">
                     Registrar avances →
                   </Link>
                   <button onClick={downloadReport} disabled={acting}
-                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">
+                    className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50">
                     {acting ? "…" : "Reporte PDF"}
                   </button>
-                  <button onClick={shareWithClient} disabled={acting}
-                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">
-                    {acting ? "…" : "Compartir con comitente"}
+                  <button onClick={downloadComitenteReport} disabled={acting}
+                    className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                    title="Descarga el PDF sin datos financieros, para reenviarlo al comitente">
+                    {acting ? "…" : "Descargar para comitente"}
                   </button>
                   <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
-                    className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50 dark:text-green-400 dark:hover:bg-green-500/10">
-                    {acting ? "…" : "Reprogramar (nueva versión)"}
+                    className="rounded-lg border border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/20 px-3.5 py-2 text-xs font-semibold transition-colors disabled:opacity-50">
+                    {acting ? "…" : "Reprogramar"}
                   </button>
                 </>
               )}
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="rounded-full bg-slate-500 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">Simulación</span>
-            <span className="text-sm text-slate-600 dark:text-slate-300">
-              Cronograma calculado al vuelo. Generá el plan de obra para congelar un baseline y empezar el seguimiento.
-            </span>
+            </>
+          ) : (
             <button onClick={() => act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))} disabled={acting}
-              className="ml-auto rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500 disabled:opacity-50">
+              className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors disabled:opacity-50">
               {acting ? "Generando…" : "Generar plan de obra"}
             </button>
-          </>
-        )}
-        {versions.length > 1 && (
-          <div className="w-full text-xs text-slate-500 dark:text-slate-400">
-            Historial: {versions.map((v) => `v${v.version} (${v.status === "active" ? "activo" : v.status === "draft" ? "borrador" : "reemplazado"})`).join(" · ")}
-          </div>
-        )}
-        {shareMsg && <div className="w-full text-sm text-green-700 dark:text-green-400 break-all">{shareMsg}</div>}
-        {error && <div className="w-full text-sm text-red-600 dark:text-red-400">{error}</div>}
-      </div>
+          )}
+        </div>
+      </header>
+
+      {/* Floating Notifications */}
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700 dark:bg-red-950/20 dark:border-red-800/40 dark:text-red-400 animate-fade-in">
+          {error}
+        </div>
+      )}
 
       {/* Controles & Filtros */}
       <div className="mb-6 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
