@@ -35,7 +35,10 @@ export function CostosTab({ projectId, progress }: { projectId: number; progress
   const [kind, setKind] = useState("material");
   const [stage, setStage] = useState("");
   const [note, setNote] = useState("");
+  const [date, setDate] = useState("");
   const [saving, setSaving] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [invoiceMsg, setInvoiceMsg] = useState<string | null>(null);
 
   const load = useCallback(() => {
     Promise.all([api.getWorkCost(projectId), api.listActualCosts(projectId)])
@@ -52,12 +55,35 @@ export function CostosTab({ projectId, progress }: { projectId: number; progress
     try {
       const c = await api.addActualCost(projectId, {
         amount: a, kind, stage: stage || undefined, note: note || undefined,
+        date: date || undefined,
       });
       setCost(c);
       setRows(await api.listActualCosts(projectId));
-      setAmount(""); setNote("");
+      setAmount(""); setNote(""); setDate(""); setInvoiceMsg(null);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Importar factura (PDF con texto): PROPONE monto/fecha; el usuario revisa y
+  // confirma con "Registrar". No guarda nada por sí solo.
+  async function importInvoice(file: File) {
+    setParsing(true);
+    setInvoiceMsg(null);
+    try {
+      const p = await api.parseInvoice(projectId, file);
+      if (!p.ok) { setInvoiceMsg(p.reason || "No se pudo leer la factura."); return; }
+      if (p.amount != null) setAmount(String(p.amount));
+      if (p.date) setDate(p.date);
+      const proveedor = [p.vendor, p.cuit ? `CUIT ${p.cuit}` : null].filter(Boolean).join(" · ");
+      if (proveedor) setNote(proveedor);
+      setInvoiceMsg(
+        `Propuesta: $${p.amount != null ? fmtARS(p.amount) : "—"} · ${p.date || "sin fecha"}. ` +
+        "Revisá y confirmá con «Registrar».");
+    } catch (e) {
+      setInvoiceMsg(String((e as Error)?.message ?? e));
+    } finally {
+      setParsing(false);
     }
   }
 
@@ -185,12 +211,24 @@ export function CostosTab({ projectId, progress }: { projectId: number; progress
 
       {/* Cargar factura */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-3 font-bold text-slate-900 dark:text-white">Registrar costo real</h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-bold text-slate-900 dark:text-white">Registrar costo real</h3>
+          <label className="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-400 dark:border-slate-600 dark:text-slate-300">
+            {parsing ? "Leyendo…" : "Importar factura (PDF)"}
+            <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={parsing}
+                   onChange={(e) => { const f = e.target.files?.[0]; if (f) importInvoice(f); e.target.value = ""; }} />
+          </label>
+        </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
             Monto ($)
             <input type="number" min="0" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
                    className="mt-1 w-36 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base dark:border-slate-600 dark:bg-slate-800" />
+          </label>
+          <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+            Fecha
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                   className="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-800" />
           </label>
           <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
             Tipo
@@ -219,6 +257,9 @@ export function CostosTab({ projectId, progress }: { projectId: number; progress
             {saving ? "…" : "Registrar"}
           </button>
         </div>
+        {invoiceMsg && (
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{invoiceMsg}</p>
+        )}
         {rows.length > 0 && (
           <div className="mt-4 space-y-1">
             {rows.map((r) => (

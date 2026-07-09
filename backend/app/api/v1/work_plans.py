@@ -11,7 +11,7 @@ import datetime as dt
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -425,6 +425,27 @@ def public_obra_report(token: str, db: Session = Depends(get_db)):
     Se abre inline en el navegador."""
     project = _project_from_token(token, db)
     return _pdf_response(_render_report(project, db, public=True), project.name, inline=True)
+
+
+@router.post("/projects/{project_id}/invoices/parse")
+async def parse_invoice_pdf(
+    project_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Lee una factura (PDF con capa de texto) y PROPONE monto/fecha/proveedor
+    para un costo real. NO persiste nada: el usuario revisa y confirma con
+    POST /actual-costs. Extracción determinística — no fabrica datos."""
+    _project_guard(project_id, db, user)
+    name = (file.filename or "").lower()
+    if not name.endswith(".pdf") and file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Subí la factura en PDF (con texto).")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="El archivo está vacío.")
+    from app.services.invoice_parse import parse_invoice
+    return parse_invoice(data)
 
 
 @router.get("/projects/{project_id}/actual-costs")

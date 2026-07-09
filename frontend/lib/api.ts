@@ -1266,6 +1266,25 @@ export const api = {
       throw new Error(detail?.detail || `No se pudo eliminar (HTTP ${res.status})`);
     }
   },
+  parseInvoice: async (projectId: number, file: File) => {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/invoices/parse`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null);
+      throw new Error(detail?.detail || `No se pudo leer la factura (HTTP ${res.status})`);
+    }
+    return res.json() as Promise<{
+      ok: boolean; reason?: string;
+      amount: number | null; date: string | null; vendor: string | null; cuit: string | null;
+      amount_candidates: number[]; date_candidates: string[]; note?: string;
+    }>;
+  },
   getShareLink: (projectId: number) =>
     request<{ token: string | null; report_url: string | null; created_at: string | null }>(
       `/api/v1/projects/${projectId}/share-link`),
