@@ -124,15 +124,20 @@ export default function ProjectGanttPage() {
   const [liveDrag, setLiveDrag] = useState<{ taskName: string; daysOffset: number; durationDays: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isPanning = useRef(false);
+  const panStartX = useRef(0);
+  const panScrollLeft = useRef(0);
   const dragInfo = useRef<{
     taskName: string;
     initialLeft: number;
     initialWidth: number;
     initialMouseX: number;
     daysOffset: number;
-    durationDays: number;
+    durationDays: number;   // duración inicial
+    newDuration: number;    // duración en curso (la actualiza el resize)
     isManual: boolean;
-    taskId?: number;
+    taskId?: number | string;
   } | null>(null);
 
   // Load team users and metadata from LocalStorage
@@ -202,6 +207,47 @@ export default function ProjectGanttPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!isPanning.current || !scrollContainerRef.current) return;
+      const dx = e.clientX - panStartX.current;
+      scrollContainerRef.current.scrollLeft = panScrollLeft.current - dx;
+    };
+    const handleGlobalMouseUp = () => {
+      if (!isPanning.current || !scrollContainerRef.current) return;
+      isPanning.current = false;
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.style.cursor = "";
+        scrollContainerRef.current.style.userSelect = "";
+      }
+    };
+    document.addEventListener("mousemove", handleGlobalMouseMove);
+    document.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleGlobalMouseMove);
+      document.removeEventListener("mouseup", handleGlobalMouseUp);
+    };
+  }, []);
+
+  const handleMouseDownPan = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest(".gantt-bar-container") || 
+      target.closest("button") || 
+      target.closest("input") || 
+      target.closest("select") || 
+      target.closest("a")
+    ) {
+      return;
+    }
+    if (!scrollContainerRef.current) return;
+    isPanning.current = true;
+    panStartX.current = e.clientX;
+    panScrollLeft.current = scrollContainerRef.current.scrollLeft;
+    scrollContainerRef.current.style.cursor = "grabbing";
+    scrollContainerRef.current.style.userSelect = "none";
+  };
+
   const saveManualTasks = (tasksList: any[]) => {
     setManualTasks(tasksList);
     localStorage.setItem(`gantt_manual_tasks_${projectId}`, JSON.stringify(tasksList));
@@ -254,9 +300,15 @@ export default function ProjectGanttPage() {
     const apiTasks = schedule?.tasks || [];
     const formattedApiTasks = apiTasks.map((t, idx) => {
       const meta = jiraMetadata[t.assembly] || {};
-      const start = meta.startDateOverride || t.start_date;
-      const duration = meta.durationOverride || t.duration_days;
-      
+      // Tarea REAL del plan (tiene id) → las fechas mandan desde el servidor
+      // (el drag ahora persiste ahí). Los overrides locales solo valen en
+      // simulación (cálculo al vuelo, sin plan congelado).
+      const realId = typeof (t as any).id === "number" ? (t as any).id
+                   : typeof (t as any).task_id === "number" ? (t as any).task_id
+                   : null;
+      const start = (realId === null && meta.startDateOverride) || t.start_date;
+      const duration = (realId === null && meta.durationOverride) || t.duration_days;
+
       const startDateObj = new Date(start + "T00:00:00");
       const endDateObj = new Date(startDateObj.getTime() + duration * 86400000);
       const end = endDateObj.toISOString().slice(0, 10);
@@ -273,7 +325,7 @@ export default function ProjectGanttPage() {
         quantity: t.quantity,
         unit: t.unit,
         isManual: t.source === "manual",
-        taskId: (t as any).id || (t as any).task_id || idx + 1,
+        taskId: realId ?? `sim_${idx}`,
       };
     });
 
@@ -405,39 +457,33 @@ export default function ProjectGanttPage() {
     }
   }
 
-  // Task overrides updater
-  const updateTaskDates = async (taskName: string, start: string, end: string, duration: number, isManual: boolean, taskId?: any) => {
-    if (isManual) {
-      const updated = manualTasks.map(t => {
-        if (t.assembly === taskName) {
-          return { ...t, start_date: start, end_date: end, duration_days: duration };
-        }
-        return t;
-      });
-      saveManualTasks(updated);
-    } else {
-      if (plan && plan.status === "draft" && typeof taskId === "number") {
-        try {
-          await api.updateWorkTask(taskId, { planned_start: start, duration_days: duration });
-          load();
-        } catch (e) {
-          setError("No se pudo actualizar la tarea en el servidor. Asegurate de estar en modo Borrador.");
-        }
-      } else {
-        const updatedMeta = { ...jiraMetadata };
-        if (!updatedMeta[taskName]) updatedMeta[taskName] = {} as any;
-        updatedMeta[taskName] = {
-          ...updatedMeta[taskName],
-          startDateOverride: start,
-          endDateOverride: end,
-          durationOverride: duration,
-          history: [
-            ...(updatedMeta[taskName].history || []),
-            { date: new Date().toLocaleDateString("es-AR"), change: `Fechas reprogramadas: ${fmtDate(start)} al ${fmtDate(end)} (${duration} días)` }
-          ]
-        };
-        saveJiraMetadata(updatedMeta);
+  // Persiste el nuevo inicio/duración de una tarea (drag = fecha, resize = días).
+  const updateTaskDates = async (taskName: string, start: string, end: string, duration: number, isManual: boolean, taskId?: number | string) => {
+    // Tarea REAL del plan (id numérico) → al servidor. El backend permite editar
+    // fechas/duración solo en borrador; si el plan está congelado devuelve 409
+    // y mostramos ese mensaje (hay que reprogramar).
+    if (typeof taskId === "number") {
+      setError(null);
+      try {
+        const updated = await api.updateWorkTask(taskId, { planned_start: start, duration_days: duration });
+        setPlan(updated);
+        setSchedule(updated);
+      } catch (e) {
+        setError(String((e as Error)?.message ?? e));
       }
+      return;
+    }
+    // Simulación (sin plan congelado): la tarea vive local.
+    if (isManual) {
+      saveManualTasks(manualTasks.map(t =>
+        t.assembly === taskName ? { ...t, start_date: start, end_date: end, duration_days: duration } : t));
+    } else {
+      const updatedMeta = { ...jiraMetadata };
+      updatedMeta[taskName] = {
+        ...(updatedMeta[taskName] || {}),
+        startDateOverride: start, endDateOverride: end, durationOverride: duration,
+      };
+      saveJiraMetadata(updatedMeta);
     }
   };
 
@@ -548,9 +594,30 @@ export default function ProjectGanttPage() {
     const updatedMeta = { ...jiraMetadata };
     const current = getTaskMeta(taskName);
 
+    let nextLocalStatus = current.status;
+    let nextIsBlocked = current.isBlocked;
+
+    if (field === "isBlocked") {
+      nextIsBlocked = value;
+      if (value) {
+        nextLocalStatus = "Bloqueada";
+      } else if (current.status === "Bloqueada") {
+        nextLocalStatus = "En progreso";
+      }
+    } else if (field === "status") {
+      nextLocalStatus = value;
+      if (value === "Bloqueada") {
+        nextIsBlocked = true;
+      } else if (current.status === "Bloqueada" && value !== "Bloqueada") {
+        nextIsBlocked = false;
+      }
+    }
+
     updatedMeta[taskName] = {
       ...current,
       [field]: value,
+      status: nextLocalStatus,
+      isBlocked: nextIsBlocked,
       history: [
         ...(current.history || []),
         { date: new Date().toLocaleDateString("es-AR"), change: changeText }
@@ -559,22 +626,31 @@ export default function ProjectGanttPage() {
     saveJiraMetadata(updatedMeta);
 
     if (activeTask && activeTask.assembly === taskName) {
-      setActiveTask((prev: any) => ({ ...prev, [field]: value }));
+      setActiveTask((prev: any) => ({ 
+        ...prev, 
+        [field]: value,
+        status: nextLocalStatus,
+        isBlocked: nextIsBlocked
+      }));
     }
 
     // Write-through al backend para los campos que el plan persiste
-    // (estado/prioridad/responsables/descripción). Solo sobre tareas del plan
-    // (id numérico); las manuales/simulación quedan locales.
     const task = allTasks.find(t => t.assembly === taskName);
     const taskId = task && typeof task.taskId === "number" ? task.taskId : null;
     if (taskId === null) return;
 
     let payload: Record<string, any> | null = null;
-    if (field === "status") payload = { status: STATUS_ES_TO_EN[value] };
-    else if (field === "priority") payload = { priority: PRIORITY_ES_TO_EN[value] };
-    else if (field === "description") payload = { description: value || null };
-    else if (field === "assignees") payload = { assignee_ids: namesToIds(value as string[]) };
-    else if (field === "isBlocked" && value === true) payload = { status: "blocked" };
+    if (field === "status") {
+      payload = { status: STATUS_ES_TO_EN[value] };
+    } else if (field === "priority") {
+      payload = { priority: PRIORITY_ES_TO_EN[value] };
+    } else if (field === "description") {
+      payload = { description: value || null };
+    } else if (field === "assignees") {
+      payload = { assignee_ids: namesToIds(value as string[]) };
+    } else if (field === "isBlocked") {
+      payload = { status: value ? "blocked" : STATUS_ES_TO_EN[nextLocalStatus] || "todo" };
+    }
     if (!payload) return;
 
     api.updateWorkTask(taskId, payload)
@@ -664,6 +740,7 @@ export default function ProjectGanttPage() {
       initialMouseX: e.clientX,
       daysOffset: 0,
       durationDays: task.duration_days,
+      newDuration: task.duration_days,
       isManual: task.isManual,
       taskId: task.taskId,
     };
@@ -682,6 +759,7 @@ export default function ProjectGanttPage() {
       initialMouseX: e.clientX,
       daysOffset: 0,
       durationDays: task.duration_days,
+      newDuration: task.duration_days,
       isManual: task.isManual,
       taskId: task.taskId,
     };
@@ -707,6 +785,7 @@ export default function ProjectGanttPage() {
     const deltaX = e.clientX - dragInfo.current.initialMouseX;
     const deltaDays = Math.round(deltaX / 16);
     const newDuration = Math.max(1, dragInfo.current.durationDays + deltaDays);
+    dragInfo.current.newDuration = newDuration;  // fuente de verdad (el listener lee del ref)
     setLiveDrag({
       taskName: dragInfo.current.taskName,
       daysOffset: 0,
@@ -714,47 +793,42 @@ export default function ProjectGanttPage() {
     });
   };
 
+  // OJO: estos handlers se registran como listeners en el mousedown, así que su
+  // closure de `liveDrag` (state) queda congelado en null. La verdad viva está
+  // en el ref `dragInfo.current` (lo mutan los *Move) — decidimos con el ref.
   const handleDragEnd = async () => {
     document.removeEventListener("mousemove", handleDragMove);
     document.removeEventListener("mouseup", handleDragEnd);
     setIsDragging(false);
-    if (dragInfo.current && liveDrag) {
-      const { taskName, daysOffset, isManual, taskId } = dragInfo.current;
-      if (daysOffset !== 0) {
-        const t = allTasks.find(x => x.assembly === taskName);
-        if (t) {
-          const originalStart = new Date(t.start_date + "T00:00:00");
-          const newStart = new Date(originalStart.getTime() + daysOffset * 86400000);
-          const newStartDateStr = newStart.toISOString().slice(0, 10);
-          const newEndDate = new Date(newStart.getTime() + t.duration_days * 86400000);
-          const newEndDateStr = newEndDate.toISOString().slice(0, 10);
-          await updateTaskDates(taskName, newStartDateStr, newEndDateStr, t.duration_days, isManual, taskId);
-        }
+    const info = dragInfo.current;
+    dragInfo.current = null;
+    setLiveDrag(null);
+    if (info && info.daysOffset !== 0) {
+      const t = allTasks.find(x => x.assembly === info.taskName);
+      if (t) {
+        const originalStart = new Date(t.start_date + "T00:00:00");
+        const newStart = new Date(originalStart.getTime() + info.daysOffset * 86400000);
+        const newStartDateStr = newStart.toISOString().slice(0, 10);
+        const newEndDateStr = new Date(newStart.getTime() + t.duration_days * 86400000).toISOString().slice(0, 10);
+        await updateTaskDates(info.taskName, newStartDateStr, newEndDateStr, t.duration_days, info.isManual, info.taskId);
       }
     }
-    setLiveDrag(null);
-    dragInfo.current = null;
   };
 
   const handleResizeEnd = async () => {
     document.removeEventListener("mousemove", handleResizeMove);
     document.removeEventListener("mouseup", handleResizeEnd);
     setIsResizing(false);
-    if (dragInfo.current && liveDrag) {
-      const { taskName, isManual, taskId } = dragInfo.current;
-      const newDuration = liveDrag.durationDays;
-      if (newDuration !== dragInfo.current.durationDays) {
-        const t = allTasks.find(x => x.assembly === taskName);
-        if (t) {
-          const start = new Date(t.start_date + "T00:00:00");
-          const newEnd = new Date(start.getTime() + newDuration * 86400000);
-          const newEndDateStr = newEnd.toISOString().slice(0, 10);
-          await updateTaskDates(taskName, t.start_date, newEndDateStr, newDuration, isManual, taskId);
-        }
+    const info = dragInfo.current;
+    dragInfo.current = null;
+    setLiveDrag(null);
+    if (info && info.newDuration !== info.durationDays) {
+      const t = allTasks.find(x => x.assembly === info.taskName);
+      if (t) {
+        const newEndDateStr = new Date(new Date(t.start_date + "T00:00:00").getTime() + info.newDuration * 86400000).toISOString().slice(0, 10);
+        await updateTaskDates(info.taskName, t.start_date, newEndDateStr, info.newDuration, info.isManual, info.taskId);
       }
     }
-    setLiveDrag(null);
-    dragInfo.current = null;
   };
 
   const getPriorityBadge = (priority: string) => {
@@ -985,12 +1059,12 @@ export default function ProjectGanttPage() {
         <>
           {/* Gantt Enterprise Split View */}
           <div className="mb-8 rounded-xl border border-slate-200 bg-white shadow-md dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
-            <div className="flex min-w-full overflow-x-auto">
+            <div ref={scrollContainerRef} className="flex min-w-full overflow-x-auto overflow-y-auto h-[calc(100vh-280px)] min-h-[400px] relative [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
               
               {/* Left Panel: WBS Table (Sticky left) */}
-              <div className="sticky left-0 z-20 shrink-0 border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)] w-[640px]">
+              <div className="sticky left-0 z-30 shrink-0 border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)] w-[640px]">
                 {/* Table Header */}
-                <div className="flex h-20 border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3">
+                <div className="flex h-20 sticky top-0 z-40 border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3">
                   <div className="w-8 shrink-0">ID</div>
                   <div className="w-40 shrink-0 truncate pl-2">Tarea</div>
                   <div className="w-14 shrink-0 text-center">Dur.</div>
@@ -1069,7 +1143,10 @@ export default function ProjectGanttPage() {
               </div>
 
               {/* Right Panel: WBS Timeline / Gantt Chart */}
-              <div className="flex-1 relative overflow-x-auto select-none bg-slate-950/20">
+              <div 
+                onMouseDown={handleMouseDownPan} 
+                className="flex-1 relative overflow-visible select-none bg-slate-950/20 hover:cursor-grab"
+              >
                 {(() => {
                   const DAY_WIDTH = 16;
                   const ROW_HEIGHT = 40;
@@ -1171,7 +1248,7 @@ export default function ProjectGanttPage() {
                   return (
                     <div style={{ width: totalDays * DAY_WIDTH }}>
                       {/* Timeline Header (Months + Weeks + Days) */}
-                      <div className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+                      <div className="sticky top-0 z-20 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
                         {/* Months Row */}
                         <div className="flex h-7 border-b border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400 items-center">
                           {monthBlocks.map((b, i) => (
