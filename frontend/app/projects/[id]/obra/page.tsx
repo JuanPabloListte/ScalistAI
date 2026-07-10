@@ -29,35 +29,15 @@ const STATUS_STYLE: Record<string, string> = {
   "pendiente": "bg-slate-500/10 text-slate-500",
 };
 
-function TaskRow({ t, onSaved }: { t: TaskProgress; onSaved: (p: WorkProgress) => void }) {
+// Solo lectura: el registro de avance se hace desde el Cronograma (doble clic
+// en la tarea → pestaña "Avance"), para tener un único lugar de edición.
+function TaskRow({ t, projectId }: { t: TaskProgress; projectId: number }) {
   const [open, setOpen] = useState(false);
-  const [qty, setQty] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<ProgressEntryRow[] | null>(null);
-
-  async function save() {
-    const q = Number(qty);
-    if (!q || q <= 0) return;
-    setSaving(true);
-    try {
-      const p = await api.addProgress(t.task_id, { qtyDone: q, note: note || undefined });
-      setQty(""); setNote(""); setHistory(null);
-      onSaved(p);
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function toggleHistory() {
     if (history === null) setHistory(await api.listProgress(t.task_id));
     else setHistory(null);
-  }
-
-  async function removeEntry(id: number) {
-    await api.deleteProgress(id);
-    setHistory(await api.listProgress(t.task_id));
-    onSaved(await api.getWorkProgress(Number(location.pathname.split("/")[2])));
   }
 
   return (
@@ -89,31 +69,16 @@ function TaskRow({ t, onSaved }: { t: TaskProgress; onSaved: (p: WorkProgress) =
 
       {open && (
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40">
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
-              Cantidad de hoy ({t.unit})
-              <input type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)}
-                     inputMode="decimal"
-                     className="mt-1 w-32 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base dark:border-slate-600 dark:bg-slate-900" />
-            </label>
-            <label className="flex min-w-40 flex-1 flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
-              Nota (opcional)
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ej: sector norte PB"
-                     className="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-900" />
-            </label>
-            <button onClick={save} disabled={saving || !qty}
-                    className="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-500 disabled:opacity-50">
-              {saving ? "…" : "Registrar"}
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-4 text-[11px] text-slate-500">
+              <span>Plan: {fmtDate(t.planned_start)} → {fmtDate(t.planned_end)}</span>
+              <span>Fin proyectado: <strong className={t.delay_days > 0 ? "text-red-500" : "text-green-600 dark:text-green-400"}>{fmtDate(t.projected_end)}</strong></span>
+              {t.real_yield != null && <span>Rinde real: {t.real_yield} {t.unit}/día</span>}
+            </div>
             <button onClick={toggleHistory}
                     className="rounded-lg border border-slate-300 px-3 py-2.5 text-xs text-slate-500 dark:border-slate-600 dark:text-slate-400">
               {history ? "Ocultar" : "Historial"}
             </button>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-slate-500">
-            <span>Plan: {fmtDate(t.planned_start)} → {fmtDate(t.planned_end)}</span>
-            <span>Fin proyectado: <strong className={t.delay_days > 0 ? "text-red-500" : "text-green-600 dark:text-green-400"}>{fmtDate(t.projected_end)}</strong></span>
-            {t.real_yield != null && <span>Rinde real: {t.real_yield} {t.unit}/día</span>}
           </div>
           {history && (
             <div className="mt-3 space-y-1">
@@ -123,11 +88,14 @@ function TaskRow({ t, onSaved }: { t: TaskProgress; onSaved: (p: WorkProgress) =
                   <span className="font-medium text-slate-600 dark:text-slate-300">{fmtDate(h.date)}</span>
                   <span className="font-semibold text-slate-800 dark:text-slate-100">{h.qty_done} {t.unit}</span>
                   <span className="min-w-0 flex-1 truncate text-slate-400">{h.note}</span>
-                  <button onClick={() => removeEntry(h.id)} className="text-red-400 hover:text-red-600" title="Borrar registro">✕</button>
                 </div>
               ))}
             </div>
           )}
+          <Link href={`/projects/${projectId}/gantt`}
+                className="mt-3 inline-block text-xs font-semibold text-brand-600 hover:text-brand-500 dark:text-brand-400">
+            Registrar avance en el Cronograma →
+          </Link>
         </div>
       )}
     </div>
@@ -242,7 +210,7 @@ export default function ObraPage() {
               <h2 className="font-bold text-slate-900 dark:text-white">{tasks[0].stage}</h2>
               <span className="text-xs font-semibold text-slate-500">{stage?.pct ?? 0}%</span>
             </div>
-            {tasks.map((t) => <TaskRow key={t.task_id} t={t} onSaved={setProgress} />)}
+            {tasks.map((t) => <TaskRow key={t.task_id} t={t} projectId={projectId} />)}
           </section>
         );
       })}
@@ -250,6 +218,10 @@ export default function ObraPage() {
       <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-400">
         El % se deriva de las cantidades registradas contra el cómputo exacto del plano —
         acá no se estima a ojo. El fin proyectado usa el rendimiento real observado de cada tarea.
+        Esta vista es de solo lectura: para registrar avance, editá la tarea en el{" "}
+        <Link href={`/projects/${projectId}/gantt`} className="font-semibold text-brand-600 hover:text-brand-500 dark:text-brand-400">
+          Cronograma
+        </Link>{" "}(doble clic → pestaña Avance).
       </p>
       </>
       )}

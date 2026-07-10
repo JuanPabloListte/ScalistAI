@@ -3,15 +3,16 @@
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
-import { 
-  api, 
-  type Project, 
-  type ScheduleResponse, 
-  type CashflowPoint, 
-  type WorkPlanData, 
-  type WorkPlanVersion, 
-  type WorkProgress, 
-  type OrgUser 
+import {
+  api,
+  type Project,
+  type ScheduleResponse,
+  type CashflowPoint,
+  type WorkPlanData,
+  type WorkPlanVersion,
+  type WorkProgress,
+  type ProgressEntryRow,
+  type OrgUser
 } from "@/lib/api";
 import { 
   Check, AlertTriangle, Play, CheckCircle, Ban, HelpCircle, X, 
@@ -90,8 +91,15 @@ export default function ProjectGanttPage() {
   const [activeTask, setActiveTask] = useState<any | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [activeModalTab, setActiveModalTab] = useState<"detail" | "responsibles" | "history">("detail");
+  const [activeModalTab, setActiveModalTab] = useState<"detail" | "avance" | "responsibles" | "history">("detail");
   const [taskHistory, setTaskHistory] = useState<{ date: string; change: string }[] | null>(null);
+
+  // Registro de avance físico desde el modal de la tarea (antes vivía en la
+  // página /obra; se centraliza acá: editar una tarea es un solo lugar).
+  const [avanceQty, setAvanceQty] = useState("");
+  const [avanceNote, setAvanceNote] = useState("");
+  const [avanceSaving, setAvanceSaving] = useState(false);
+  const [avanceEntries, setAvanceEntries] = useState<ProgressEntryRow[] | null>(null);
 
   // Top Filter states
   const [searchTerm, setSearchTerm] = useState("");
@@ -599,6 +607,7 @@ export default function ProjectGanttPage() {
     setIsDrawerOpen(true);
     setActiveModalTab("detail");
     setTaskHistory(null);
+    setAvanceQty(""); setAvanceNote(""); setAvanceEntries(null);
     if (typeof t.taskId === "number") {
       api.getTaskHistory(t.taskId)
         .then((rows) => setTaskHistory(rows.map((r) => ({
@@ -608,6 +617,40 @@ export default function ProjectGanttPage() {
         .catch(() => setTaskHistory(null));
     }
   };
+
+  // Progreso de la tarea activa (solo tareas del plan persistido con baseline
+  // activo: el registro de avance requiere plan congelado).
+  const activeTaskProgress = activeTask && typeof activeTask.taskId === "number"
+    ? progress?.tasks.find((t) => t.task_id === activeTask.taskId) ?? null
+    : null;
+
+  async function loadAvanceEntries() {
+    if (!activeTask || typeof activeTask.taskId !== "number") return;
+    setAvanceEntries(await api.listProgress(activeTask.taskId));
+  }
+
+  async function saveAvance() {
+    const q = Number(avanceQty);
+    if (!q || q <= 0 || !activeTask || typeof activeTask.taskId !== "number") return;
+    setAvanceSaving(true);
+    try {
+      const p = await api.addProgress(activeTask.taskId, { qtyDone: q, note: avanceNote || undefined });
+      setProgress(p);
+      setAvanceQty(""); setAvanceNote("");
+      if (avanceEntries !== null) await loadAvanceEntries();
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setAvanceSaving(false);
+    }
+  }
+
+  async function removeAvanceEntry(entryId: number) {
+    if (!activeTask || typeof activeTask.taskId !== "number") return;
+    await api.deleteProgress(entryId);
+    await loadAvanceEntries();
+    setProgress(await api.getWorkProgress(projectId));
+  }
 
   // Drag handlers
   const startDrag = (e: React.MouseEvent, task: any) => {
@@ -1332,14 +1375,20 @@ export default function ProjectGanttPage() {
 
               {/* Tabs Navigation */}
               <div className="flex border-b border-slate-200 dark:border-slate-800 mb-4 text-xs font-semibold text-slate-500">
-                <button 
-                  onClick={() => setActiveModalTab("detail")} 
+                <button
+                  onClick={() => setActiveModalTab("detail")}
                   className={`pb-2 px-1 border-b-2 transition-colors ${activeModalTab === "detail" ? "border-brand-600 text-brand-600 dark:text-brand-400 font-bold" : "border-transparent hover:text-slate-800 dark:hover:text-slate-200"}`}
                 >
                   Detalle
                 </button>
-                <button 
-                  onClick={() => setActiveModalTab("responsibles")} 
+                <button
+                  onClick={() => { setActiveModalTab("avance"); if (avanceEntries === null) loadAvanceEntries(); }}
+                  className={`ml-4 pb-2 px-1 border-b-2 transition-colors ${activeModalTab === "avance" ? "border-brand-600 text-brand-600 dark:text-brand-400 font-bold" : "border-transparent hover:text-slate-800 dark:hover:text-slate-200"}`}
+                >
+                  Avance
+                </button>
+                <button
+                  onClick={() => setActiveModalTab("responsibles")}
                   className={`ml-4 pb-2 px-1 border-b-2 transition-colors ${activeModalTab === "responsibles" ? "border-brand-600 text-brand-600 dark:text-brand-400 font-bold" : "border-transparent hover:text-slate-800 dark:hover:text-slate-200"}`}
                 >
                   Responsable
@@ -1476,6 +1525,85 @@ export default function ProjectGanttPage() {
                       </div>
                     </div>
                   </>
+                )}
+
+                {activeModalTab === "avance" && (
+                  <div className="space-y-3">
+                    {typeof activeTask.taskId !== "number" ? (
+                      <p className="text-slate-500">
+                        Las tareas manuales de simulación no registran avance físico:
+                        generá y congelá el plan de obra primero.
+                      </p>
+                    ) : !progress ? (
+                      <p className="text-slate-500">
+                        El registro de avance requiere un plan de obra <strong>congelado</strong> (baseline
+                        activo). Este plan todavía es un borrador — congelalo arriba para habilitarlo.
+                      </p>
+                    ) : (
+                      <>
+                        {activeTaskProgress && (
+                          <div className="grid grid-cols-2 gap-3 p-2.5 bg-slate-50 dark:bg-slate-800/20 border border-slate-200 dark:border-slate-800 rounded">
+                            <div>
+                              <span className="font-semibold text-slate-500 dark:text-slate-400">Avance</span>
+                              <div className="mt-1 font-mono font-semibold text-slate-800 dark:text-slate-100">
+                                {activeTaskProgress.qty_done.toLocaleString("es-AR")} / {activeTaskProgress.qty_planned.toLocaleString("es-AR")} {activeTaskProgress.unit} · {activeTaskProgress.pct}%
+                              </div>
+                            </div>
+                            <div>
+                              <span className="font-semibold text-slate-500 dark:text-slate-400">Fin proyectado</span>
+                              <div className={`mt-1 font-mono font-semibold ${activeTaskProgress.delay_days > 0 ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+                                {fmtDate(activeTaskProgress.projected_end)}{activeTaskProgress.delay_days > 0 ? ` (+${activeTaskProgress.delay_days}d)` : ""}
+                              </div>
+                            </div>
+                            {activeTaskProgress.real_yield != null && (
+                              <div className="col-span-2 text-slate-500">
+                                Rinde real: <strong className="text-slate-700 dark:text-slate-300">{activeTaskProgress.real_yield} {activeTaskProgress.unit}/día</strong>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-end gap-2">
+                          <label className="flex flex-col font-semibold text-slate-500 dark:text-slate-400">
+                            Cantidad de hoy {activeTaskProgress ? `(${activeTaskProgress.unit})` : ""}
+                            <input type="number" min="0" step="any" inputMode="decimal"
+                                   value={avanceQty} onChange={(e) => setAvanceQty(e.target.value)}
+                                   className="mt-1 w-28 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5" />
+                          </label>
+                          <label className="flex min-w-32 flex-1 flex-col font-semibold text-slate-500 dark:text-slate-400">
+                            Nota (opcional)
+                            <input value={avanceNote} onChange={(e) => setAvanceNote(e.target.value)}
+                                   placeholder="ej: sector norte PB"
+                                   className="mt-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5" />
+                          </label>
+                          <button onClick={saveAvance} disabled={avanceSaving || !avanceQty}
+                                  className="rounded bg-brand-600 px-4 py-1.5 font-semibold text-white transition hover:bg-brand-500 disabled:opacity-50">
+                            {avanceSaving ? "…" : "Registrar"}
+                          </button>
+                        </div>
+
+                        <div>
+                          <label className="font-semibold text-slate-500 dark:text-slate-400 text-sm block mb-2">Registros</label>
+                          {avanceEntries === null ? (
+                            <p className="text-slate-400">Cargando…</p>
+                          ) : avanceEntries.length === 0 ? (
+                            <p className="text-slate-400">Sin registros todavía.</p>
+                          ) : (
+                            <div className="space-y-1 max-h-[30vh] overflow-y-auto pr-1">
+                              {avanceEntries.map((h) => (
+                                <div key={h.id} className="flex items-center gap-3 rounded bg-slate-50 dark:bg-slate-800/40 px-3 py-1.5">
+                                  <span className="font-medium text-slate-600 dark:text-slate-300">{fmtDate(h.date)}</span>
+                                  <span className="font-semibold text-slate-800 dark:text-slate-100">{h.qty_done}{activeTaskProgress ? ` ${activeTaskProgress.unit}` : ""}</span>
+                                  <span className="min-w-0 flex-1 truncate text-slate-400">{h.note}</span>
+                                  <button onClick={() => removeAvanceEntry(h.id)} className="text-red-400 hover:text-red-600" title="Borrar registro">✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
 
                 {activeModalTab === "responsibles" && (
