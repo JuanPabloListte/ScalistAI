@@ -123,8 +123,14 @@ export default function ProjectGanttPage() {
   const [newIsBlocked, setNewIsBlocked] = useState<boolean>(false);
   const [newBlockedReason, setNewBlockedReason] = useState<string>("");
 
-  // Drag & drop state
-  const [liveDrag, setLiveDrag] = useState<{ taskName: string; daysOffset: number; durationDays: number } | null>(null);
+  // Drag & drop state. La barra del Gantt se arrastra en los dos ejes a la vez:
+  // horizontal = mover fecha (daysOffset), vertical = cambiar prioridad
+  // (priorityLevel/deltaY, arriba sube la urgencia). Mismo gesto mousedown/
+  // mousemove/mouseup para ambos, como un drag libre en el plano.
+  const [liveDrag, setLiveDrag] = useState<{
+    taskName: string; daysOffset: number; durationDays: number;
+    deltaY: number; priorityLevel: number;
+  } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragInfo = useRef<{
@@ -132,15 +138,13 @@ export default function ProjectGanttPage() {
     initialLeft: number;
     initialWidth: number;
     initialMouseX: number;
+    initialMouseY: number;
     daysOffset: number;
     durationDays: number;
+    initialPriorityLevel: number;
     isManual: boolean;
     taskId?: number;
   } | null>(null);
-
-  // Drag vertical del badge de prioridad: arriba = más urgente, abajo = menos.
-  const [priorityDrag, setPriorityDrag] = useState<{ taskName: string; level: number } | null>(null);
-  const priorityDragInfo = useRef<{ taskName: string; initialMouseY: number; initialLevel: number } | null>(null);
 
   // Load team users and metadata from LocalStorage
   const load = useCallback(() => {
@@ -659,7 +663,9 @@ export default function ProjectGanttPage() {
     setProgress(await api.getWorkProgress(projectId));
   }
 
-  // Drag handlers
+  // Drag handlers. Un mismo mousedown en la barra maneja los dos ejes: X mueve
+  // la fecha, Y cambia la prioridad (arriba = más urgente). El resize (borde
+  // derecho) solo toca duración, así que fija el eje Y en el nivel inicial.
   const startDrag = (e: React.MouseEvent, task: any) => {
     e.preventDefault();
     e.stopPropagation();
@@ -669,8 +675,10 @@ export default function ProjectGanttPage() {
       initialLeft: tOffset * 16,
       initialWidth: task.duration_days * 16,
       initialMouseX: e.clientX,
+      initialMouseY: e.clientY,
       daysOffset: 0,
       durationDays: task.duration_days,
+      initialPriorityLevel: PRIORITY_LEVELS.indexOf(getTaskMeta(task.assembly).priority),
       isManual: task.isManual,
       taskId: task.taskId,
     };
@@ -687,8 +695,10 @@ export default function ProjectGanttPage() {
       initialLeft: 0,
       initialWidth: task.duration_days * 16,
       initialMouseX: e.clientX,
+      initialMouseY: e.clientY,
       daysOffset: 0,
       durationDays: task.duration_days,
+      initialPriorityLevel: PRIORITY_LEVELS.indexOf(getTaskMeta(task.assembly).priority),
       isManual: task.isManual,
       taskId: task.taskId,
     };
@@ -702,10 +712,17 @@ export default function ProjectGanttPage() {
     const deltaX = e.clientX - dragInfo.current.initialMouseX;
     const deltaDays = Math.round(deltaX / 16);
     dragInfo.current.daysOffset = deltaDays;
+
+    const deltaY = e.clientY - dragInfo.current.initialMouseY;
+    const steps = Math.round(-deltaY / PRIORITY_DRAG_STEP_PX);
+    const priorityLevel = Math.min(PRIORITY_LEVELS.length - 1,
+      Math.max(0, dragInfo.current.initialPriorityLevel + steps));
+
     setLiveDrag({
       taskName: dragInfo.current.taskName,
       daysOffset: deltaDays,
-      durationDays: dragInfo.current.durationDays
+      durationDays: dragInfo.current.durationDays,
+      deltaY, priorityLevel,
     });
   };
 
@@ -717,7 +734,8 @@ export default function ProjectGanttPage() {
     setLiveDrag({
       taskName: dragInfo.current.taskName,
       daysOffset: 0,
-      durationDays: newDuration
+      durationDays: newDuration,
+      deltaY: 0, priorityLevel: dragInfo.current.initialPriorityLevel,
     });
   };
 
@@ -726,7 +744,7 @@ export default function ProjectGanttPage() {
     document.removeEventListener("mouseup", handleDragEnd);
     setIsDragging(false);
     if (dragInfo.current && liveDrag) {
-      const { taskName, daysOffset, isManual, taskId } = dragInfo.current;
+      const { taskName, daysOffset, isManual, taskId, initialPriorityLevel } = dragInfo.current;
       if (daysOffset !== 0) {
         const t = allTasks.find(x => x.assembly === taskName);
         if (t) {
@@ -737,6 +755,10 @@ export default function ProjectGanttPage() {
           const newEndDateStr = newEndDate.toISOString().slice(0, 10);
           await updateTaskDates(taskName, newStartDateStr, newEndDateStr, t.duration_days, isManual, taskId);
         }
+      }
+      if (liveDrag.priorityLevel !== initialPriorityLevel) {
+        const newPriority = PRIORITY_LEVELS[liveDrag.priorityLevel];
+        updateTaskMetaField(taskName, "priority", newPriority, `Prioridad cambiada a ${newPriority} (arrastre)`);
       }
     }
     setLiveDrag(null);
@@ -762,42 +784,6 @@ export default function ProjectGanttPage() {
     }
     setLiveDrag(null);
     dragInfo.current = null;
-  };
-
-  // Drag vertical del badge de "Prior.": arrastrar arriba sube la urgencia
-  // (Baja→Media→Alta→Crítica), arrastrar abajo la baja. Mismo patrón mousedown/
-  // mousemove/mouseup que el drag horizontal de fechas, sobre un target distinto
-  // (el badge, no la barra del Gantt) para no pisar ese gesto.
-  const startPriorityDrag = (e: React.MouseEvent, task: any) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const initialLevel = PRIORITY_LEVELS.indexOf(getTaskMeta(task.assembly).priority);
-    priorityDragInfo.current = { taskName: task.assembly, initialMouseY: e.clientY, initialLevel };
-    setPriorityDrag({ taskName: task.assembly, level: initialLevel });
-    document.addEventListener("mousemove", handlePriorityDragMove);
-    document.addEventListener("mouseup", handlePriorityDragEnd);
-  };
-
-  const handlePriorityDragMove = (e: MouseEvent) => {
-    if (!priorityDragInfo.current) return;
-    const deltaY = e.clientY - priorityDragInfo.current.initialMouseY;
-    const steps = Math.round(-deltaY / PRIORITY_DRAG_STEP_PX);
-    const newLevel = Math.min(PRIORITY_LEVELS.length - 1, Math.max(0, priorityDragInfo.current.initialLevel + steps));
-    setPriorityDrag({ taskName: priorityDragInfo.current.taskName, level: newLevel });
-  };
-
-  const handlePriorityDragEnd = () => {
-    document.removeEventListener("mousemove", handlePriorityDragMove);
-    document.removeEventListener("mouseup", handlePriorityDragEnd);
-    if (priorityDragInfo.current && priorityDrag) {
-      const { taskName, initialLevel } = priorityDragInfo.current;
-      if (priorityDrag.level !== initialLevel) {
-        const newPriority = PRIORITY_LEVELS[priorityDrag.level];
-        updateTaskMetaField(taskName, "priority", newPriority, `Prioridad cambiada a ${newPriority} (arrastre)`);
-      }
-    }
-    setPriorityDrag(null);
-    priorityDragInfo.current = null;
   };
 
   const getPriorityBadge = (priority: string) => {
@@ -1102,12 +1088,8 @@ export default function ProjectGanttPage() {
                           </div>
 
                           <div className="w-12 shrink-0 text-center text-slate-400 font-mono" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
-                          <div
-                            className="w-16 shrink-0 text-center flex items-center justify-center cursor-ns-resize select-none"
-                            title="Arrastrá arriba/abajo para cambiar la prioridad"
-                            onMouseDown={(e) => startPriorityDrag(e, t)}
-                          >
-                            {getPriorityBadge(priorityDrag && priorityDrag.taskName === t.assembly ? PRIORITY_LEVELS[priorityDrag.level] : meta.priority)}
+                          <div className="w-16 shrink-0 text-center flex items-center justify-center">
+                            {getPriorityBadge(liveDrag && liveDrag.taskName === t.assembly ? PRIORITY_LEVELS[liveDrag.priorityLevel] : meta.priority)}
                           </div>
                           <div className="w-20 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
                         </div>
@@ -1307,12 +1289,21 @@ export default function ProjectGanttPage() {
                                   left: leftPos,
                                   width: Math.max(16, barWidth),
                                   backgroundColor: statusColor,
-                                  cursor: isDragging || isResizing ? "grabbing" : "grab"
+                                  cursor: isDragging || isResizing ? "grabbing" : "grab",
+                                  transform: liveDrag && liveDrag.taskName === t.assembly && liveDrag.deltaY
+                                    ? `translateY(${liveDrag.deltaY}px)` : undefined,
+                                  zIndex: liveDrag && liveDrag.taskName === t.assembly ? 30 : undefined,
                                 }}
                                 onMouseDown={(e) => startDrag(e, t)}
-                                title={`${t.assembly} · ${t.duration_days} días · ${fmtDate(t.start_date)} al ${fmtDate(t.end_date)}`}
+                                title={`${t.assembly} · ${t.duration_days} días · ${fmtDate(t.start_date)} al ${fmtDate(t.end_date)} · arrastrá arriba/abajo para cambiar la prioridad`}
                               >
-                                
+                                {/* Prioridad tentativa mientras se arrastra verticalmente */}
+                                {liveDrag && liveDrag.taskName === t.assembly && Math.abs(liveDrag.deltaY) > 6 && (
+                                  <div className="absolute -top-6 left-0 z-40 whitespace-nowrap rounded bg-slate-900 px-1.5 py-0.5 shadow-lg">
+                                    {getPriorityBadge(PRIORITY_LEVELS[liveDrag.priorityLevel])}
+                                  </div>
+                                )}
+
                                 {/* Inner progress highlight strip */}
                                 {pct > 0 && (
                                   <div className="absolute bottom-0 left-0 h-1 rounded-bl-sm bg-white/70"
