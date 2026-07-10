@@ -53,6 +53,9 @@ const PRIORITY_ES_TO_EN: Record<string, string> = {
 const PRIORITY_EN_TO_ES: Record<string, TaskJiraMetadata["priority"]> = {
   low: "Baja", medium: "Media", high: "Alta", critical: "Crítica",
 };
+// Orden creciente de urgencia, para el drag vertical del badge de prioridad.
+const PRIORITY_LEVELS = ["Baja", "Media", "Alta", "Crítica"] as const;
+const PRIORITY_DRAG_STEP_PX = 26; // px de arrastre por escalón de prioridad
 
 type TaskJiraMetadata = {
   status: "Pendiente" | "En progreso" | "En revisión" | "Completada" | "Bloqueada" | "Cancelada";
@@ -134,6 +137,10 @@ export default function ProjectGanttPage() {
     isManual: boolean;
     taskId?: number;
   } | null>(null);
+
+  // Drag vertical del badge de prioridad: arriba = más urgente, abajo = menos.
+  const [priorityDrag, setPriorityDrag] = useState<{ taskName: string; level: number } | null>(null);
+  const priorityDragInfo = useRef<{ taskName: string; initialMouseY: number; initialLevel: number } | null>(null);
 
   // Load team users and metadata from LocalStorage
   const load = useCallback(() => {
@@ -757,6 +764,42 @@ export default function ProjectGanttPage() {
     dragInfo.current = null;
   };
 
+  // Drag vertical del badge de "Prior.": arrastrar arriba sube la urgencia
+  // (Baja→Media→Alta→Crítica), arrastrar abajo la baja. Mismo patrón mousedown/
+  // mousemove/mouseup que el drag horizontal de fechas, sobre un target distinto
+  // (el badge, no la barra del Gantt) para no pisar ese gesto.
+  const startPriorityDrag = (e: React.MouseEvent, task: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const initialLevel = PRIORITY_LEVELS.indexOf(getTaskMeta(task.assembly).priority);
+    priorityDragInfo.current = { taskName: task.assembly, initialMouseY: e.clientY, initialLevel };
+    setPriorityDrag({ taskName: task.assembly, level: initialLevel });
+    document.addEventListener("mousemove", handlePriorityDragMove);
+    document.addEventListener("mouseup", handlePriorityDragEnd);
+  };
+
+  const handlePriorityDragMove = (e: MouseEvent) => {
+    if (!priorityDragInfo.current) return;
+    const deltaY = e.clientY - priorityDragInfo.current.initialMouseY;
+    const steps = Math.round(-deltaY / PRIORITY_DRAG_STEP_PX);
+    const newLevel = Math.min(PRIORITY_LEVELS.length - 1, Math.max(0, priorityDragInfo.current.initialLevel + steps));
+    setPriorityDrag({ taskName: priorityDragInfo.current.taskName, level: newLevel });
+  };
+
+  const handlePriorityDragEnd = () => {
+    document.removeEventListener("mousemove", handlePriorityDragMove);
+    document.removeEventListener("mouseup", handlePriorityDragEnd);
+    if (priorityDragInfo.current && priorityDrag) {
+      const { taskName, initialLevel } = priorityDragInfo.current;
+      if (priorityDrag.level !== initialLevel) {
+        const newPriority = PRIORITY_LEVELS[priorityDrag.level];
+        updateTaskMetaField(taskName, "priority", newPriority, `Prioridad cambiada a ${newPriority} (arrastre)`);
+      }
+    }
+    setPriorityDrag(null);
+    priorityDragInfo.current = null;
+  };
+
   const getPriorityBadge = (priority: string) => {
     switch (priority) {
       case "Baja": return <span className="text-green-500 font-medium font-mono">↓ Baja</span>;
@@ -1059,7 +1102,13 @@ export default function ProjectGanttPage() {
                           </div>
 
                           <div className="w-12 shrink-0 text-center text-slate-400 font-mono" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
-                          <div className="w-16 shrink-0 text-center flex items-center justify-center">{getPriorityBadge(meta.priority)}</div>
+                          <div
+                            className="w-16 shrink-0 text-center flex items-center justify-center cursor-ns-resize select-none"
+                            title="Arrastrá arriba/abajo para cambiar la prioridad"
+                            onMouseDown={(e) => startPriorityDrag(e, t)}
+                          >
+                            {getPriorityBadge(priorityDrag && priorityDrag.taskName === t.assembly ? PRIORITY_LEVELS[priorityDrag.level] : meta.priority)}
+                          </div>
                           <div className="w-20 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
                         </div>
                       );
