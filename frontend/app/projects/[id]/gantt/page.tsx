@@ -53,9 +53,6 @@ const PRIORITY_ES_TO_EN: Record<string, string> = {
 const PRIORITY_EN_TO_ES: Record<string, TaskJiraMetadata["priority"]> = {
   low: "Baja", medium: "Media", high: "Alta", critical: "Crítica",
 };
-// Orden creciente de urgencia, para el drag vertical del badge de prioridad.
-const PRIORITY_LEVELS = ["Baja", "Media", "Alta", "Crítica"] as const;
-const PRIORITY_DRAG_STEP_PX = 26; // px de arrastre por escalón de prioridad
 
 type TaskJiraMetadata = {
   status: "Pendiente" | "En progreso" | "En revisión" | "Completada" | "Bloqueada" | "Cancelada";
@@ -123,14 +120,8 @@ export default function ProjectGanttPage() {
   const [newIsBlocked, setNewIsBlocked] = useState<boolean>(false);
   const [newBlockedReason, setNewBlockedReason] = useState<string>("");
 
-  // Drag & drop state. La barra del Gantt se arrastra en los dos ejes a la vez:
-  // horizontal = mover fecha (daysOffset), vertical = cambiar prioridad
-  // (priorityLevel/deltaY, arriba sube la urgencia). Mismo gesto mousedown/
-  // mousemove/mouseup para ambos, como un drag libre en el plano.
-  const [liveDrag, setLiveDrag] = useState<{
-    taskName: string; daysOffset: number; durationDays: number;
-    deltaY: number; priorityLevel: number;
-  } | null>(null);
+  // Drag & drop state
+  const [liveDrag, setLiveDrag] = useState<{ taskName: string; daysOffset: number; durationDays: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragInfo = useRef<{
@@ -138,10 +129,8 @@ export default function ProjectGanttPage() {
     initialLeft: number;
     initialWidth: number;
     initialMouseX: number;
-    initialMouseY: number;
     daysOffset: number;
     durationDays: number;
-    initialPriorityLevel: number;
     isManual: boolean;
     taskId?: number;
   } | null>(null);
@@ -663,9 +652,7 @@ export default function ProjectGanttPage() {
     setProgress(await api.getWorkProgress(projectId));
   }
 
-  // Drag handlers. Un mismo mousedown en la barra maneja los dos ejes: X mueve
-  // la fecha, Y cambia la prioridad (arriba = más urgente). El resize (borde
-  // derecho) solo toca duración, así que fija el eje Y en el nivel inicial.
+  // Drag handlers
   const startDrag = (e: React.MouseEvent, task: any) => {
     e.preventDefault();
     e.stopPropagation();
@@ -675,10 +662,8 @@ export default function ProjectGanttPage() {
       initialLeft: tOffset * 16,
       initialWidth: task.duration_days * 16,
       initialMouseX: e.clientX,
-      initialMouseY: e.clientY,
       daysOffset: 0,
       durationDays: task.duration_days,
-      initialPriorityLevel: PRIORITY_LEVELS.indexOf(getTaskMeta(task.assembly).priority),
       isManual: task.isManual,
       taskId: task.taskId,
     };
@@ -695,10 +680,8 @@ export default function ProjectGanttPage() {
       initialLeft: 0,
       initialWidth: task.duration_days * 16,
       initialMouseX: e.clientX,
-      initialMouseY: e.clientY,
       daysOffset: 0,
       durationDays: task.duration_days,
-      initialPriorityLevel: PRIORITY_LEVELS.indexOf(getTaskMeta(task.assembly).priority),
       isManual: task.isManual,
       taskId: task.taskId,
     };
@@ -712,17 +695,10 @@ export default function ProjectGanttPage() {
     const deltaX = e.clientX - dragInfo.current.initialMouseX;
     const deltaDays = Math.round(deltaX / 16);
     dragInfo.current.daysOffset = deltaDays;
-
-    const deltaY = e.clientY - dragInfo.current.initialMouseY;
-    const steps = Math.round(-deltaY / PRIORITY_DRAG_STEP_PX);
-    const priorityLevel = Math.min(PRIORITY_LEVELS.length - 1,
-      Math.max(0, dragInfo.current.initialPriorityLevel + steps));
-
     setLiveDrag({
       taskName: dragInfo.current.taskName,
       daysOffset: deltaDays,
-      durationDays: dragInfo.current.durationDays,
-      deltaY, priorityLevel,
+      durationDays: dragInfo.current.durationDays
     });
   };
 
@@ -734,8 +710,7 @@ export default function ProjectGanttPage() {
     setLiveDrag({
       taskName: dragInfo.current.taskName,
       daysOffset: 0,
-      durationDays: newDuration,
-      deltaY: 0, priorityLevel: dragInfo.current.initialPriorityLevel,
+      durationDays: newDuration
     });
   };
 
@@ -744,7 +719,7 @@ export default function ProjectGanttPage() {
     document.removeEventListener("mouseup", handleDragEnd);
     setIsDragging(false);
     if (dragInfo.current && liveDrag) {
-      const { taskName, daysOffset, isManual, taskId, initialPriorityLevel } = dragInfo.current;
+      const { taskName, daysOffset, isManual, taskId } = dragInfo.current;
       if (daysOffset !== 0) {
         const t = allTasks.find(x => x.assembly === taskName);
         if (t) {
@@ -755,10 +730,6 @@ export default function ProjectGanttPage() {
           const newEndDateStr = newEndDate.toISOString().slice(0, 10);
           await updateTaskDates(taskName, newStartDateStr, newEndDateStr, t.duration_days, isManual, taskId);
         }
-      }
-      if (liveDrag.priorityLevel !== initialPriorityLevel) {
-        const newPriority = PRIORITY_LEVELS[liveDrag.priorityLevel];
-        updateTaskMetaField(taskName, "priority", newPriority, `Prioridad cambiada a ${newPriority} (arrastre)`);
       }
     }
     setLiveDrag(null);
@@ -1088,9 +1059,7 @@ export default function ProjectGanttPage() {
                           </div>
 
                           <div className="w-12 shrink-0 text-center text-slate-400 font-mono" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
-                          <div className="w-16 shrink-0 text-center flex items-center justify-center">
-                            {getPriorityBadge(liveDrag && liveDrag.taskName === t.assembly ? PRIORITY_LEVELS[liveDrag.priorityLevel] : meta.priority)}
-                          </div>
+                          <div className="w-16 shrink-0 text-center flex items-center justify-center">{getPriorityBadge(meta.priority)}</div>
                           <div className="w-20 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
                         </div>
                       );
@@ -1289,21 +1258,12 @@ export default function ProjectGanttPage() {
                                   left: leftPos,
                                   width: Math.max(16, barWidth),
                                   backgroundColor: statusColor,
-                                  cursor: isDragging || isResizing ? "grabbing" : "grab",
-                                  transform: liveDrag && liveDrag.taskName === t.assembly && liveDrag.deltaY
-                                    ? `translateY(${liveDrag.deltaY}px)` : undefined,
-                                  zIndex: liveDrag && liveDrag.taskName === t.assembly ? 30 : undefined,
+                                  cursor: isDragging || isResizing ? "grabbing" : "grab"
                                 }}
                                 onMouseDown={(e) => startDrag(e, t)}
-                                title={`${t.assembly} · ${t.duration_days} días · ${fmtDate(t.start_date)} al ${fmtDate(t.end_date)} · arrastrá arriba/abajo para cambiar la prioridad`}
+                                title={`${t.assembly} · ${t.duration_days} días · ${fmtDate(t.start_date)} al ${fmtDate(t.end_date)}`}
                               >
-                                {/* Prioridad tentativa mientras se arrastra verticalmente */}
-                                {liveDrag && liveDrag.taskName === t.assembly && Math.abs(liveDrag.deltaY) > 6 && (
-                                  <div className="absolute -top-6 left-0 z-40 whitespace-nowrap rounded bg-slate-900 px-1.5 py-0.5 shadow-lg">
-                                    {getPriorityBadge(PRIORITY_LEVELS[liveDrag.priorityLevel])}
-                                  </div>
-                                )}
-
+                                
                                 {/* Inner progress highlight strip */}
                                 {pct > 0 && (
                                   <div className="absolute bottom-0 left-0 h-1 rounded-bl-sm bg-white/70"
