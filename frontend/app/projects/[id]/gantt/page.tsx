@@ -423,6 +423,15 @@ export default function ProjectGanttPage() {
       setSchedule(p);
       const st = await api.getWorkPlan(projectId);
       setVersions(st.versions);
+      // Mantener `progress` consistente con el estado nuevo del plan: al
+      // congelar hay que traerlo (sin esto, la pestaña Avance sigue diciendo
+      // "congelalo primero" y los % quedan en 0 hasta recargar); al volver a
+      // borrador/regenerar, el avance viejo ya no aplica.
+      if (p.status === "active") {
+        api.getWorkProgress(projectId).then(setProgress).catch(() => setProgress(null));
+      } else {
+        setProgress(null);
+      }
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
@@ -1062,18 +1071,18 @@ export default function ProjectGanttPage() {
             <div ref={scrollContainerRef} className="flex min-w-full overflow-x-auto overflow-y-auto h-[calc(100vh-280px)] min-h-[400px] relative [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
               
               {/* Left Panel: WBS Table (Sticky left) */}
-              <div className="sticky left-0 z-30 shrink-0 border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)] w-[640px]">
+              <div className="shrink-0 bg-slate-50 dark:bg-slate-950 w-[680px] z-30 min-h-fit">
                 {/* Table Header */}
-                <div className="flex h-20 sticky top-0 z-40 border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3">
+                <div className="flex h-20 sticky left-0 top-0 z-40 border-r border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]">
                   <div className="w-8 shrink-0">ID</div>
                   <div className="w-40 shrink-0 truncate pl-2">Tarea</div>
                   <div className="w-14 shrink-0 text-center">Dur.</div>
                   <div className="w-16 shrink-0 text-center">Inicio</div>
                   <div className="w-16 shrink-0 text-center">Fin</div>
                   <div className="w-12 shrink-0 text-center">%</div>
-                  <div className="w-12 shrink-0 text-center">Pred.</div>
-                  <div className="w-16 shrink-0 text-center">Prior.</div>
-                  <div className="w-20 shrink-0 text-right">Etapa</div>
+                  <div className="w-20 shrink-0 text-center">Pred.</div>
+                  <div className="w-18 shrink-0 text-center">Prior.</div>
+                  <div className="w-26 shrink-0 text-right">Etapa</div>
                 </div>
                 
                 {/* Table Body */}
@@ -1116,7 +1125,7 @@ export default function ProjectGanttPage() {
                         <div 
                           key={t.assembly} 
                           onDoubleClick={() => openTask(t)}
-                          className="flex h-10 items-center px-3 text-xs bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer group"
+                          className="flex h-10 sticky left-0 z-30 items-center px-3 text-xs bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer group border-r border-slate-100 dark:border-slate-800/60 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]"
                         >
                           <div className="w-8 shrink-0 font-mono text-slate-400">{id}</div>
                           <div className="w-40 shrink-0 font-medium text-slate-800 dark:text-slate-200 truncate pl-2 flex items-center gap-1.5">
@@ -1132,9 +1141,9 @@ export default function ProjectGanttPage() {
                             {pct > 0 ? `${pct}%` : "0%"}
                           </div>
 
-                          <div className="w-12 shrink-0 text-center text-slate-400 font-mono" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
-                          <div className="w-16 shrink-0 text-center flex items-center justify-center">{getPriorityBadge(meta.priority)}</div>
-                          <div className="w-20 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
+                          <div className="w-20 shrink-0 text-center text-slate-400 font-mono truncate px-1" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
+                          <div className="w-18 shrink-0 text-center flex items-center justify-center">{getPriorityBadge(meta.priority)}</div>
+                          <div className="w-26 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
                         </div>
                       );
                     });
@@ -1145,7 +1154,7 @@ export default function ProjectGanttPage() {
               {/* Right Panel: WBS Timeline / Gantt Chart */}
               <div 
                 onMouseDown={handleMouseDownPan} 
-                className="flex-1 relative overflow-visible select-none bg-slate-950/20 hover:cursor-grab"
+                className="flex-1 relative overflow-visible select-none bg-slate-950/20 hover:cursor-grab min-h-fit"
               >
                 {(() => {
                   const DAY_WIDTH = 16;

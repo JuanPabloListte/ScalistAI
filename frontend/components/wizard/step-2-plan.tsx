@@ -35,6 +35,13 @@ export function Step2Plan({
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    // PIVOTE IFC: validación dura (el `accept` del input es solo un hint del
+    // selector). Quitar este bloque al reactivar PDF/DXF/DWG.
+    if (!file.name.toLowerCase().endsWith(".ifc")) {
+      setError("Por ahora solo aceptamos modelos BIM en formato .ifc. La carga de PDF/DXF/DWG está temporalmente deshabilitada.");
+      e.target.value = "";
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -51,12 +58,26 @@ export function Step2Plan({
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Subir plano del proyecto</h2>
+      <h2 className="text-lg font-semibold">Subir modelo BIM (IFC)</h2>
+      {/* ─── PIVOTE IFC (jul-2026): la carga de PDF/DXF/DWG está DESACTIVADA
+          temporalmente — el MVP se centra en el flujo IFC, que devuelve el
+          cómputo exacto. Para REACTIVAR los otros formatos: restaurar el
+          `accept` multi-formato del input y el copy original de abajo.
+          Copy original:
+            "Subí el plano en PDF, DXF o DWG. Si es PDF, en el paso siguiente
+             asignás qué páginas usar para cada tipo de detección. Si es
+             DXF/DWG, en el paso siguiente mapeás las capas del archivo a
+             tipos de elementos, con la precisión exacta del CAD."
+          accept original: "application/pdf,.pdf,.dxf,.dwg,.ifc"          ─── */}
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        Subí el plano en PDF, DXF o DWG. Si es PDF, en el paso siguiente asignás
-        qué páginas usar para cada tipo de detección. Si es DXF/DWG, en el paso
-        siguiente mapeás las capas del archivo a tipos de elementos, con la
-        precisión exacta del CAD.
+        Subí el modelo BIM en formato <strong>IFC</strong> (exportado desde
+        Revit, ArchiCAD u otro software BIM). El cómputo de materiales sale
+        exacto del modelo: cantidades, niveles y recetas por elemento, directo
+        al presupuesto.
+      </p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Tip: al exportar el IFC activá “base quantities” e incluí los ambientes
+        (rooms/spaces) para obtener superficies exactas.
       </p>
 
       {hasPlan && (
@@ -76,7 +97,8 @@ export function Step2Plan({
       >
         <input
           type="file"
-          accept="application/pdf,.pdf,.dxf,.dwg,.ifc"
+          // PIVOTE IFC: accept restringido a .ifc (antes: "application/pdf,.pdf,.dxf,.dwg,.ifc")
+          accept=".ifc"
           onChange={handleUpload}
           disabled={uploading}
           className="hidden"
@@ -84,13 +106,14 @@ export function Step2Plan({
         <UploadIcon />
         <span className="font-medium">
           {uploading
-            ? "Procesando plano..."
+            ? "Procesando modelo..."
             : hasPlan
-              ? "Subir otro plano"
-              : "Hacé clic para elegir un archivo"}
+              ? "Subir otro modelo"
+              : "Hacé clic para elegir un archivo .ifc"}
         </span>
         <span className="text-xs text-slate-500 dark:text-slate-400">
-          PDF, DXF o DWG (máx 50 MB) · modelo BIM IFC (máx 500 MB)
+          {/* PIVOTE IFC — copy original: "PDF, DXF o DWG (máx 50 MB) · modelo BIM IFC (máx 500 MB)" */}
+          Modelo BIM IFC (máx 500 MB)
         </span>
       </label>
 
