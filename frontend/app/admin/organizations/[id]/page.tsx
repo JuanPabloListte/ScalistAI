@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { api, type OrganizationDetail, type OrgUser } from "@/lib/api";
+import { api, ApiError, isUnauthorized, type OrganizationDetail, type OrgUser } from "@/lib/api";
 
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   active: { label: "Activa", tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
@@ -33,10 +33,11 @@ export default function OrgDetailPage() {
     api
       .getOrganization(orgId)
       .then(setOrg)
-      .catch((err: Error) => {
-        if (err.message.includes("401")) router.push("/login");
-        else if (err.message.includes("403")) setError("Solo superadmin puede ver esta página.");
-        else setError(err.message);
+      .catch((err: unknown) => {
+        if (isUnauthorized(err)) router.push("/login");
+        else if (err instanceof ApiError && err.status === 403)
+          setError("Solo superadmin puede ver esta página.");
+        else setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => setLoading(false));
   }, [orgId, router]);

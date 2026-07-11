@@ -42,6 +42,12 @@ export function Step2Plan({
       e.target.value = "";
       return;
     }
+    const MAX_IFC_BYTES = 500 * 1024 * 1024;
+    if (file.size > MAX_IFC_BYTES) {
+      setError("El archivo supera el máximo de 500 MB.");
+      e.target.value = "";
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -49,8 +55,9 @@ export function Step2Plan({
       onUploaded(plan);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
-      setUploading(false);
       e.target.value = "";
+    } finally {
+      setUploading(false);
     }
   }
 

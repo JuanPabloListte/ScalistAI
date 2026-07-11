@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { api, type User } from "@/lib/api";
+import { api, isUnauthorized, type User } from "@/lib/api";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -24,10 +24,10 @@ export default function ProfilePage() {
         setEmail(u.email);
       })
       .catch((err) => {
-        if (err.message.includes("401")) {
+        if (isUnauthorized(err)) {
           router.push("/login");
         } else {
-          setError("Error cargando perfil: " + err.message);
+          setError("Error cargando perfil: " + (err instanceof Error ? err.message : String(err)));
         }
       })
       .finally(() => setLoading(false));

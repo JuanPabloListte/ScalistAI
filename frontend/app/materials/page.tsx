@@ -5,6 +5,7 @@ import { useEffect, useState, useRef } from "react";
 
 import {
   api,
+  isUnauthorized,
   type Material,
   type Assembly,
   type AssemblyCreatePayload,
@@ -78,7 +79,7 @@ export default function MaterialsPage() {
         setAssemblies(a);
       })
       .catch((err) => {
-        if (err instanceof Error && err.message.includes("401")) {
+        if (isUnauthorized(err)) {
           router.push("/login");
           return;
         }
@@ -532,7 +533,17 @@ function AssemblyModal({ assembly, allMaterials, onCancel, onSaved }: { assembly
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true); setErr(null);
-    const payload: AssemblyCreatePayload = { name: name.trim(), applies_to: appliesTo, daily_yield: dailyYield, materials: ams };
+    if (ams.some((am) => !am.material_id || am.material_id <= 0)) {
+      setErr("Elegí un insumo válido en cada fila.");
+      setSaving(false);
+      return;
+    }
+    const payload: AssemblyCreatePayload = {
+      name: name.trim(),
+      applies_to: appliesTo,
+      daily_yield: dailyYield,
+      assembly_materials: ams,
+    };
     const req = isEdit ? api.updateAssembly(assembly!.id, payload) : api.createAssembly(payload);
     req.then(onSaved).catch(err => setErr(err.message)).finally(() => setSaving(false));
   }

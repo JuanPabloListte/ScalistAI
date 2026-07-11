@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { api, type Project } from "@/lib/api";
+import { api, isUnauthorized, type Project } from "@/lib/api";
 import { BUILDING_FIELDS } from "@/components/wizard/step-4-building";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -41,10 +41,10 @@ export default function ProjectsPage() {
         setPlanCounts(Object.fromEntries(counts));
       })
       .catch((err) => {
-        if (err instanceof Error && err.message.includes("401")) {
+        if (isUnauthorized(err)) {
           router.push("/login");
         } else {
-          setError(err.message);
+          setError(err instanceof Error ? err.message : String(err));
         }
       })
       .finally(() => setLoading(false));
@@ -91,7 +91,7 @@ export default function ProjectsPage() {
             Crear primer proyecto
           </p>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Subí un plano y empezá a cuantificar tus materiales.
+            Subí un modelo BIM (IFC) y empezá a cuantificar tus materiales.
           </p>
         </Link>
       ) : (

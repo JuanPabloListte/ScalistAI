@@ -1,7 +1,14 @@
 "use client";
 
-export const WIZARD_STEPS: { num: number; label: string }[] = [
+// `num` = índice INTERNO del wizard (matchea currentStep / onJump). `display`
+// = número VISIBLE en el círculo (secuencial 1..N). En IFC el paso interno 3
+// ("Páginas") no existe, así que display desacopla la numeración mostrada
+// (1..5) del índice interno (1,2,4,5,6) — antes se veía "1,2,4,5,6".
+type WizardStep = { num: number; label: string; display?: number };
+
+export const WIZARD_STEPS: WizardStep[] = [
   { num: 1, label: "Datos" },
+  // PIVOTE IFC: label histórico "Plano PDF" — reactivar con PDF/DXF/DWG.
   { num: 2, label: "Plano PDF" },
   { num: 3, label: "Páginas" },
   { num: 4, label: "Ubicación" },
@@ -10,24 +17,26 @@ export const WIZARD_STEPS: { num: number; label: string }[] = [
 ];
 
 // IFC: modelo BIM exacto -> sin "Páginas" (no tiene láminas).
-export const IFC_WIZARD_STEPS: { num: number; label: string }[] = [
-  { num: 1, label: "Datos" },
-  { num: 2, label: "Modelo BIM" },
-  { num: 4, label: "Ubicación" },
-  { num: 5, label: "Construcción" },
-  { num: 6, label: "Revisión" },
+// PIVOTE IFC (jul-2026): este es el stepper activo del MVP.
+export const IFC_WIZARD_STEPS: WizardStep[] = [
+  { num: 1, label: "Datos", display: 1 },
+  { num: 2, label: "Modelo BIM", display: 2 },
+  { num: 4, label: "Ubicación", display: 3 },
+  { num: 5, label: "Construcción", display: 4 },
+  { num: 6, label: "Revisión", display: 5 },
 ];
 
 export function Stepper({
   currentStep,
   maxReached,
   onJump,
-  steps = WIZARD_STEPS,
+  // PIVOTE IFC: default = IFC (antes era WIZARD_STEPS)
+  steps = IFC_WIZARD_STEPS,
 }: {
   currentStep: number;
   maxReached: number;
   onJump?: (step: number) => void;
-  steps?: { num: number; label: string }[];
+  steps?: WizardStep[];
 }) {
   return (
     <ol className="my-6 flex items-center gap-2">
@@ -49,7 +58,7 @@ export function Stepper({
                     : "border-slate-300 bg-white text-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-500"
               } ${clickable ? "cursor-pointer hover:scale-105" : "cursor-default"}`}
             >
-              {done && !active ? "✓" : s.num}
+              {done && !active ? "✓" : (s.display ?? s.num)}
             </button>
             <span
               className={`hidden text-sm sm:inline ${

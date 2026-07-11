@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AiDetectionBanner } from "@/components/ai-detection-banner";
 import { PlanViewer } from "@/components/plan-viewer";
 import { ScalesModal } from "@/components/scales-modal";
-import { api, type Plan, type Project } from "@/lib/api";
+import { api, isUnauthorized, type Plan, type Project } from "@/lib/api";
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
@@ -39,7 +39,7 @@ export default function ProjectDetailPage() {
       })
       .catch((err) => {
         if (cancelled) return;
-        if (err instanceof Error && err.message.includes("401")) {
+        if (isUnauthorized(err)) {
           router.push("/login");
         } else {
           setError(err.message);

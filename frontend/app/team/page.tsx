@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { api, type OrgUser, type User } from "@/lib/api";
+import { api, isUnauthorized, type OrgUser, type User } from "@/lib/api";
 import { AiConfigSection } from "@/components/AiConfigSection";
 
 export default function TeamPage() {
@@ -24,9 +24,9 @@ export default function TeamPage() {
         setMe(m);
         setUsers(list);
       })
-      .catch((err: Error) => {
-        if (err.message.includes("401")) router.push("/login");
-        else setError(err.message);
+      .catch((err: unknown) => {
+        if (isUnauthorized(err)) router.push("/login");
+        else setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => setLoading(false));
   }, [router]);

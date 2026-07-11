@@ -252,16 +252,13 @@ export type AssemblyCreatePayload = {
   name: string;
   applies_to: string;
   daily_yield: number | null;
-  materials: {
-    material_id: number;
-    consumption: number;
-    waste_factor: number;
-  }[];
+  assembly_materials: AssemblyMaterialInput[];
 };
 
 export type AssemblyUpdatePayload = {
   name?: string;
   applies_to?: string;
+  daily_yield?: number | null;
   assembly_materials?: AssemblyMaterialInput[];
 };
 
@@ -469,6 +466,52 @@ function getToken(): string | null {
   return window.localStorage.getItem("scalistai_token");
 }
 
+/** Error de API con status HTTP (para 401/402/403 sin parsear el mensaje). */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isUnauthorized(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 401;
+  return err instanceof Error && /\b401\b/.test(err.message);
+}
+
+export function isForbidden(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 403 || err.status === 402;
+  return err instanceof Error && /\b40[23]\b/.test(err.message);
+}
+
+function parseFastApiDetail(raw: string, status: number): string {
+  if (!raw) return `HTTP ${status}`;
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    if (typeof parsed?.detail === "string") return parsed.detail;
+    if (Array.isArray(parsed?.detail)) {
+      const parts = parsed.detail.map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          const loc = Array.isArray((item as { loc?: unknown }).loc)
+            ? (item as { loc: unknown[] }).loc.join(".")
+            : "";
+          const msg = String((item as { msg: unknown }).msg);
+          return loc ? `${loc}: ${msg}` : msg;
+        }
+        return JSON.stringify(item);
+      });
+      return parts.filter(Boolean).join("; ") || `HTTP ${status}`;
+    }
+    if (parsed?.detail != null) return JSON.stringify(parsed.detail);
+  } catch {
+    /* body no era JSON */
+  }
+  return raw;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(init.headers);
@@ -478,10 +521,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(detail || `HTTP ${res.status}`);
+    const raw = await res.text();
+    const message = parseFastApiDetail(raw, res.status);
+    // Sesión inválida/expirada: limpiar token y volver al login (salvo el propio login).
+    if (
+      res.status === 401 &&
+      typeof window !== "undefined" &&
+      !path.includes("/auth/login")
+    ) {
+      window.localStorage.removeItem("scalistai_token");
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+    }
+    throw new ApiError(message, res.status);
   }
-  return res.json() as Promise<T>;
+  // DELETE / acciones que responden 204 No Content: no hay body que parsear.
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 // --- Motor de Inteligencia de Costos ---
@@ -689,6 +749,32 @@ export const api = {
   getPriceSeries: () => request<PriceSeriesProduct[]>("/api/v1/price-series"),
   getBudgetSummary: (planId: number) =>
     request<ProjectBudgetSummary>(`/api/v1/plans/${planId}/budget-summary`),
+  /** Excel del presupuesto completo (obra gris + paramétricos). Misma fuente que la pantalla. */
+  downloadBudgetXlsx: async (planId: number, projectName?: string) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/budget-export/xlsx`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const raw = await res.text();
+      let message = raw || `HTTP ${res.status}`;
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.detail === "string") message = parsed.detail;
+      } catch { /* ignore */ }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safe = (projectName || `plan_${planId}`).replace(/[^\w\-]+/g, "_").slice(0, 60);
+    a.download = `presupuesto_${safe}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
   updateCostSettings: (patch: Partial<CostSettings>) =>
     request<CostSettings>("/api/v1/cost-settings", {
       method: "PUT",
@@ -725,15 +811,15 @@ export const api = {
       { method: "POST", body: formData },
     );
   },
-  
-  uploadDxf: async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    return request<{ success: boolean; project_id: number; plan_id: number; elements_imported: number }>(
-      "/api/v1/integrations/dxf/upload",
-      { method: "POST", body: formData },
-    );
-  },
+  // PIVOTE IFC (jul-2026): upload DXF vía integración desactivado en UI.
+  // uploadDxf: async (file: File) => {
+  //   const formData = new FormData();
+  //   formData.append("file", file);
+  //   return request<{ success: boolean; project_id: number; plan_id: number; elements_imported: number }>(
+  //     "/api/v1/integrations/dxf/upload",
+  //     { method: "POST", body: formData },
+  //   );
+  // },
 
   getRenderStatus: (planId: number) =>
     request<{ rendered: number; total: number }>(
