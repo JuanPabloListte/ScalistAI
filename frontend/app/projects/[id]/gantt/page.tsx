@@ -658,7 +658,7 @@ export default function ProjectGanttPage() {
     } else if (field === "assignees") {
       payload = { assignee_ids: namesToIds(value as string[]) };
     } else if (field === "isBlocked") {
-      payload = { status: value ? "blocked" : STATUS_ES_TO_EN[nextLocalStatus] || "todo" };
+      payload = { status: value ? "blocked" : STATUS_ES_TO_EN[nextLocalStatus] || "pending" };
     }
     if (!payload) return;
 

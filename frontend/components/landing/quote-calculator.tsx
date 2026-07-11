@@ -10,13 +10,14 @@
 
 import { useMemo, useState } from "react";
 import {
-  ArrowRight, Box, CalendarRange, Check, LineChart, Minus, Plus, Users,
+  ArrowRight, CalendarRange, Check, LineChart, Minus, Plus, Users,
 } from "lucide-react";
+// PIVOTE IFC: Box se usaba en el módulo add-on BIM — reactivar con ese ítem.
 
 // ---------------------------------------------------------------- pricing
 // Todos los montos en ARS/mes. Editar acá para recalibrar la oferta.
 const QUOTE_PRICING = {
-  base: 49_000,            // plataforma: cómputo + presupuesto (PDF/DXF/DWG), 2 usuarios
+  base: 49_000,            // plataforma: cómputo + presupuesto desde IFC (BIM), 2 usuarios
   includedUsers: 2,
   extraUser: 15_000,       // por usuario adicional / mes
   projects: {              // proyectos activos por mes
@@ -24,12 +25,13 @@ const QUOTE_PRICING = {
     "10": { label: "Hasta 10", price: 30_000 },
     "unlimited": { label: "Ilimitados", price: 70_000 },
   } as Record<string, { label: string; price: number }>,
+  // PIVOTE IFC: el módulo "bim" ya no se vende aparte — IFC va incluido en base.
   modules: [
-    {
-      key: "bim", icon: Box, price: 35_000,
-      name: "Import BIM (IFC)",
-      desc: "Del modelo Revit/ArchiCAD al presupuesto directo: fundaciones, armaduras y artefactos incluidos.",
-    },
+    // {
+    //   key: "bim", icon: Box, price: 35_000,
+    //   name: "Import BIM (IFC)",
+    //   desc: "Del modelo Revit/ArchiCAD al presupuesto directo...",
+    // },
     {
       key: "gantt", icon: CalendarRange, price: 19_000,
       name: "Cronograma + curva de inversión",
@@ -51,7 +53,8 @@ const fmt = (n: number) =>
 export function QuoteCalculator() {
   const [users, setUsers] = useState(3);
   const [projects, setProjects] = useState<"3" | "10" | "unlimited">("3");
-  const [modules, setModules] = useState<Record<string, boolean>>({ bim: true });
+  const [modules, setModules] = useState<Record<string, boolean>>({});
+  // PIVOTE IFC — estado inicial anterior: { bim: true }
   const [annual, setAnnual] = useState(true);
 
   const P = QUOTE_PRICING;
@@ -158,7 +161,7 @@ export function QuoteCalculator() {
         <div className="rounded-3xl border border-slate-800 bg-slate-900 p-6">
           <h3 className="mb-1 font-semibold text-white">¿Qué módulos necesitás?</h3>
           <p className="mb-4 text-xs text-slate-500">
-            El cómputo y presupuesto desde PDF, DXF y DWG viene incluido siempre.
+            El cómputo y presupuesto desde tu modelo BIM (IFC) viene incluido siempre.
           </p>
           <div className="space-y-3">
             {/* Base, siempre incluido */}
@@ -172,7 +175,7 @@ export function QuoteCalculator() {
                   <span className="text-xs font-medium text-brand-300">Incluido</span>
                 </div>
                 <p className="mt-0.5 text-xs leading-relaxed text-slate-400">
-                  Cantidades exactas desde PDF, DXF y DWG, presupuesto por rubro con precios de mercado y export a Excel.
+                  Cantidades exactas desde tu modelo BIM (IFC), presupuesto por rubro con precios de mercado y export a Excel.
                 </p>
               </div>
             </div>
@@ -260,7 +263,7 @@ export function QuoteCalculator() {
             {[
               `${users} usuario${users !== 1 ? "s" : ""} con roles y permisos`,
               `Proyectos activos: ${P.projects[projects].label.toLowerCase()}`,
-              "Cómputo y presupuesto (PDF · DXF · DWG)",
+              "Cómputo y presupuesto desde IFC (BIM)",  // PIVOTE IFC — original: PDF · DXF · DWG
               ...quote.moduleItems.map((m) => m.name),
               "Precios de mercado actualizados",
               "Export a Excel · soporte por WhatsApp",

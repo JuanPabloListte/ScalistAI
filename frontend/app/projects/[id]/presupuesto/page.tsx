@@ -43,8 +43,8 @@ export default function PresupuestoPage() {
   async function download(planId: number, name: string) {
     setDownloading(true);
     try {
-      const sim = await api.runSimulation(planId, name);
-      await api.downloadSimulationXlsx(sim.id);
+      // Misma fuente que la pantalla (obra gris + paramétricos), no la simulación sola.
+      await api.downloadBudgetXlsx(planId, name);
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
@@ -55,22 +55,51 @@ export default function PresupuestoPage() {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let tries = 0;
+    const MAX_TRIES = 90; // ~6 min a 4s
     async function load() {
       try {
         const plans = await api.listPlans(projectId);
         setIsIfc(plans.some((p) => p.original_filename?.toLowerCase().endsWith(".ifc")));
         const ready = plans.find((p) => p.status === "ready");
         const proc = plans.find((p) => p.status === "processing");
+        const failed = plans.find((p) => p.status === "error" || p.status === "failed");
         // Modelo BIM (IFC) procesándose en background -> esperar y reintentar.
         if (!ready && proc) {
           if (cancelled) return;
+          if (tries >= MAX_TRIES) {
+            setProcessing(false);
+            setLoading(false);
+            setError(
+              "El procesamiento del modelo BIM está tardando demasiado. " +
+                "Probá recargar la página o subí de nuevo el archivo .ifc.",
+            );
+            return;
+          }
           setProcessing(true);
           setLoading(false);
+          tries += 1;
           timer = setTimeout(load, 4000);
+          return;
+        }
+        if (!ready && failed) {
+          if (cancelled) return;
+          setProcessing(false);
+          setLoading(false);
+          setError(
+            "No se pudo procesar el modelo BIM. Verificá que el .ifc se haya " +
+              "exportado con geometría y base quantities, e intentá de nuevo " +
+              "desde el wizard del proyecto.",
+          );
           return;
         }
         const target = ready ?? plans[0];
         if (!target) throw new Error("Este proyecto no tiene un plano listo.");
+        if (target.status === "error" || target.status === "failed") {
+          throw new Error(
+            "El modelo BIM falló al procesarse. Subí de nuevo el archivo .ifc.",
+          );
+        }
         const d = await api.getBudgetSummary(target.id);
         if (cancelled) return;
         setProcessing(false);
@@ -80,6 +109,7 @@ export default function PresupuestoPage() {
         if (!cancelled) {
           setError(String((e as Error)?.message ?? e));
           setLoading(false);
+          setProcessing(false);
         }
       }
     }

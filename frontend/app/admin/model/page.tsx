@@ -29,8 +29,8 @@ export default function AdminModelPage() {
       .then((u) => {
         setUser(u);
         setUserLoading(false);
-        // Once authenticated as admin, load training metrics
-        if (u.role === "admin" || u.email === "admin@gmail.com") {
+        // Entrenamiento ML es plataforma-wide: solo superadmin (no admin de org).
+        if (u.is_superadmin) {
           loadData();
         }
       })
@@ -164,7 +164,7 @@ export default function AdminModelPage() {
     );
   }
 
-  const isAdmin = user?.role === "admin" || user?.email === "admin@gmail.com";
+  const isAdmin = Boolean(user?.is_superadmin);
   if (!isAdmin) {
     return (
       <main className="mx-auto max-w-md px-6 py-20 text-center">

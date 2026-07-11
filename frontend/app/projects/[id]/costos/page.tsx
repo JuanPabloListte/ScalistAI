@@ -46,7 +46,18 @@ export default function CostosPage() {
       .then(([proj, plans, cs]) => {
         setProject(proj);
         setSettings(cs);
-        const ready = plans.find((p) => p.status === "ready") ?? plans[0] ?? null;
+        const ready = plans.find((p) => p.status === "ready") ?? null;
+        if (!ready) {
+          const proc = plans.find((p) => p.status === "processing");
+          const failed = plans.find((p) => p.status === "error" || p.status === "failed");
+          if (proc) {
+            setError("El modelo BIM todavía se está procesando. Volvé en un momento.");
+          } else if (failed) {
+            setError("El modelo BIM falló al procesarse. Subí de nuevo el archivo .ifc.");
+          } else {
+            setError("Este proyecto no tiene un plano listo para calcular costos.");
+          }
+        }
         setPlanId(ready ? ready.id : null);
       })
       .catch((e) => setError(String(e?.message ?? e)))

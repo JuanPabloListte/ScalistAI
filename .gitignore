@@ -76,3 +76,6 @@ frontend/tsconfig.tsbuildinfo
 
 # Accidental duplicate directories
 backend/backend/
+
+# Notas de progreso de agentes (scratch, no forma parte del código)
+/memory/

@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { api, type Project } from "@/lib/api";
+import { api, type Plan, type Project } from "@/lib/api";
 
 import { BUILDING_FIELDS } from "./step-4-building";
 
@@ -22,11 +21,86 @@ export function Step5Review({
   const [error, setError] = useState<string | null>(null);
   const [allowTraining, setAllowTraining] = useState(true);
   const [showTerms, setShowTerms] = useState(false);
+  const [bimStatus, setBimStatus] = useState<"unknown" | "ready" | "processing" | "error" | "none">(
+    "unknown",
+  );
+
+  // Bloquea "Crear proyecto" mientras el IFC sigue en el worker.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let tries = 0;
+    const MAX_TRIES = 90;
+
+    async function poll() {
+      try {
+        const plans = await api.listPlans(project.id);
+        if (cancelled) return;
+        const ifc = plans.filter((p) =>
+          p.original_filename?.toLowerCase().endsWith(".ifc"),
+        );
+        if (ifc.length === 0) {
+          setBimStatus(plans.length > 0 ? "ready" : "none");
+          return;
+        }
+        if (ifc.some((p) => p.status === "ready")) {
+          setBimStatus("ready");
+          return;
+        }
+        if (ifc.some((p) => p.status === "processing")) {
+          setBimStatus("processing");
+          if (tries < MAX_TRIES) {
+            tries += 1;
+            timer = setTimeout(poll, 4000);
+          } else {
+            setBimStatus("error");
+            setError(
+              "El procesamiento del modelo BIM está tardando demasiado. " +
+                "Volvé al paso del modelo y subí el archivo de nuevo.",
+            );
+          }
+          return;
+        }
+        setBimStatus("error");
+      } catch {
+        if (!cancelled) setBimStatus("none");
+      }
+    }
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [project.id]);
 
   async function handleActivate() {
     setError(null);
+    if (bimStatus === "processing") {
+      setError("El modelo BIM todavía se está procesando. Esperá un momento.");
+      return;
+    }
+    if (bimStatus === "error") {
+      setError("El modelo BIM no está listo. Subí de nuevo el archivo .ifc.");
+      return;
+    }
     setSubmitting(true);
     try {
+      // Re-check justo antes de activar (evita race con el worker).
+      const plans = await api.listPlans(project.id);
+      const ifc = plans.filter((p: Plan) =>
+        p.original_filename?.toLowerCase().endsWith(".ifc"),
+      );
+      if (ifc.length > 0 && !ifc.some((p) => p.status === "ready")) {
+        const stillProc = ifc.some((p) => p.status === "processing");
+        setBimStatus(stillProc ? "processing" : "error");
+        setError(
+          stillProc
+            ? "El modelo BIM todavía se está procesando. Esperá un momento."
+            : "El modelo BIM no se pudo procesar. Subí de nuevo el .ifc.",
+        );
+        return;
+      }
       if (!allowTraining) {
         await api.setTrainingConsent(project.id, false);
       }
@@ -39,6 +113,9 @@ export function Step5Review({
     }
   }
 
+  const canActivate =
+    !submitting && bimStatus !== "processing" && bimStatus !== "unknown" && bimStatus !== "error";
+
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Revisar y crear</h2>
@@ -47,12 +124,25 @@ export function Step5Review({
         el listado de arriba.
       </p>
 
+      {bimStatus === "processing" && (
+        <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300">
+          <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600 dark:border-sky-600 dark:border-t-sky-300" />
+          Procesando el modelo BIM… el proyecto se podrá crear cuando termine el cómputo.
+        </div>
+      )}
+      {bimStatus === "ready" && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+          ✓ Modelo BIM listo para el presupuesto.
+        </div>
+      )}
+
       <Section title="Datos básicos" onEdit={() => onEditStep(1)}>
         <Row label="Nombre" value={project.name} />
         <Row label="Descripción" value={project.description || "—"} />
       </Section>
 
-      <Section title="Localización" onEdit={() => onEditStep(3)}>
+      {/* Steps: 1 Datos · 2 Plano · 3 Páginas(PDF) · 4 Ubicación · 5 Construcción · 6 Review */}
+      <Section title="Localización" onEdit={() => onEditStep(4)}>
         <Row label="Dirección" value={project.address || "—"} />
         <Row
           label="Coordenadas"
@@ -66,7 +156,7 @@ export function Step5Review({
         {project.country && <Row label="País" value={project.country} />}
       </Section>
 
-      <Section title="Construcción" onEdit={() => onEditStep(4)}>
+      <Section title="Construcción" onEdit={() => onEditStep(5)}>
         <Row
           label="Tipo"
           value={
@@ -124,10 +214,21 @@ export function Step5Review({
         <button
           type="button"
           onClick={handleActivate}
-          disabled={submitting}
+          disabled={!canActivate}
           className="rounded-md bg-brand px-6 py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+          title={
+            bimStatus === "processing"
+              ? "Esperá a que termine el procesamiento del BIM"
+              : bimStatus === "error"
+                ? "El modelo BIM falló"
+                : ""
+          }
         >
-          {submitting ? "Creando..." : "Crear proyecto ✓"}
+          {submitting
+            ? "Creando..."
+            : bimStatus === "processing"
+              ? "Esperando BIM…"
+              : "Crear proyecto ✓"}
         </button>
       </div>
 

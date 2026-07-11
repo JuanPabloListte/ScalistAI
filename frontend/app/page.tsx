@@ -9,13 +9,14 @@ import { QuoteCalculator } from "@/components/landing/quote-calculator";
 const STEPS = [
   {
     icon: Upload,
-    title: "Subí el plano o el modelo",
-    desc: "PDF, DXF, DWG o directamente el modelo BIM (IFC) exportado de Revit/ArchiCAD. Sin configuración, sin escalímetro.",
+    title: "Subí el modelo BIM",
+    // PIVOTE IFC — original: "Subí el plano o el modelo" + PDF/DXF/DWG
+    desc: "El modelo IFC exportado de Revit/ArchiCAD, directo al presupuesto. Sin configuración, sin escalímetro.",
   },
   {
     icon: ScanLine,
     title: "Cómputo exacto, no estimado",
-    desc: "La geometría del CAD/BIM se convierte en cantidades reales: muros, aberturas, estructura, fundaciones y hasta el acero en kilos. La IA asiste donde el archivo no alcanza — y vos aprobás.",
+    desc: "La geometría del BIM se convierte en cantidades reales: muros, aberturas, estructura, fundaciones y hasta el acero en kilos. Los rubros que el modelo no trae se marcan como estimados — y vos aprobás.",
   },
   {
     icon: Download,
@@ -27,19 +28,20 @@ const STEPS = [
 const FAQS = [
   {
     q: "¿Qué formatos acepta?",
-    a: "PDF, DXF, DWG y modelos BIM en formato IFC (el export estándar de Revit, ArchiCAD y Tekla). Con un IFC ni siquiera hace falta revisar el plano: el modelo va directo al presupuesto con fundaciones, armaduras y artefactos incluidos.",
+    // PIVOTE IFC
+    a: "Modelos BIM en formato IFC (el export estándar de Revit, ArchiCAD y Tekla). El modelo va directo al presupuesto con fundaciones, armaduras y artefactos incluidos. La carga de PDF/DXF/DWG está temporalmente deshabilitada.",
   },
   {
     q: "¿Qué tan preciso es el cómputo?",
-    a: "Depende de la fuente, y te lo decimos con honestidad: lo que viene de un CAD o BIM es la geometría exacta del archivo (no una estimación). Donde hay que estimar —por ejemplo instalaciones que el plano no trae— el presupuesto lo marca explícitamente como estimado y podés ajustar los porcentajes. Nunca te mezclamos las dos cosas sin avisarte.",
+    a: "Lo que viene del modelo BIM (IFC) es la geometría exacta del archivo — no una estimación. Donde hay que estimar —por ejemplo instalaciones que el modelo no trae— el presupuesto lo marca explícitamente como estimado y podés ajustar los porcentajes. Nunca te mezclamos las dos cosas sin avisarte.",
   },
   {
     q: "¿De dónde salen los precios?",
     a: "De relevamientos reales de proveedores argentinos, con historial de evolución y comparación contra la inflación. Nada de índices inventados: cada material tiene su fuente. Además podés cargar tus propios precios y recetas constructivas, que quedan privados de tu organización.",
   },
   {
-    q: "¿Mis planos están seguros?",
-    a: "Sí. Cada organización tiene sus datos aislados (multi-tenant) y tus planos no se comparten ni se usan sin tu permiso. El control de roles te permite definir quién accede a qué.",
+    q: "¿Mis modelos están seguros?",
+    a: "Sí. Cada organización tiene sus datos aislados (multi-tenant) y tus archivos IFC no se comparten ni se usan sin tu permiso. El control de roles te permite definir quién accede a qué.",
   },
   {
     q: "¿Reemplaza al profesional que computa?",
@@ -47,7 +49,7 @@ const FAQS = [
   },
   {
     q: "¿Cómo empiezo?",
-    a: "Armá tu cotización online acá arriba y escribinos: coordinamos una demo con tus propios planos para que veas el resultado sobre tu trabajo real, sin compromiso.",
+    a: "Armá tu cotización online acá arriba y escribinos: coordinamos una demo con tu propio modelo IFC para que veas el resultado sobre tu trabajo real, sin compromiso.",
   },
 ];
 
@@ -108,15 +110,17 @@ export default function LandingPage() {
 
         <div className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold text-brand-300 mb-8 animate-fade-in">
           <Zap className="h-3 w-3" />
-          <span>PDF · DXF · DWG · BIM (IFC) — con precios reales de mercado</span>
+          {/* PIVOTE IFC — original: PDF · DXF · DWG · BIM (IFC) */}
+          <span>BIM (IFC) — con precios reales de mercado</span>
         </div>
 
         <h1 className="max-w-4xl text-5xl font-extrabold tracking-tight text-white sm:text-6xl md:text-7xl lg:text-8xl animate-slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
-          Del plano al <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-sky-300">presupuesto de obra</span> en minutos.
+          Del modelo BIM al <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-sky-300">presupuesto de obra</span> en minutos.
         </h1>
 
         <p className="mt-8 max-w-2xl text-lg text-slate-400 sm:text-xl animate-slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
-          ScalistAI computa tu proyecto desde el plano o el modelo BIM —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto llave en mano con precios reales, cronograma y curva de inversión.
+          {/* PIVOTE IFC */}
+          ScalistAI computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto llave en mano con precios reales, cronograma y curva de inversión.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center animate-slide-up" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
@@ -164,7 +168,8 @@ export default function LandingPage() {
                   <div className="mt-2 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h3 className="text-lg font-bold text-white">Vivienda Dúplex Norte</h3>
-                      <p className="truncate text-xs text-slate-500">DX_2026_PLANTA-EJECUTIVO.pdf · 150 DPI · 24 páginas</p>
+                        {/* PIVOTE IFC — mockup original: DX_2026_PLANTA-EJECUTIVO.pdf · 150 DPI · 24 páginas */}
+                        <p className="truncate text-xs text-slate-500">Duplex_Norte.ifc · IFC4 · 3 niveles</p>
                     </div>
                     <div className="hidden shrink-0 gap-2 md:flex">
                       <span className="rounded-md border border-slate-700 px-2.5 py-1.5 text-[11px] font-medium text-slate-300">Tabla de escalas · 22</span>
@@ -334,7 +339,8 @@ export default function LandingPage() {
       <section id="how" className="relative z-10 mx-auto max-w-7xl px-6 py-24 md:px-12 lg:px-24">
         <div className="text-center mb-16">
           <span className="text-sm font-semibold uppercase tracking-wider text-brand-400">Cómo funciona</span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">De un PDF a tu presupuesto en 3 pasos</h2>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">Del modelo IFC a tu presupuesto en 3 pasos</h2>
+          {/* PIVOTE IFC — original: "De un PDF a tu presupuesto en 3 pasos" */}
           <p className="mt-4 text-slate-400">Sin instalaciones, sin curva de aprendizaje.</p>
         </div>
 
@@ -394,7 +400,7 @@ export default function LandingPage() {
               </div>
               <h3 className="text-xl font-semibold text-white mb-3">Presupuesto honesto</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                El desglose separa lo que se computó <span className="text-slate-200 font-medium">exacto</span> del plano de lo que se <span className="text-slate-200 font-medium">estimó</span> — y te lo dice. Sin cajas negras ni doble conteo: sabés exactamente qué estás presentando.
+                El desglose separa lo que se computó <span className="text-slate-200 font-medium">exacto</span> del modelo BIM de lo que se <span className="text-slate-200 font-medium">estimó</span> — y te lo dice. Sin cajas negras ni doble conteo: sabés exactamente qué estás presentando.
               </p>
             </div>
 
@@ -475,7 +481,8 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-6 py-24 md:px-12 lg:px-24 text-center">
           <h2 className="text-4xl font-bold tracking-tight text-white sm:text-5xl">Tu próximo presupuesto, en minutos</h2>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-400">
-            Traé un plano o un modelo BIM real de tu estudio y armamos la demo sobre tu propio proyecto. Vas a ver el presupuesto completo antes de que termine la reunión.
+            {/* PIVOTE IFC */}
+            Traé un modelo IFC real de tu estudio y armamos la demo sobre tu propio proyecto. Vas a ver el presupuesto completo antes de que termine la reunión.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <a href="#cotizacion" className="inline-flex items-center justify-center rounded-full bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:bg-slate-200 hover:scale-105">
@@ -501,7 +508,8 @@ export default function LandingPage() {
                 ScalistAI
               </div>
               <p className="text-slate-400 max-w-sm">
-                Cómputo y presupuesto de obra automático desde planos y modelos BIM,
+                {/* PIVOTE IFC */}
+                Cómputo y presupuesto de obra automático desde modelos BIM (IFC),
                 con precios reales de mercado. Para estudios y constructoras de Argentina.
               </p>
             </div>
