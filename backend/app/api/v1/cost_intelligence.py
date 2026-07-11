@@ -18,7 +18,10 @@ from app.cost_intelligence.application.use_cases.run_simulation import RunSimula
 from app.cost_intelligence.domain.material_trend import project_material
 from app.cost_intelligence.domain.pricing_breakdown import IndirectRates, build_price
 from app.cost_intelligence.domain.value_objects import Money
-from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_workbook
+from app.cost_intelligence.infrastructure.export.xlsx_exporter import (
+    build_budget_workbook,
+    build_workbook,
+)
 from app.cost_intelligence.infrastructure.forecasting.deterministic import DeterministicForecaster
 from app.cost_intelligence.infrastructure.persistence.cost_settings_repo import SqlCostSettingsRepo
 from app.cost_intelligence.infrastructure.persistence.macro_rate_provider import SqlMacroRateProvider
@@ -341,11 +344,46 @@ def budget_summary(
     """Presupuesto COMPLETO del proyecto: total, desglose por rubro y resumen de
     cómputo (ml de muro, aberturas, etc.). Corre la simulación y agrega."""
     _assert_plan_in_org(db, plan_id, user.organization_id)
+    summary = _compute_budget_summary(db, plan_id, user.organization_id)
+    db.commit()
+    return summary
+
+
+@router.get("/plans/{plan_id}/budget-export/xlsx")
+def export_budget_summary(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Excel del presupuesto completo (misma fuente que budget-summary).
+
+    Incluye obra gris + rubros paramétricos + precio de venta + cómputo.
+    Reemplaza el download vía simulación (que omitía los paramétricos).
+    """
+    _assert_plan_in_org(db, plan_id, user.organization_id)
+    summary = _compute_budget_summary(db, plan_id, user.organization_id)
+    db.commit()
+    xlsx = build_budget_workbook(summary.model_dump())
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in summary.project_name)[:60]
+    filename = f"presupuesto_{safe or plan_id}.xlsx"
+    return Response(
+        content=xlsx,
+        media_type=_XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _compute_budget_summary(
+    db: Session, plan_id: int, organization_id: int | None,
+) -> ProjectBudgetSummary:
+    """Fuente única de verdad del presupuesto completo del proyecto."""
     plan = db.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
     project = db.get(Project, plan.project_id)
 
     scenario = RunSimulation(SqlMeasurementProvider(db), SqlRecipeCatalog(db)).execute(
-        plan_id, user.organization_id)
+        plan_id, organization_id)
     materials_total = float(scenario.totals.materials.amount)
     labor_total = float(scenario.totals.labor_cost.amount)
     obra_gris = materials_total + labor_total  # costo directo de lo MODELADO
@@ -419,7 +457,7 @@ def budget_summary(
 
     area = floor_m2
     repo = SqlCostSettingsRepo(db)
-    cs = repo.get_or_create(user.organization_id)
+    cs = repo.get_or_create(organization_id)
 
     # Rubros PARAMÉTRICOS: lo que el modelo no trae (fundaciones, instalaciones,
     # terminaciones) estimado como % sobre la obra gris. Estimación explícita,
@@ -430,7 +468,7 @@ def budget_summary(
     # eléctricas y sus conexiones). Para no contar dos veces, a cada rubro se le
     # descuenta lo ya computado exacto de su disciplina (piso en 0). Así el
     # estimado representa solo la RED faltante, no modelada.
-    prubros = repo.parametric_rubros(user.organization_id)
+    prubros = repo.parametric_rubros(organization_id)
     entity_costs = getattr(scenario, "entity_costs", {}) or {}
     parametric_cats = []
     for r in prubros:
@@ -445,7 +483,6 @@ def budget_summary(
             parametric_cats.append((r["label"], net))
     parametric_total = float(sum(t for _, t in parametric_cats))
     direct = obra_gris + parametric_total
-    db.commit()
 
     breakdown = build_price(Money(direct), IndirectRates(
         Decimal(str(cs.overhead_pct)), Decimal(str(cs.profit_pct)), Decimal(str(cs.iva_pct))))
@@ -460,7 +497,8 @@ def budget_summary(
     categories = modeled + estimated  # primero lo modelado, luego los estimados
 
     return ProjectBudgetSummary(
-        plan_id=plan_id, project_name=project.name, area_m2=area,
+        plan_id=plan_id, project_name=project.name if project else f"Plan {plan_id}",
+        area_m2=area,
         area_estimated=area_estimated,
         materials_total=materials_total, labor_total=labor_total,
         labor_hours=float(scenario.totals.labor_hours),

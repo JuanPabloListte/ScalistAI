@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_superadmin
 from app.models import Plan, User
 
 router = APIRouter(tags=["plans"])
@@ -87,21 +87,16 @@ def generate_synthetic_dataset(
     }
 
 
-def _require_admin(user: User) -> None:
-    if user.role != "admin" and user.email != "admin@gmail.com":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operación permitida únicamente a administradores.",
-        )
+
 
 
 @router.post("/admin/train-now")
 def trigger_training(
     epochs: int = 10,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_superadmin),
 ) -> dict:
     """Dispara el re-entrenamiento del modelo ML en background."""
-    _require_admin(user)
+    _ = user  # autenticado via require_superadmin
     from app.services.training_manager import get_training_manager
     manager = get_training_manager()
     res = manager.start_training(epochs=epochs)
@@ -113,10 +108,10 @@ def trigger_training(
 @router.post("/admin/gen-procedural")
 def trigger_procedural_generation(
     count: int = 3000,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_superadmin),
 ) -> dict:
     """Genera el dataset PROCEDURAL en background."""
-    _require_admin(user)
+    _ = user
     if count < 100 or count > 50000:
         raise HTTPException(status_code=400, detail="count debe estar entre 100 y 50000.")
     from app.services.training_manager import get_training_manager
@@ -129,10 +124,10 @@ def trigger_procedural_generation(
 
 @router.get("/admin/train-status")
 def get_training_status(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_superadmin),
 ) -> dict:
     """Devuelve estado y logs del entrenamiento en background."""
-    _require_admin(user)
+    _ = user
     from app.services.training_manager import get_training_manager
     manager = get_training_manager()
     return {

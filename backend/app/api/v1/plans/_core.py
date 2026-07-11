@@ -27,6 +27,10 @@ from ._common import MAX_IFC_BYTES, MAX_PDF_BYTES, RASTER_DPI, _page_raster_path
 
 router = APIRouter(tags=["plans"])
 
+# PIVOTE IFC: imports del path PDF/DXF comentado se conservan para reactivación.
+_ = (uuid, Path, settings, detect_scales, page_count, recommend_pages,
+     prewarm_plan_pages, MAX_PDF_BYTES, RASTER_DPI, classify_pages)
+
 
 @router.post(
     "/projects/{project_id}/plans",
@@ -67,63 +71,71 @@ async def upload_plan(
         enqueue(process_ifc, plan.id, background_tasks=background_tasks)
         return plan
 
-    # DXF / DWG: se plotea a PDF vectorial; los elementos salen del mapeo de capas.
-    if fname_lower.endswith(".dxf") or fname_lower.endswith(".dwg"):
-        from app.services.dxf_import import build_dxf_plan
-
-        ext = ".dwg" if fname_lower.endswith(".dwg") else ".dxf"
-        plan, _ = build_dxf_plan(project_id, contents, file.filename or f"plano{ext}", db)
-        if project.wizard_step < 2:
-            project.wizard_step = 2
-        db.commit()
-        db.refresh(plan)
-        return plan
-
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF, DXF o DWG")
-
-    plan_storage = Path(settings.STORAGE_DIR) / "plans" / str(project_id)
-    plan_storage.mkdir(parents=True, exist_ok=True)
-
-    file_id = uuid.uuid4().hex
-    pdf_path = plan_storage / f"{file_id}.pdf"
-    pdf_path.write_bytes(contents)
-
-    try:
-        n_pages = page_count(pdf_path)
-    except Exception as exc:  # noqa: BLE001
-        pdf_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"PDF inválido: {exc}") from exc
-
-    try:
-        auto_scales = detect_scales(pdf_path, RASTER_DPI)
-    except Exception:  # noqa: BLE001
-        auto_scales = {}
-
-    plan = Plan(
-        project_id=project_id,
-        original_filename=file.filename or f"{file_id}.pdf",
-        pdf_path=str(pdf_path),
-        dpi=RASTER_DPI,
-        page_count=n_pages,
-        status="ready",
-        page_scales=auto_scales or None,
-        scale_source="auto_text" if auto_scales else None,
+    # ─── PIVOTE IFC (jul-2026): PDF / DXF / DWG DESACTIVADOS temporalmente.
+    # El MVP se centra en IFC (cómputo exacto). Para REACTIVAR: restaurar los
+    # bloques comentados debajo y quitar este HTTPException.
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Por ahora solo aceptamos modelos BIM en formato .ifc. "
+            "La carga de PDF/DXF/DWG está temporalmente deshabilitada."
+        ),
     )
-    db.add(plan)
-    if project.wizard_step < 2:
-        project.wizard_step = 2
-    db.commit()
-    db.refresh(plan)
 
-    background_tasks.add_task(prewarm_plan_pages, plan.id)
-    # Si el PDF es vectorial con capas CAD (muros/aberturas/etc.), extrae los
-    # elementos exactos. Va al worker de jobs: una lámina A0 con miles de
-    # entidades puede tardar minutos de CPU.
-    from app.core.jobs import enqueue
-    from app.services.pdf_vector_import import try_vector_import
-    enqueue(try_vector_import, plan.id, background_tasks=background_tasks)
-    return plan
+    # # DXF / DWG: se plotea a PDF vectorial; los elementos salen del mapeo de capas.
+    # if fname_lower.endswith(".dxf") or fname_lower.endswith(".dwg"):
+    #     from app.services.dxf_import import build_dxf_plan
+    #
+    #     ext = ".dwg" if fname_lower.endswith(".dwg") else ".dxf"
+    #     plan, _ = build_dxf_plan(project_id, contents, file.filename or f"plano{ext}", db)
+    #     if project.wizard_step < 2:
+    #         project.wizard_step = 2
+    #     db.commit()
+    #     db.refresh(plan)
+    #     return plan
+    #
+    # if file.content_type != "application/pdf":
+    #     raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF, DXF o DWG")
+    #
+    # plan_storage = Path(settings.STORAGE_DIR) / "plans" / str(project_id)
+    # plan_storage.mkdir(parents=True, exist_ok=True)
+    #
+    # file_id = uuid.uuid4().hex
+    # pdf_path = plan_storage / f"{file_id}.pdf"
+    # pdf_path.write_bytes(contents)
+    #
+    # try:
+    #     n_pages = page_count(pdf_path)
+    # except Exception as exc:  # noqa: BLE001
+    #     pdf_path.unlink(missing_ok=True)
+    #     raise HTTPException(status_code=400, detail=f"PDF inválido: {exc}") from exc
+    #
+    # try:
+    #     auto_scales = detect_scales(pdf_path, RASTER_DPI)
+    # except Exception:  # noqa: BLE001
+    #     auto_scales = {}
+    #
+    # plan = Plan(
+    #     project_id=project_id,
+    #     original_filename=file.filename or f"{file_id}.pdf",
+    #     pdf_path=str(pdf_path),
+    #     dpi=RASTER_DPI,
+    #     page_count=n_pages,
+    #     status="ready",
+    #     page_scales=auto_scales or None,
+    #     scale_source="auto_text" if auto_scales else None,
+    # )
+    # db.add(plan)
+    # if project.wizard_step < 2:
+    #     project.wizard_step = 2
+    # db.commit()
+    # db.refresh(plan)
+    #
+    # background_tasks.add_task(prewarm_plan_pages, plan.id)
+    # from app.core.jobs import enqueue
+    # from app.services.pdf_vector_import import try_vector_import
+    # enqueue(try_vector_import, plan.id, background_tasks=background_tasks)
+    # return plan
 
 
 @router.get("/projects/{project_id}/plans", response_model=list[PlanRead])
