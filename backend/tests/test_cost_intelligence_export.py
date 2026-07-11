@@ -72,6 +72,59 @@ def test_hojas_vacias_no_rompen():
     assert "Escenarios" in wb.sheetnames and "Proyección" in wb.sheetnames
 
 
+# --- Presupuesto completo (budget-summary → Excel) ---
+
+from app.cost_intelligence.infrastructure.export.xlsx_exporter import build_budget_workbook  # noqa: E402
+
+BUDGET = {
+    "project_name": "Obra Test",
+    "area_m2": 100.0,
+    "area_estimated": False,
+    "materials_total": 1000.0,
+    "labor_total": 500.0,
+    "obra_gris_direct": 1500.0,
+    "parametric_total": 300.0,
+    "direct_cost": 1800.0,
+    "sale_price": 2500.0,
+    "labor_hours": 40.0,
+    "duration_days": 10.0,
+    "cost_per_m2": 18.0,
+    "breakdown": {
+        "direct": 1800.0, "overhead": 270.0, "profit": 200.0, "iva": 230.0, "total": 2500.0,
+    },
+    "categories": [
+        {"name": "Mampostería", "total": 1000.0, "pct": 55.5, "per_m2": 10.0, "parametric": False},
+        {"name": "Inst. eléctrica", "total": 300.0, "pct": 16.7, "per_m2": 3.0, "parametric": True},
+    ],
+    "takeoff": {
+        "wall_ml": 40.0, "wall_m2": 112.0, "openings": 5, "doors": 2, "windows": 3,
+        "rooms": 4, "floor_m2": 100.0, "roof_m2": 100.0, "columns": 8, "beams_ml": 20.0,
+        "cloaca_ml": 0, "electricidad_ml": 0, "sanitarios": 3, "bocas_electricas": 12,
+        "escaleras": 0, "pilotes": 0, "zapatas_ml": 0, "armaduras": 0, "armadura_kg": 0,
+    },
+}
+
+
+def test_budget_workbook_sheets_and_totals():
+    data = build_budget_workbook(BUDGET)
+    assert isinstance(data, bytes) and len(data) > 0
+    wb = load_workbook(BytesIO(data))
+    assert wb.sheetnames == ["Presupuesto", "Rubros", "Cómputo"]
+    ws = wb["Presupuesto"]
+    vals = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)}
+    assert vals.get("COSTO DIRECTO") == 1800.0
+    assert vals.get("PRECIO DE VENTA") == 2500.0
+    assert vals.get("Rubros estimados (paramétricos)") == 300.0
+
+
+def test_budget_workbook_rubros_marca_estimado():
+    wb = load_workbook(BytesIO(build_budget_workbook(BUDGET)))
+    ws = wb["Rubros"]
+    types = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(4, ws.max_row + 1)}
+    assert types.get("Mampostería") == "Modelado"
+    assert types.get("Inst. eléctrica") == "Estimado"
+
+
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

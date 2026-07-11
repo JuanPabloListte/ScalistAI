@@ -132,3 +132,110 @@ def build_workbook(sim: dict, scenarios: Iterable[dict], projections: Iterable[d
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def build_budget_workbook(summary: dict) -> bytes:
+    """XLSX alineado a `ProjectBudgetSummary` (pantalla de presupuesto).
+
+    Hojas:
+      1. Presupuesto — obra gris + paramétricos + precio de venta
+      2. Rubros — desglose por categoría (modelado vs estimado)
+      3. Cómputo — takeoff de cantidades
+    """
+    wb = Workbook()
+    bd = summary.get("breakdown") or {}
+    takeoff = summary.get("takeoff") or {}
+    categories = summary.get("categories") or []
+
+    # --- Hoja 1: Presupuesto ---
+    ws = wb.active
+    ws.title = "Presupuesto"
+    ws["A1"] = summary.get("project_name") or "Presupuesto"
+    ws["A1"].font = _TITLE_FONT
+    if summary.get("area_estimated"):
+        ws["A2"] = f"Área cubierta ≈ {round(summary.get('area_m2') or 0, 1)} m² (estimada)"
+    else:
+        ws["A2"] = f"Área cubierta: {round(summary.get('area_m2') or 0, 1)} m²"
+
+    _header_row(ws, 4, ["Rubro", "Monto"])
+    rows: list[tuple[str, float, str]] = [
+        ("Materiales (obra gris)", float(summary.get("materials_total") or 0), "money"),
+        ("Mano de obra (obra gris)", float(summary.get("labor_total") or 0), "money"),
+        ("Obra gris (modelado)", float(summary.get("obra_gris_direct") or 0), "bold"),
+        ("Rubros estimados (paramétricos)", float(summary.get("parametric_total") or 0), "money"),
+        ("COSTO DIRECTO", float(summary.get("direct_cost") or 0), "bold"),
+        ("Gastos generales", float(bd.get("overhead") or 0), "money"),
+        ("Beneficio", float(bd.get("profit") or 0), "money"),
+        ("IVA", float(bd.get("iva") or 0), "money"),
+        ("PRECIO DE VENTA", float(summary.get("sale_price") or bd.get("total") or 0), "bold"),
+        ("Horas hombre", float(summary.get("labor_hours") or 0), "plain"),
+        ("Duración estimada (días)", float(summary.get("duration_days") or 0), "plain"),
+    ]
+    if summary.get("cost_per_m2") is not None:
+        rows.append(("Costo directo / m²", float(summary["cost_per_m2"]), "money"))
+
+    for i, (label, value, kind) in enumerate(rows, start=5):
+        lc = ws.cell(row=i, column=1, value=label)
+        c = ws.cell(row=i, column=2, value=round(value, 2))
+        if kind != "plain":
+            c.number_format = _MONEY_FMT
+        if kind == "bold":
+            lc.font = _TOTAL_FONT
+            c.font = _TOTAL_FONT
+    _autosize(ws, [36, 22])
+
+    # --- Hoja 2: Rubros ---
+    ws2 = wb.create_sheet("Rubros")
+    ws2["A1"] = "Desglose por rubro"
+    ws2["A1"].font = _TITLE_FONT
+    _header_row(ws2, 3, ["Rubro", "Tipo", "Monto", "%", "$/m²"])
+    r = 4
+    for cat in categories:
+        ws2.cell(row=r, column=1, value=cat.get("name"))
+        ws2.cell(row=r, column=2, value="Estimado" if cat.get("parametric") else "Modelado")
+        ws2.cell(row=r, column=3, value=round(float(cat.get("total") or 0), 2)).number_format = _MONEY_FMT
+        ws2.cell(row=r, column=4, value=round(float(cat.get("pct") or 0), 1))
+        per_m2 = cat.get("per_m2")
+        if per_m2 is not None:
+            ws2.cell(row=r, column=5, value=round(float(per_m2), 2)).number_format = _MONEY_FMT
+        r += 1
+    if r == 4:
+        ws2.cell(row=4, column=1, value="(sin rubros)")
+    _autosize(ws2, [32, 12, 18, 8, 14])
+
+    # --- Hoja 3: Cómputo ---
+    ws3 = wb.create_sheet("Cómputo")
+    ws3["A1"] = "Resumen de cómputo (takeoff)"
+    ws3["A1"].font = _TITLE_FONT
+    _header_row(ws3, 3, ["Cantidad", "Valor", "Detalle"])
+    takeoff_rows = [
+        ("Muros", f"{round(float(takeoff.get('wall_ml') or 0), 1)} ml",
+         f"{round(float(takeoff.get('wall_m2') or 0), 1)} m²"),
+        ("Aberturas", str(takeoff.get("openings") or 0),
+         f"{takeoff.get('doors') or 0} puertas · {takeoff.get('windows') or 0} ventanas"),
+        ("Ambientes", str(takeoff.get("rooms") or 0),
+         f"{round(float(takeoff.get('floor_m2') or 0), 1)} m² de piso"),
+        ("Cubierta / losa", f"{round(float(takeoff.get('roof_m2') or 0), 1)} m²", ""),
+        ("Columnas", str(takeoff.get("columns") or 0), ""),
+        ("Vigas", f"{round(float(takeoff.get('beams_ml') or 0), 1)} ml",
+         f"+ {takeoff.get('escaleras') or 0} escaleras" if takeoff.get("escaleras") else ""),
+        ("Sanitarios", str(takeoff.get("sanitarios") or 0),
+         f"{round(float(takeoff.get('cloaca_ml') or 0), 1)} ml cañería"),
+        ("Eléctrico", str(takeoff.get("bocas_electricas") or 0),
+         f"{round(float(takeoff.get('electricidad_ml') or 0), 1)} ml tendido"),
+        ("Pilotes", str(takeoff.get("pilotes") or 0), ""),
+        ("Zapatas", f"{round(float(takeoff.get('zapatas_ml') or 0), 1)} ml", ""),
+        ("Armaduras", str(takeoff.get("armaduras") or 0),
+         f"{round(float(takeoff.get('armadura_kg') or 0), 1)} kg"),
+    ]
+    r = 4
+    for label, value, detail in takeoff_rows:
+        ws3.cell(row=r, column=1, value=label)
+        ws3.cell(row=r, column=2, value=value)
+        ws3.cell(row=r, column=3, value=detail)
+        r += 1
+    _autosize(ws3, [18, 18, 36])
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models import Assembly, AssemblyMaterial, User
+from app.models import Assembly, AssemblyMaterial, Material, User
 from app.schemas.assembly import (
     AssemblyCreate,
     AssemblyUpdate,
@@ -13,6 +13,27 @@ from app.schemas.assembly import (
 
 router = APIRouter(tags=["assemblies"])
 
+
+def _assert_materials_in_org(
+    db: Session, organization_id: int | None, material_ids: list[int],
+) -> None:
+    """Evita referenciar insumos de otra org (o IDs inventados)."""
+    if not material_ids:
+        return
+    unique_ids = set(material_ids)
+    stmt = select(Material.id).where(
+        Material.id.in_(unique_ids),
+        Material.organization_id == organization_id,
+    )
+    found = set(db.scalars(stmt).all())
+    missing = unique_ids - found
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insumos inválidos o de otra organización: {sorted(missing)}",
+        )
+
+
 @router.get("/", response_model=list[AssemblyRead])
 def list_assemblies(
     db: Session = Depends(get_db),
@@ -20,6 +41,7 @@ def list_assemblies(
 ) -> list[Assembly]:
     stmt = select(Assembly).where(Assembly.organization_id == user.organization_id).order_by(Assembly.name.asc())
     return list(db.scalars(stmt).all())
+
 
 @router.post("/", response_model=AssemblyRead, status_code=status.HTTP_201_CREATED)
 def create_assembly(
@@ -38,6 +60,12 @@ def create_assembly(
             detail=f"Ya existe un sistema con el nombre '{payload.name}'."
         )
 
+    _assert_materials_in_org(
+        db,
+        user.organization_id,
+        [am.material_id for am in payload.assembly_materials],
+    )
+
     assembly = Assembly(
         organization_id=user.organization_id,
         name=payload.name,
@@ -49,7 +77,7 @@ def create_assembly(
     db.add(assembly)
     db.flush()
 
-    for am_payload in (payload.materials or []):
+    for am_payload in payload.assembly_materials:
         db_am = AssemblyMaterial(
             assembly_id=assembly.id,
             material_id=am_payload.material_id,
@@ -62,6 +90,7 @@ def create_assembly(
     db.refresh(assembly)
     return assembly
 
+
 @router.get("/{assembly_id}", response_model=AssemblyRead)
 def get_assembly(
     assembly_id: int,
@@ -72,6 +101,7 @@ def get_assembly(
     if not assembly or assembly.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Sistema no encontrado")
     return assembly
+
 
 @router.put("/{assembly_id}", response_model=AssemblyRead)
 def update_assembly(
@@ -100,7 +130,7 @@ def update_assembly(
 
     if payload.applies_to is not None:
         assembly.applies_to = payload.applies_to
-        
+
     if payload.daily_yield is not None:
         assembly.daily_yield = payload.daily_yield
 
@@ -109,10 +139,15 @@ def update_assembly(
     if payload.stage_order is not None:
         assembly.stage_order = payload.stage_order
 
-    if payload.materials is not None:
-        for old_am in assembly.assembly_materials:
+    if payload.assembly_materials is not None:
+        _assert_materials_in_org(
+            db,
+            user.organization_id,
+            [am.material_id for am in payload.assembly_materials],
+        )
+        for old_am in list(assembly.assembly_materials):
             db.delete(old_am)
-        for am_payload in payload.materials:
+        for am_payload in payload.assembly_materials:
             db_am = AssemblyMaterial(
                 assembly_id=assembly.id,
                 material_id=am_payload.material_id,
@@ -124,6 +159,7 @@ def update_assembly(
     db.commit()
     db.refresh(assembly)
     return assembly
+
 
 @router.delete("/{assembly_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_assembly(

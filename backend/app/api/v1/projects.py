@@ -144,9 +144,31 @@ def activate_project(
     if not project.name:
         raise HTTPException(status_code=400, detail="Falta el nombre del proyecto")
 
-    has_plan = db.scalar(select(Plan.id).where(Plan.project_id == project_id).limit(1))
-    if has_plan is None:
+    plans = list(db.scalars(select(Plan).where(Plan.project_id == project_id)).all())
+    if not plans:
         raise HTTPException(status_code=400, detail="Falta subir al menos un plano")
+
+    # IFC: el parse corre en worker. No activar con cómputo incompleto o fallido.
+    ifc_plans = [
+        p for p in plans if (p.original_filename or "").lower().endswith(".ifc")
+    ]
+    if ifc_plans:
+        if any(p.status == "processing" for p in ifc_plans):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "El modelo BIM todavía se está procesando. "
+                    "Esperá a que termine antes de activar el proyecto."
+                ),
+            )
+        if not any(p.status == "ready" for p in ifc_plans):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "El modelo BIM no se pudo procesar. "
+                    "Subí de nuevo el archivo .ifc e intentá otra vez."
+                ),
+            )
 
     if project.address is None or project.latitude is None or project.longitude is None:
         raise HTTPException(status_code=400, detail="Falta la ubicacion del proyecto")
