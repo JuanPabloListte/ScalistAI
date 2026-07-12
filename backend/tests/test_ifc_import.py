@@ -321,6 +321,29 @@ def test_autofill_building():
     assert proj2.building_info == {"area_total_m2": 900.0, "pisos": 5}
 
 
+def test_assess_ifc_quality_semaphore():
+    ifc = _load_ifc_import()
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        # Sin spaces ni QTO → yellow (tiene muros/storeys, usable).
+        q_no = ifc.assess_ifc_quality(str(_build_ifc(tmp, with_spaces=False)))
+        assert q_no["level"] in ("yellow", "green", "red")
+        assert q_no["has_spaces"] is False
+        assert any(c["id"] == "spaces" and c["ok"] is False for c in q_no["checks"])
+        assert q_no["n_storeys"] >= 1
+
+        q_yes = ifc.assess_ifc_quality(str(_build_ifc(tmp, with_spaces=True)))
+        assert q_yes["has_spaces"] is True
+        assert any(c["id"] == "spaces" and c["ok"] is True for c in q_yes["checks"])
+
+        refined = ifc.refine_ifc_quality(
+            q_no,
+            {"entities": {"wall": 10}, "raw": {"wall": 2}, "area_estimada": True, "n_elements": 5},
+        )
+        assert refined["level"] in ("yellow", "red")
+        assert any("muros" in w.lower() for w in refined["warnings"])
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

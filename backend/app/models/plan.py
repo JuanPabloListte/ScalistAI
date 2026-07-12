@@ -41,6 +41,13 @@ class Plan(Base):
     # las mismas paginas.
     page_roles: Mapped[dict[str, list[str]] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="uploaded", nullable=False)
+    # Motivo legible cuando status=error (p.ej. fallo del worker IFC).
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Progreso del parseo IFC en background (0–100) + etiqueta de etapa.
+    parse_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parse_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Semáforo de calidad del modelo BIM (schema, spaces, QTO, niveles).
+    ifc_quality: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -23,6 +23,10 @@ class PlanRead(BaseModel):
     deleted_pages: list[int] | None = None
     page_overrides: dict[str, str] | None = None
     page_roles: dict[str, list[PageRole]] | None = None
+    error_message: str | None = None
+    parse_progress: int | None = None
+    parse_stage: str | None = None
+    ifc_quality: dict | None = None
     created_at: datetime
 
 
