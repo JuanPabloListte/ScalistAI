@@ -10,9 +10,11 @@ import {
   type CashflowPoint,
   type WorkPlanData,
   type WorkPlanVersion,
+  type WorkPlanComputeDiff,
   type WorkProgress,
   type ProgressEntryRow,
-  type OrgUser
+  type OrgUser,
+  type ProjectBudgetSummary,
 } from "@/lib/api";
 import { 
   Check, AlertTriangle, Play, CheckCircle, Ban, HelpCircle, X, 
@@ -77,6 +79,9 @@ export default function ProjectGanttPage() {
   const [plan, setPlan] = useState<WorkPlanData | null>(null);
   const [versions, setVersions] = useState<WorkPlanVersion[]>([]);
   const [progress, setProgress] = useState<WorkProgress | null>(null);
+  const [budgetSummary, setBudgetSummary] = useState<ProjectBudgetSummary | null>(null);
+  const [computeDiff, setComputeDiff] = useState<WorkPlanComputeDiff | null>(null);
+  const [showComputeDiff, setShowComputeDiff] = useState(false);
   const [team, setTeam] = useState<OrgUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
@@ -199,6 +204,20 @@ export default function ProjectGanttPage() {
         if (typeof window !== "undefined") {
           const mt = localStorage.getItem(`gantt_manual_tasks_${projectId}`);
           if (mt) setManualTasks(JSON.parse(mt));
+        }
+
+        // Alineación medición ↔ plan: presupuesto completo + diff vs cómputo.
+        const plans = await api.listPlans(projectId).catch(() => []);
+        const ready = plans.find((p) => p.status === "ready");
+        if (ready) {
+          api.getBudgetSummary(ready.id).then(setBudgetSummary).catch(() => setBudgetSummary(null));
+        } else {
+          setBudgetSummary(null);
+        }
+        if (wpState.plan) {
+          api.getWorkPlanComputeDiff(projectId).then(setComputeDiff).catch(() => setComputeDiff(null));
+        } else {
+          setComputeDiff(null);
         }
       })
       .catch((e) => setError(String((e as Error)?.message ?? e)))
@@ -432,6 +451,7 @@ export default function ProjectGanttPage() {
       } else {
         setProgress(null);
       }
+      api.getWorkPlanComputeDiff(projectId).then(setComputeDiff).catch(() => setComputeDiff(null));
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
@@ -923,6 +943,16 @@ export default function ProjectGanttPage() {
                     className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors">
                     Registrar avances →
                   </Link>
+                  <button
+                    onClick={() =>
+                      act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))
+                    }
+                    disabled={acting}
+                    title="Genera borrador vN+1 desde el cómputo IFC actual. El baseline activo no cambia hasta que congelés el borrador."
+                    className="rounded-lg border border-sky-600 text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/20 px-3.5 py-2 text-xs font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {acting ? "…" : "Actualizar borrador desde cómputo"}
+                  </button>
                   <button onClick={downloadReport} disabled={acting}
                     className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50">
                     {acting ? "…" : "Reporte PDF"}
@@ -947,6 +977,131 @@ export default function ProjectGanttPage() {
           )}
         </div>
       </header>
+
+      {/* Alineación medición (presupuesto) ↔ plan de obra */}
+      {(budgetSummary || computeDiff) && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Medición ↔ Plan
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
+                Plan = materiales por receta (tareas del Gantt). Presupuesto = obra gris
+                (+ mano de obra en categorías) + rubros paramétricos.
+              </p>
+            </div>
+            {computeDiff && computeDiff.n_changed > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowComputeDiff((v) => !v)}
+                className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+              >
+                {showComputeDiff ? "Ocultar cambios" : `${computeDiff.n_changed} cambio(s) vs cómputo`}
+              </button>
+            )}
+            {computeDiff && computeDiff.n_changed === 0 && plan && (
+              <span className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+                Plan alineado al cómputo actual
+              </span>
+            )}
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+            {budgetSummary && (
+              <>
+                <div>
+                  <div className="text-xs text-slate-500">Presupuesto (obra gris)</div>
+                  <div className="font-semibold text-slate-900 dark:text-white">
+                    ${fmtARS(budgetSummary.obra_gris_direct ?? budgetSummary.materials_total + budgetSummary.labor_total)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Presupuesto (directo c/ param.)</div>
+                  <div className="font-semibold text-slate-900 dark:text-white">
+                    ${fmtARS(budgetSummary.direct_cost)}
+                  </div>
+                </div>
+              </>
+            )}
+            <div>
+              <div className="text-xs text-slate-500">Costo del plan (Gantt)</div>
+              <div className="font-semibold text-brand-600 dark:text-brand-400">
+                ${fmtARS(scheduleTotalCost)}
+              </div>
+            </div>
+            {computeDiff && (
+              <div>
+                <div className="text-xs text-slate-500">Cómputo IFC ahora</div>
+                <div className="font-semibold text-slate-900 dark:text-white">
+                  ${fmtARS(computeDiff.compute_total)}
+                  {Math.abs(computeDiff.delta_cost) >= 1 && (
+                    <span className={`ml-1 text-xs ${computeDiff.delta_cost > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                      ({computeDiff.delta_cost > 0 ? "+" : ""}{fmtARS(computeDiff.delta_cost)})
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {showComputeDiff && computeDiff && computeDiff.n_changed > 0 && (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-left text-slate-500 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-3 py-2">Tarea</th>
+                    <th className="px-3 py-2">Estado</th>
+                    <th className="px-3 py-2 text-right">Qty plan</th>
+                    <th className="px-3 py-2 text-right">Qty cómputo</th>
+                    <th className="px-3 py-2 text-right">$ plan</th>
+                    <th className="px-3 py-2 text-right">$ cómputo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {computeDiff.tasks
+                    .filter((r) => r.status !== "same")
+                    .map((r) => (
+                      <tr key={`${r.name}-${r.status}`}>
+                        <td className="px-3 py-1.5 font-medium text-slate-800 dark:text-slate-200">
+                          {r.name}
+                          {r.level ? <span className="ml-1 text-slate-400">· {r.level}</span> : null}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <span className={
+                            r.status === "changed" ? "text-amber-600"
+                              : r.status === "added" ? "text-sky-600"
+                                : "text-slate-500"
+                          }>
+                            {r.status === "changed" ? "cambió"
+                              : r.status === "added" ? "nueva en cómputo"
+                                : "solo en plan"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono text-slate-600">
+                          {r.qty_plan != null ? `${r.qty_plan.toFixed(1)} ${r.unit || ""}` : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono text-slate-600">
+                          {r.qty_compute != null ? `${r.qty_compute.toFixed(1)} ${r.unit || ""}` : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">
+                          {r.cost_plan != null ? `$${fmtARS(r.cost_plan)}` : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">
+                          {r.cost_compute != null ? `$${fmtARS(r.cost_compute)}` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+              {plan?.status === "active" && (
+                <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500 dark:border-slate-800">
+                  Para aplicar el cómputo nuevo: usá «Actualizar borrador desde cómputo» y después congelá el baseline.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Floating Notifications */}
       {error && (
@@ -1071,18 +1226,19 @@ export default function ProjectGanttPage() {
             <div ref={scrollContainerRef} className="flex min-w-full overflow-x-auto overflow-y-auto h-[calc(100vh-280px)] min-h-[400px] relative [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
               
               {/* Left Panel: WBS Table (Sticky left) */}
-              <div className="shrink-0 bg-slate-50 dark:bg-slate-950 w-[680px] z-30 min-h-fit">
+              <div className="shrink-0 bg-slate-50 dark:bg-slate-950 w-[760px] z-30 min-h-fit">
                 {/* Table Header */}
                 <div className="flex h-20 sticky left-0 top-0 z-40 border-r border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]">
                   <div className="w-8 shrink-0">ID</div>
                   <div className="w-40 shrink-0 truncate pl-2">Tarea</div>
+                  <div className="w-20 shrink-0 text-center" title="Cantidad desde cómputo IFC">Cant.</div>
                   <div className="w-14 shrink-0 text-center">Dur.</div>
                   <div className="w-16 shrink-0 text-center">Inicio</div>
                   <div className="w-16 shrink-0 text-center">Fin</div>
                   <div className="w-12 shrink-0 text-center">%</div>
-                  <div className="w-20 shrink-0 text-center">Pred.</div>
-                  <div className="w-18 shrink-0 text-center">Prior.</div>
-                  <div className="w-26 shrink-0 text-right">Etapa</div>
+                  <div className="w-16 shrink-0 text-center">Pred.</div>
+                  <div className="w-16 shrink-0 text-center">Prior.</div>
+                  <div className="w-24 shrink-0 text-right">Etapa</div>
                 </div>
                 
                 {/* Table Body */}
@@ -1130,7 +1286,20 @@ export default function ProjectGanttPage() {
                           <div className="w-8 shrink-0 font-mono text-slate-400">{id}</div>
                           <div className="w-40 shrink-0 font-medium text-slate-800 dark:text-slate-200 truncate pl-2 flex items-center gap-1.5">
                             {meta.isBlocked && <span title={`Bloqueada: ${meta.blockedReason}`}><Ban className="h-3 w-3 text-red-500" /></span>}
+                            {t.isManual && (
+                              <span className="rounded bg-slate-200 px-1 text-[9px] font-semibold uppercase text-slate-600 dark:bg-slate-700 dark:text-slate-300" title="Tarea manual">
+                                man
+                              </span>
+                            )}
                             <span className="truncate" title={t.assembly}>{t.assembly}</span>
+                          </div>
+                          <div
+                            className="w-20 shrink-0 text-center text-slate-600 dark:text-slate-400 font-mono text-[10px]"
+                            title="Cantidad desde cómputo IFC"
+                          >
+                            {t.quantity != null
+                              ? `${Number(t.quantity).toFixed(t.quantity >= 100 ? 0 : 1)} ${t.unit || ""}`
+                              : "—"}
                           </div>
                           <div className="w-14 shrink-0 text-center text-slate-600 dark:text-slate-400 font-mono">{t.duration_days}d</div>
                           <div className="w-16 shrink-0 text-center text-slate-500 dark:text-slate-400 font-mono">{t.start_date.slice(8,10)}/{t.start_date.slice(5,7)}</div>
@@ -1141,9 +1310,9 @@ export default function ProjectGanttPage() {
                             {pct > 0 ? `${pct}%` : "0%"}
                           </div>
 
-                          <div className="w-20 shrink-0 text-center text-slate-400 font-mono truncate px-1" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
-                          <div className="w-18 shrink-0 text-center flex items-center justify-center">{getPriorityBadge(meta.priority)}</div>
-                          <div className="w-26 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
+                          <div className="w-16 shrink-0 text-center text-slate-400 font-mono truncate px-1" title={`Fin a Comienzo con ID ${predecessorsStr}`}>{predecessorsStr}</div>
+                          <div className="w-16 shrink-0 text-center flex items-center justify-center">{getPriorityBadge(meta.priority)}</div>
+                          <div className="w-24 shrink-0 text-right text-[10px] font-semibold text-slate-400 truncate" title={t.stage}>{t.stage}</div>
                         </div>
                       );
                     });

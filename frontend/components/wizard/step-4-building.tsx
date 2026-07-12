@@ -112,7 +112,7 @@ export function Step4Building({
         setWaitingBim(processing);
         if (processing && tries < 90) {  // hasta ~6 min para modelos grandes
           tries += 1;
-          timer = setTimeout(poll, 4000);
+          timer = setTimeout(poll, 2500);
         }
       } catch {
         /* sin red o sin datos: el usuario carga a mano, como siempre */

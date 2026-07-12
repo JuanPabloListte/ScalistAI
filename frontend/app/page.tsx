@@ -133,10 +133,10 @@ export default function LandingPage() {
           </a>
         </div>
 
-        {/* Product Mockup — réplica del layout de la app */}
+        {/* Product Mockup — réplica del layout de la app (Comentado temporalmente por migración directa a IFC) */}
+        {/* 
         <div className="mt-20 w-full max-w-6xl animate-slide-up" style={{ animationDelay: '0.45s', animationFillMode: 'both' }}>
           <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 text-left shadow-2xl shadow-brand-500/10">
-            {/* Window chrome */}
             <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-900/90 px-4 py-3">
               <span className="h-3 w-3 rounded-full bg-red-400/70"></span>
               <span className="h-3 w-3 rounded-full bg-yellow-400/70"></span>
@@ -145,10 +145,8 @@ export default function LandingPage() {
             </div>
 
             <div className="flex">
-              {/* Icon rail */}
               <div className="hidden w-12 shrink-0 flex-col items-center gap-5 border-r border-slate-800 bg-slate-900/60 py-4 sm:flex">
                 <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/logo.png" alt="Logo" className="h-full w-full object-contain brightness-0 invert opacity-90" />
                 </div>
                 <Folder className="h-5 w-5 text-brand-400" />
@@ -158,9 +156,7 @@ export default function LandingPage() {
                 <Globe className="h-5 w-5 text-slate-500" />
               </div>
 
-              {/* Main column */}
               <div className="min-w-0 flex-1">
-                {/* Project header */}
                 <div className="border-b border-slate-800 px-5 py-4">
                   <div className="flex items-center gap-1 text-xs text-slate-500">
                     <ChevronLeft className="h-3.5 w-3.5" /> Volver a proyectos
@@ -168,7 +164,6 @@ export default function LandingPage() {
                   <div className="mt-2 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h3 className="text-lg font-bold text-white">Vivienda Dúplex Norte</h3>
-                        {/* PIVOTE IFC — mockup original: DX_2026_PLANTA-EJECUTIVO.pdf · 150 DPI · 24 páginas */}
                         <p className="truncate text-xs text-slate-500">Duplex_Norte.ifc · IFC4 · 3 niveles</p>
                     </div>
                     <div className="hidden shrink-0 gap-2 md:flex">
@@ -176,7 +171,6 @@ export default function LandingPage() {
                       <span className="rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1.5 text-[11px] font-medium text-brand-300">Ver Cronograma (Gantt)</span>
                     </div>
                   </div>
-                  {/* Tabs */}
                   <div className="mt-4 flex gap-5 overflow-x-auto text-xs">
                     {[
                       { label: "Muros", count: 1, active: true },
@@ -194,9 +188,7 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                {/* Body: Elementos · Canvas · Cómputo */}
                 <div className="flex">
-                  {/* Elementos panel */}
                   <div className="hidden w-60 shrink-0 border-r border-slate-800 p-4 lg:block">
                     <div className="mb-1 flex items-center justify-between">
                       <span className="text-sm font-semibold text-white">Elementos</span>
@@ -251,30 +243,25 @@ export default function LandingPage() {
                     </div>
                   </div>
 
-                  {/* Canvas */}
                   <div className="relative min-w-0 flex-1 bg-slate-950 p-5">
                     <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:24px_24px] opacity-40"></div>
                     <svg viewBox="0 0 400 300" className="relative w-full" role="img" aria-label="Plano analizado con detecciones de IA">
-                      {/* Recintos (áreas detectadas) */}
                       <rect x="40" y="40" width="150" height="110" fill="rgba(14,165,233,0.10)" />
                       <rect x="40" y="150" width="150" height="110" fill="rgba(99,102,241,0.10)" />
                       <rect x="190" y="40" width="170" height="100" fill="rgba(56,189,248,0.10)" />
                       <rect x="190" y="140" width="170" height="120" fill="rgba(14,165,233,0.08)" />
-                      {/* Muros detectados */}
                       <g stroke="#38bdf8" strokeWidth="3" fill="none" strokeLinecap="round">
                         <rect x="40" y="40" width="320" height="220" />
                         <line x1="190" y1="40" x2="190" y2="260" />
                         <line x1="40" y1="150" x2="190" y2="150" />
                         <line x1="190" y1="140" x2="360" y2="140" />
                       </g>
-                      {/* Aberturas (puertas/ventanas) */}
                       <g stroke="#fbbf24" strokeWidth="3" strokeLinecap="round">
                         <line x1="95" y1="40" x2="135" y2="40" />
                         <line x1="190" y1="80" x2="190" y2="115" />
                         <line x1="115" y1="150" x2="150" y2="150" />
                         <line x1="260" y1="260" x2="300" y2="260" />
                       </g>
-                      {/* Cotas */}
                       <g stroke="#64748b" strokeWidth="1" strokeDasharray="3 3">
                         <line x1="40" y1="278" x2="190" y2="278" />
                       </g>
@@ -288,7 +275,6 @@ export default function LandingPage() {
                       <DoorOpen className="h-3 w-3" /> Abertura
                     </div>
 
-                    {/* Bottom toolbar */}
                     <div className="absolute bottom-3 left-1/2 hidden -translate-x-1/2 items-center gap-3 rounded-full border border-slate-700 bg-slate-900/90 px-3 py-1.5 backdrop-blur-sm md:flex">
                       <Ruler className="h-3.5 w-3.5 text-slate-400" />
                       <PencilRuler className="h-3.5 w-3.5 text-brand-400" />
@@ -298,7 +284,6 @@ export default function LandingPage() {
                     </div>
                   </div>
 
-                  {/* Cómputo panel */}
                   <div className="hidden w-56 shrink-0 border-l border-slate-800 p-4 xl:block">
                     <div className="mb-1 flex items-center justify-between">
                       <span className="text-sm font-semibold text-white">Cómputo</span>
@@ -333,6 +318,7 @@ export default function LandingPage() {
             </div>
           </div>
         </div>
+        */}
       </section>
 
       {/* How it works */}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { api, type Plan, type Project } from "@/lib/api";
+import { IfcParseProgress, IfcQualityCard, planErrorMessage } from "@/components/ifc-status";
 
 export function Step2Plan({
   project,
@@ -16,13 +17,19 @@ export function Step2Plan({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [existingPlans, setExistingPlans] = useState<Plan[] | null>(null);
+  const [latestPlan, setLatestPlan] = useState<Plan | null>(null);
 
   useEffect(() => {
     let mounted = true;
     api
       .listPlans(project.id)
       .then((plans) => {
-        if (mounted) setExistingPlans(plans);
+        if (!mounted) return;
+        setExistingPlans(plans);
+        const ifc = plans.filter((p) =>
+          p.original_filename?.toLowerCase().endsWith(".ifc"),
+        );
+        setLatestPlan(ifc[0] ?? plans[0] ?? null);
       })
       .catch(() => {
         if (mounted) setExistingPlans([]);
@@ -31,6 +38,38 @@ export function Step2Plan({
       mounted = false;
     };
   }, [project.id]);
+
+  // Poll mientras el último IFC sigue processing (progreso + semáforo).
+  useEffect(() => {
+    if (!latestPlan || latestPlan.status !== "processing") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function poll() {
+      try {
+        const plans = await api.listPlans(project.id);
+        if (cancelled) return;
+        setExistingPlans(plans);
+        const ifc = plans.filter((p) =>
+          p.original_filename?.toLowerCase().endsWith(".ifc"),
+        );
+        const current =
+          ifc.find((p) => p.id === latestPlan!.id) ?? ifc[0] ?? null;
+        setLatestPlan(current);
+        if (current?.status === "processing") {
+          timer = setTimeout(poll, 2000);
+        }
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, 4000);
+      }
+    }
+
+    timer = setTimeout(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [project.id, latestPlan?.id, latestPlan?.status]);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -52,6 +91,8 @@ export function Step2Plan({
     setError(null);
     try {
       const plan = await api.uploadPlan(project.id, file);
+      setLatestPlan(plan);
+      setExistingPlans((prev) => [plan, ...(prev ?? []).filter((p) => p.id !== plan.id)]);
       onUploaded(plan);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
@@ -62,6 +103,9 @@ export function Step2Plan({
   }
 
   const hasPlan = (existingPlans?.length ?? 0) > 0;
+  const processing = latestPlan?.status === "processing";
+  const failed =
+    latestPlan?.status === "error" || latestPlan?.status === "failed";
 
   return (
     <div className="flex flex-col gap-4">
@@ -87,11 +131,30 @@ export function Step2Plan({
         (rooms/spaces) para obtener superficies exactas.
       </p>
 
-      {hasPlan && (
+      {hasPlan && !processing && !failed && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
           ✓ Ya tenés {existingPlans!.length} plano
           {existingPlans!.length > 1 ? "s" : ""} subido
           {existingPlans!.length > 1 ? "s" : ""}. Podés subir otro o continuar.
+        </div>
+      )}
+
+      {latestPlan?.ifc_quality && (
+        <IfcQualityCard quality={latestPlan.ifc_quality} />
+      )}
+
+      {processing && latestPlan && (
+        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-500/30 dark:bg-sky-500/10">
+          <IfcParseProgress plan={latestPlan} />
+        </div>
+      )}
+
+      {failed && latestPlan && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          {planErrorMessage(
+            latestPlan,
+            "No se pudo procesar el modelo BIM. Subí de nuevo el archivo .ifc.",
+          )}
         </div>
       )}
 
@@ -113,7 +176,7 @@ export function Step2Plan({
         <UploadIcon />
         <span className="font-medium">
           {uploading
-            ? "Procesando modelo..."
+            ? "Subiendo archivo…"
             : hasPlan
               ? "Subir otro modelo"
               : "Hacé clic para elegir un archivo .ifc"}

@@ -84,7 +84,11 @@ def create_draft(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Genera (o regenera) el BORRADOR del plan desde el cómputo del plano."""
+    """Genera (o regenera) el BORRADOR del plan desde el cómputo del plano.
+
+    Si ya hay un baseline `active`, no lo toca: solo reemplaza el draft (o
+    crea uno nuevo). El active sigue vigente hasta que se congele el draft.
+    """
     _project_guard(project_id, db, user)
     sd = dt.date.fromisoformat(payload.start_date) if payload.start_date else None
     try:
@@ -95,6 +99,20 @@ def create_draft(
     db.commit()
     db.refresh(plan)
     return wp.serialize(plan)
+
+
+@router.get("/projects/{project_id}/work-plan/compute-diff")
+def work_plan_compute_diff(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Diff read-only: plan vigente (draft > active) vs cómputo IFC actual."""
+    _project_guard(project_id, db, user)
+    try:
+        return wp.compute_diff(project_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/work-plans/{plan_id}/freeze")

@@ -8,22 +8,11 @@ import {
   type CostSettings,
   type ForecastResult,
   type Project,
-  type SimulationResult,
+  type ProjectBudgetSummary,
 } from "@/lib/api";
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
-}
-
-// Espeja el `build_price` del backend (costo directo → precio de venta). Es solo
-// para mostrar en pantalla; el XLSX descargable usa la versión autoritativa.
-function buildSale(direct: number, s: CostSettings) {
-  const overhead = direct * s.overhead_pct;
-  const subtotal = direct + overhead;
-  const profit = subtotal * s.profit_pct;
-  const net = subtotal + profit;
-  const iva = net * s.iva_pct;
-  return { overhead, profit, net, iva, total: net + iva };
 }
 
 export default function CostosPage() {
@@ -33,7 +22,7 @@ export default function CostosPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [planId, setPlanId] = useState<number | null>(null);
-  const [sim, setSim] = useState<SimulationResult | null>(null);
+  const [budget, setBudget] = useState<ProjectBudgetSummary | null>(null);
   const [forecast, setForecast] = useState<ForecastResult | null>(null);
   const [settings, setSettings] = useState<CostSettings | null>(null);
   const [horizon, setHorizon] = useState(6);
@@ -53,7 +42,10 @@ export default function CostosPage() {
           if (proc) {
             setError("El modelo BIM todavía se está procesando. Volvé en un momento.");
           } else if (failed) {
-            setError("El modelo BIM falló al procesarse. Subí de nuevo el archivo .ifc.");
+            setError(
+              failed.error_message?.trim() ||
+                "El modelo BIM falló al procesarse. Subí de nuevo el archivo .ifc.",
+            );
           } else {
             setError("Este proyecto no tiene un plano listo para calcular costos.");
           }
@@ -69,15 +61,20 @@ export default function CostosPage() {
     setComputing(true);
     setError(null);
     try {
-      const s = await api.runSimulation(planId, project?.name);
-      setSim(s);
-      setForecast(await api.forecastCost(s.id, horizon));
+      // Misma fuente que /presupuesto (obra gris + paramétricos).
+      const b = await api.getBudgetSummary(planId);
+      setBudget(b);
+      try {
+        setForecast(await api.forecastCostByAmount(b.direct_cost, horizon));
+      } catch {
+        setForecast(null);
+      }
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
       setComputing(false);
     }
-  }, [planId, project?.name, horizon]);
+  }, [planId, horizon]);
 
   // Auto-calcula al cargar el plano.
   useEffect(() => {
@@ -85,35 +82,48 @@ export default function CostosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planId]);
 
-  // Re-proyecta cuando cambia el horizonte (sin recomputar la simulación).
+  // Re-proyecta cuando cambia el horizonte (sin recalcular el presupuesto).
   useEffect(() => {
-    if (sim) api.forecastCost(sim.id, horizon).then(setForecast).catch(() => {});
+    if (!budget) return;
+    api
+      .forecastCostByAmount(budget.direct_cost, horizon)
+      .then(setForecast)
+      .catch(() => setForecast(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [horizon]);
 
   async function saveSettings(patch: Partial<CostSettings>) {
     try {
       setSettings(await api.updateCostSettings(patch));
+      // Las tasas entran en sale_price del budget-summary: refrescar.
+      if (planId) {
+        const b = await api.getBudgetSummary(planId);
+        setBudget(b);
+        try {
+          setForecast(await api.forecastCostByAmount(b.direct_cost, horizon));
+        } catch {
+          /* sin IPC */
+        }
+      }
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     }
   }
 
   async function download() {
-    if (!sim) return;
+    if (!planId || !budget) return;
     try {
-      await api.downloadSimulationXlsx(sim.id);
+      await api.downloadBudgetXlsx(planId, budget.project_name || project?.name);
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     }
   }
 
-  const direct = sim ? sim.totals.materials + sim.totals.labor_cost : 0;
-  const sale = sim && settings ? buildSale(direct, settings) : null;
-
   if (loading) {
     return <div className="p-8 text-slate-500">Cargando…</div>;
   }
+
+  const bd = budget?.breakdown;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -128,7 +138,12 @@ export default function CostosPage() {
           <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
             Presupuesto Inteligente
           </h1>
-          <p className="text-sm text-slate-500">{project?.name}</p>
+          <p className="text-sm text-slate-500">
+            {project?.name}
+            <span className="ml-2 text-slate-400">
+              · mismos números que Presupuesto + proyección IPC
+            </span>
+          </p>
         </div>
         <div className="flex gap-2">
           <button
@@ -140,7 +155,7 @@ export default function CostosPage() {
           </button>
           <button
             onClick={() => void download()}
-            disabled={!sim}
+            disabled={!budget}
             className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
           >
             Descargar Excel
@@ -159,28 +174,36 @@ export default function CostosPage() {
         </div>
       )}
 
-      {sale && sim && (
+      {budget && bd && (
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Desglose a precio de venta */}
+          {/* Desglose a precio de venta — misma fuente que /presupuesto */}
           <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
               Del costo al precio de venta
             </h2>
             <dl className="space-y-1.5 text-sm">
-              <Row label="Materiales" value={sim.totals.materials} />
-              <Row label="Mano de obra" value={sim.totals.labor_cost} />
-              <Row label="Costo directo" value={direct} strong />
-              <Row label="+ Gastos generales" value={sale.overhead} muted />
-              <Row label="+ Beneficio" value={sale.profit} muted />
-              <Row label="Precio neto (sin IVA)" value={sale.net} />
-              <Row label="+ IVA" value={sale.iva} muted />
+              <Row label="Materiales (obra gris)" value={budget.materials_total} />
+              <Row label="Mano de obra (obra gris)" value={budget.labor_total} />
+              {(budget.parametric_total ?? 0) > 0 && (
+                <Row label="+ Rubros paramétricos" value={budget.parametric_total!} muted />
+              )}
+              <Row label="Costo directo" value={budget.direct_cost} strong />
+              <Row label="+ Gastos generales" value={bd.overhead} muted />
+              <Row label="+ Beneficio" value={bd.profit} muted />
+              <Row label="Precio neto (sin IVA)" value={bd.direct + bd.overhead + bd.profit} />
+              <Row label="+ IVA" value={bd.iva} muted />
               <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-700">
-                <Row label="PRECIO DE VENTA" value={sale.total} strong highlight />
+                <Row label="PRECIO DE VENTA" value={bd.total} strong highlight />
               </div>
             </dl>
-            <p className="mt-3 text-xs text-slate-400"
-               title="Jornales = días-cuadrilla de esfuerzo (suma de tareas). El calendario real, con tareas en paralelo, está en el Cronograma (Gantt).">
-              {sim.totals.labor_hours.toFixed(0)} horas hombre · {sim.totals.duration_days.toFixed(0)} jornales
+            <p
+              className="mt-3 text-xs text-slate-400"
+              title="Jornales = días-cuadrilla de esfuerzo (suma de tareas). El calendario real, con tareas en paralelo, está en el Cronograma (Gantt)."
+            >
+              {budget.labor_hours.toFixed(0)} horas hombre · {budget.duration_days.toFixed(0)} jornales
+              {budget.cost_per_m2 != null && (
+                <> · ${fmtARS(budget.cost_per_m2)} /m²</>
+              )}
             </p>
           </div>
 
@@ -207,7 +230,7 @@ export default function CostosPage() {
                     ${fmtARS(forecast.projected_cost)}
                   </p>
                   <p className="text-sm text-slate-500">
-                    en {forecast.horizon_months} meses ·{" "}
+                    sobre costo directo (${fmtARS(budget.direct_cost)}) en {forecast.horizon_months} meses ·{" "}
                     <span className="font-semibold text-amber-600 dark:text-amber-400">
                       +{forecast.variation.toFixed(1)}%
                     </span>{" "}
@@ -238,30 +261,33 @@ export default function CostosPage() {
         </div>
       )}
 
-      {/* Detalle de materiales */}
-      {sim && sim.lines.length > 0 && (
+      {/* Rubros — misma estructura que presupuesto */}
+      {budget && budget.categories.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800/50">
               <tr>
-                <th className="px-4 py-2">Material</th>
-                <th className="px-4 py-2 text-right">Cantidad</th>
-                <th className="px-4 py-2 text-right">Precio unit.</th>
+                <th className="px-4 py-2">Rubro</th>
+                <th className="px-4 py-2 text-right">%</th>
                 <th className="px-4 py-2 text-right">Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {sim.lines
+              {budget.categories
                 .slice()
                 .sort((a, b) => b.total - a.total)
-                .map((ln) => (
-                  <tr key={ln.material_id}>
-                    <td className="px-4 py-2">{ln.material_name}</td>
-                    <td className="px-4 py-2 text-right text-slate-500">
-                      {ln.quantity.toFixed(1)} {ln.unit}
+                .map((c) => (
+                  <tr key={c.name}>
+                    <td className="px-4 py-2">
+                      {c.name}
+                      {c.parametric ? (
+                        <span className="ml-2 text-xs text-slate-400">(estimado)</span>
+                      ) : null}
                     </td>
-                    <td className="px-4 py-2 text-right text-slate-500">${fmtARS(ln.unit_cost)}</td>
-                    <td className="px-4 py-2 text-right font-medium">${fmtARS(ln.total)}</td>
+                    <td className="px-4 py-2 text-right text-slate-500">
+                      {c.pct.toFixed(1)}%
+                    </td>
+                    <td className="px-4 py-2 text-right font-medium">${fmtARS(c.total)}</td>
                   </tr>
                 ))}
             </tbody>

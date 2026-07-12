@@ -2,7 +2,8 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, type ParametricRubro, type ProjectBudgetSummary } from "@/lib/api";
+import { api, type ParametricRubro, type Plan, type ProjectBudgetSummary } from "@/lib/api";
+import { IfcParseProgress, planErrorMessage } from "@/components/ifc-status";
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -17,6 +18,7 @@ export default function PresupuestoPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [processingPlan, setProcessingPlan] = useState<Plan | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [isIfc, setIsIfc] = useState(false);
   const [rubros, setRubros] = useState<ParametricRubro[] | null>(null);
@@ -69,6 +71,7 @@ export default function PresupuestoPage() {
           if (cancelled) return;
           if (tries >= MAX_TRIES) {
             setProcessing(false);
+            setProcessingPlan(null);
             setLoading(false);
             setError(
               "El procesamiento del modelo BIM está tardando demasiado. " +
@@ -77,19 +80,24 @@ export default function PresupuestoPage() {
             return;
           }
           setProcessing(true);
+          setProcessingPlan(proc);
           setLoading(false);
           tries += 1;
-          timer = setTimeout(load, 4000);
+          timer = setTimeout(load, 2500);
           return;
         }
         if (!ready && failed) {
           if (cancelled) return;
           setProcessing(false);
+          setProcessingPlan(null);
           setLoading(false);
           setError(
-            "No se pudo procesar el modelo BIM. Verificá que el .ifc se haya " +
-              "exportado con geometría y base quantities, e intentá de nuevo " +
-              "desde el wizard del proyecto.",
+            planErrorMessage(
+              failed,
+              "No se pudo procesar el modelo BIM. Verificá que el .ifc se haya " +
+                "exportado con geometría y base quantities, e intentá de nuevo " +
+                "desde el wizard del proyecto.",
+            ),
           );
           return;
         }
@@ -97,12 +105,16 @@ export default function PresupuestoPage() {
         if (!target) throw new Error("Este proyecto no tiene un plano listo.");
         if (target.status === "error" || target.status === "failed") {
           throw new Error(
-            "El modelo BIM falló al procesarse. Subí de nuevo el archivo .ifc.",
+            planErrorMessage(
+              target,
+              "El modelo BIM falló al procesarse. Subí de nuevo el archivo .ifc.",
+            ),
           );
         }
         const d = await api.getBudgetSummary(target.id);
         if (cancelled) return;
         setProcessing(false);
+        setProcessingPlan(null);
         setData(d);
         setLoading(false);
       } catch (e) {
@@ -110,6 +122,7 @@ export default function PresupuestoPage() {
           setError(String((e as Error)?.message ?? e));
           setLoading(false);
           setProcessing(false);
+          setProcessingPlan(null);
         }
       }
     }
@@ -125,10 +138,16 @@ export default function PresupuestoPage() {
   if (error) return <div className="p-8 text-red-600">{error}</div>;
   if (processing && !data) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-8 text-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand" />
-        <p className="font-medium text-slate-700 dark:text-slate-200">Procesando el modelo BIM…</p>
-        <p className="text-sm text-slate-500">Extrayendo muros, aberturas, losas y demás. Puede tardar un minuto.</p>
+        {processingPlan ? (
+          <IfcParseProgress plan={processingPlan} />
+        ) : (
+          <>
+            <p className="font-medium text-slate-700 dark:text-slate-200">Procesando el modelo BIM…</p>
+            <p className="text-sm text-slate-500">Extrayendo muros, aberturas, losas y demás. Puede tardar un minuto.</p>
+          </>
+        )}
       </div>
     );
   }

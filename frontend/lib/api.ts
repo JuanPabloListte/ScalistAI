@@ -108,6 +108,24 @@ export type PageClassification = {
   reason: string;
 };
 
+export type IfcQualityCheck = {
+  id: string;
+  ok: boolean;
+  label: string;
+};
+
+export type IfcQuality = {
+  level: "green" | "yellow" | "red";
+  schema?: string | null;
+  has_spaces?: boolean;
+  has_base_quantities?: boolean;
+  n_storeys?: number;
+  n_walls?: number;
+  n_elements?: number;
+  warnings?: string[];
+  checks?: IfcQualityCheck[];
+};
+
 export type Plan = {
   id: number;
   project_id: number;
@@ -122,6 +140,10 @@ export type Plan = {
   deleted_pages: number[] | null;
   page_overrides: Record<string, PageOverride> | null;
   page_roles: Record<string, PageRole[]> | null;
+  error_message?: string | null;
+  parse_progress?: number | null;
+  parse_stage?: string | null;
+  ifc_quality?: IfcQuality | null;
   created_at: string;
 };
 
@@ -288,6 +310,9 @@ export type ScheduleTask = {
   id?: number;
   depends_on?: number[];
   source?: string;
+  assembly_id?: number | null;
+  level?: string | null;
+  level_order?: number | null;
   status?: string;      // pending|in_progress|in_review|completed|blocked|cancelled
   priority?: string;    // low|medium|high|critical
   description?: string | null;
@@ -331,6 +356,33 @@ export type WorkPlanData = ScheduleResponse & {
   frozen_at: string | null;
   crews: number;
   overlap_pct: number;
+  price_snapshot_count?: number;
+};
+
+export type WorkPlanComputeDiffRow = {
+  name: string;
+  assembly_id: number | null;
+  level: string | null;
+  unit: string | null;
+  qty_plan: number | null;
+  qty_compute: number | null;
+  cost_plan: number | null;
+  cost_compute: number | null;
+  duration_plan: number | null;
+  duration_compute: number | null;
+  source: string | null;
+  status: "same" | "changed" | "added" | "removed";
+};
+
+export type WorkPlanComputeDiff = {
+  plan_id: number | null;
+  plan_status: string | null;
+  plan_version: number | null;
+  plan_total: number;
+  compute_total: number;
+  delta_cost: number;
+  n_changed: number;
+  tasks: WorkPlanComputeDiffRow[];
 };
 
 export type WorkPlanVersion = {
@@ -745,6 +797,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ simulation_id: simulationId, horizon_months: horizonMonths }),
     }),
+  /** Proyecta un monto (p.ej. direct_cost del budget-summary) con IPC. */
+  forecastCostByAmount: (amount: number, horizonMonths: number) =>
+    request<ForecastResult>("/api/v1/forecast", {
+      method: "POST",
+      body: JSON.stringify({ amount, horizon_months: horizonMonths }),
+    }),
   getCostSettings: () => request<CostSettings>("/api/v1/cost-settings"),
   getPriceSeries: () => request<PriceSeriesProduct[]>("/api/v1/price-series"),
   getBudgetSummary: (planId: number) =>
@@ -1080,6 +1138,8 @@ export const api = {
   // ----- Plan de obra persistido (módulo Obra) -----
   getWorkPlan: (projectId: number) =>
     request<WorkPlanState>(`/api/v1/projects/${projectId}/work-plan`),
+  getWorkPlanComputeDiff: (projectId: number) =>
+    request<WorkPlanComputeDiff>(`/api/v1/projects/${projectId}/work-plan/compute-diff`),
   createWorkPlanDraft: (projectId: number, opts: { startDate?: string; crews?: number; overlapPct?: number }) =>
     request<WorkPlanData>(`/api/v1/projects/${projectId}/work-plan/draft`, {
       method: "POST",

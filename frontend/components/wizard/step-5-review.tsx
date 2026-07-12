@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { api, type Plan, type Project } from "@/lib/api";
+import { IfcParseProgress, IfcQualityCard, planErrorMessage } from "@/components/ifc-status";
 
 import { BUILDING_FIELDS } from "./step-4-building";
 
@@ -24,6 +25,7 @@ export function Step5Review({
   const [bimStatus, setBimStatus] = useState<"unknown" | "ready" | "processing" | "error" | "none">(
     "unknown",
   );
+  const [bimPlan, setBimPlan] = useState<Plan | null>(null);
 
   // Bloquea "Crear proyecto" mientras el IFC sigue en el worker.
   useEffect(() => {
@@ -41,17 +43,22 @@ export function Step5Review({
         );
         if (ifc.length === 0) {
           setBimStatus(plans.length > 0 ? "ready" : "none");
+          setBimPlan(null);
           return;
         }
-        if (ifc.some((p) => p.status === "ready")) {
+        const ready = ifc.find((p) => p.status === "ready");
+        if (ready) {
           setBimStatus("ready");
+          setBimPlan(ready);
           return;
         }
-        if (ifc.some((p) => p.status === "processing")) {
+        const proc = ifc.find((p) => p.status === "processing");
+        if (proc) {
           setBimStatus("processing");
+          setBimPlan(proc);
           if (tries < MAX_TRIES) {
             tries += 1;
-            timer = setTimeout(poll, 4000);
+            timer = setTimeout(poll, 2500);
           } else {
             setBimStatus("error");
             setError(
@@ -61,7 +68,12 @@ export function Step5Review({
           }
           return;
         }
+        const failed = ifc.find((p) => p.status === "error" || p.status === "failed");
         setBimStatus("error");
+        setBimPlan(failed ?? ifc[0] ?? null);
+        if (failed?.error_message) {
+          setError(failed.error_message);
+        }
       } catch {
         if (!cancelled) setBimStatus("none");
       }
@@ -93,11 +105,12 @@ export function Step5Review({
       );
       if (ifc.length > 0 && !ifc.some((p) => p.status === "ready")) {
         const stillProc = ifc.some((p) => p.status === "processing");
+        const failed = ifc.find((p) => p.status === "error" || p.status === "failed");
         setBimStatus(stillProc ? "processing" : "error");
         setError(
           stillProc
             ? "El modelo BIM todavía se está procesando. Esperá un momento."
-            : "El modelo BIM no se pudo procesar. Subí de nuevo el .ifc.",
+            : planErrorMessage(failed, "El modelo BIM no se pudo procesar. Subí de nuevo el .ifc."),
         );
         return;
       }
@@ -125,14 +138,28 @@ export function Step5Review({
       </p>
 
       {bimStatus === "processing" && (
-        <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300">
-          <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600 dark:border-sky-600 dark:border-t-sky-300" />
-          Procesando el modelo BIM… el proyecto se podrá crear cuando termine el cómputo.
+        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-500/30 dark:bg-sky-500/10">
+          {bimPlan ? (
+            <IfcParseProgress plan={bimPlan} />
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
+              <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-sky-300 border-t-sky-600" />
+              Procesando el modelo BIM… el proyecto se podrá crear cuando termine el cómputo.
+            </div>
+          )}
         </div>
       )}
-      {bimStatus === "ready" && (
+      {bimStatus === "ready" && bimPlan?.ifc_quality && (
+        <IfcQualityCard quality={bimPlan.ifc_quality} />
+      )}
+      {bimStatus === "ready" && !bimPlan?.ifc_quality && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
           ✓ Modelo BIM listo para el presupuesto.
+        </div>
+      )}
+      {bimStatus === "error" && bimPlan && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          {planErrorMessage(bimPlan, "El modelo BIM no está listo. Subí de nuevo el archivo .ifc.")}
         </div>
       )}
 
