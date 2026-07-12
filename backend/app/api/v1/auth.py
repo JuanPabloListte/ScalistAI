@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth_security import clear_login_rate_limit, enforce_login_rate_limit
 from app.core.database import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
@@ -19,12 +20,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> Token:
+    enforce_login_rate_limit(request, form_data.username)
     user = db.scalar(select(User).where(User.email == form_data.username))
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
+    clear_login_rate_limit(request, form_data.username)
     token = create_access_token(subject=user.id)
     return Token(access_token=token)
 
@@ -50,4 +54,3 @@ def update_profile(
     db.commit()
     db.refresh(user)
     return user
-

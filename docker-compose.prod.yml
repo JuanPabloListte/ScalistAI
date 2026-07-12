@@ -18,6 +18,11 @@ services:
     image: redis:7-alpine
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: always
 
   backend:
@@ -37,7 +42,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         reservations:
@@ -47,6 +52,37 @@ services:
               capabilities: [gpu]
     # Gunicorn para production con Uvicorn workers
     command: bash -c "alembic upgrade head && gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000"
+    restart: always
+
+  # Worker de trabajos pesados (rq): parseo IFC, detección ML, snapshots.
+  # Misma imagen que el backend; consume la cola "scalist-jobs" en Redis.
+  # Sin este servicio, enqueue() degrada a in-process dentro de Gunicorn
+  # (OOM / API lenta / geometría IFC corrupta bajo presión de memoria).
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    shm_size: "2gb"
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      ENVIRONMENT: production
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: rq worker scalist-jobs --url redis://redis:6379
     restart: always
 
   frontend:

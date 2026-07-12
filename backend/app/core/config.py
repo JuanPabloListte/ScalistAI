@@ -10,9 +10,16 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
+    # development | production — en production un JWT_SECRET débil aborta el arranque
+    ENVIRONMENT: str = "development"
+
     JWT_SECRET: str = "change-me"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440
+
+    # Login brute-force: N intentos por IP dentro de la ventana (0 = desactivado)
+    LOGIN_RATE_LIMIT_MAX: int = 10
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
 
     STORAGE_DIR: str = "./storage"
     CORS_ORIGINS: str = "http://localhost:3000"
@@ -44,6 +51,10 @@ class Settings(BaseSettings):
     # scripts/gen_procedural.py). Va SOLO al train, nunca al holdout/val. Si el
     # directorio existe y tiene samples, el training (UI y CLI) lo incluye.
     PROCEDURAL_DATA_DIR: str = "storage/procedural"
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.strip().lower() in ("production", "prod")
 
     @property
     def database_url(self) -> str:

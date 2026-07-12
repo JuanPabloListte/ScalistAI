@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    from app.core.auth_security import validate_jwt_secret_on_startup
+
+    validate_jwt_secret_on_startup()
+
     # Health-check de dependencias externas: avisar a ops ANTES de que un
     # usuario pegue contra el error. Ninguna es fatal (el resto de la app anda).
     for binary, feature in [
