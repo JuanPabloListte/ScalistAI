@@ -27,6 +27,7 @@ from app.models.material import Assembly, AssemblyMaterial
 from app.models.work_plan import ProgressEntry, WorkPlan, WorkTask
 from app.services.work_cpm import critical_path
 from app.services.work_cost import cost_summary
+from app.services.work_plan import price_map_for_plan
 from app.services.work_progress import plan_progress
 
 _CPI_ALERT = 0.90            # gastar $1 y avanzar <$0.90
@@ -110,6 +111,9 @@ def build_alerts(plan: WorkPlan, db: Session, today: dt.date | None = None) -> d
         })
 
     # 3. Pre-acopio: etapas que aún no arrancaron y empiezan pronto.
+    # Relevancia de materiales: preferir precios del snapshot del baseline
+    # (si existe) para no sesgar por cambios del catálogo vivo post-freeze.
+    snap_prices = price_map_for_plan(plan.id, db)
     started_stages = {t.stage for t in tasks if tp[t.id]["n_entries"] > 0}
     stage_start: dict[str, dt.date] = {}
     stage_mats: dict[str, dict[int, tuple]] = defaultdict(dict)  # stage -> mat_id -> (name, relevancia)
@@ -121,7 +125,8 @@ def build_alerts(plan: WorkPlan, db: Session, today: dt.date | None = None) -> d
                 m = am.material
                 if not m or m.category == "Recursos Humanos":
                     continue
-                rel = (am.consumption or 0) * (m.unit_price or 0)
+                unit_price = snap_prices.get(m.id, m.unit_price or 0)
+                rel = (am.consumption or 0) * (unit_price or 0)
                 prev = stage_mats[t.stage].get(m.id)
                 stage_mats[t.stage][m.id] = (m.name, (prev[1] if prev else 0) + rel)
 

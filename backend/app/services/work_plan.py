@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session, object_session, selectinload
 
-from app.models.work_plan import WorkPlan, WorkTask, WorkTaskEvent
+from app.models.material import Assembly, AssemblyMaterial
+from app.models.work_plan import WorkPlan, WorkPlanMaterialPrice, WorkTask, WorkTaskEvent
 from app.services.schedule import compute_schedule
 
 
@@ -224,6 +225,7 @@ def generate_draft(project_id: int, db: Session, *,
             work_plan_id=plan.id, assembly_id=t.get("assembly_id"),
             name=t["assembly"], stage=t["stage"], stage_order=t["stage_order"],
             qty_planned=t["quantity"], unit=t["unit"],
+            level=t.get("level"), level_order=t.get("level_order"),
             duration_days=t["duration_days"],
             planned_start=dt.date.fromisoformat(t["start_date"]),
             planned_end=dt.date.fromisoformat(t["end_date"]),
@@ -253,11 +255,107 @@ def generate_draft(project_id: int, db: Session, *,
     return plan
 
 
+def _refresh_auto_costs_at_freeze(plan: WorkPlan, db: Session) -> None:
+    """Recalcula cost_planned de tareas auto con precios vivos al momento del
+    freeze (misma fórmula que compute_schedule). Así el BAC no queda con
+    precios de cuando se generó el borrador días antes."""
+    try:
+        sched = compute_schedule(
+            plan.project_id, db,
+            start_date=plan.start_date,
+            crews=plan.crews,
+            overlap_pct=plan.overlap_pct,
+        )
+    except Exception:  # noqa: BLE001
+        return  # sin cómputo usable: se congelan los costos del borrador
+    by_key = {
+        (t.get("assembly_id"), t["assembly"]): t["cost"]
+        for t in sched["tasks"]
+    }
+    for task in plan.tasks:
+        if task.source != "auto" or not task.assembly_id:
+            continue
+        cost = by_key.get((task.assembly_id, task.name))
+        if cost is not None:
+            task.cost_planned = float(cost)
+
+
+def snapshot_material_prices(plan: WorkPlan, db: Session) -> list[WorkPlanMaterialPrice]:
+    """Captura unit_price de cada material de las recetas del plan.
+
+    Idempotente: reemplaza filas previas del mismo work_plan_id.
+    """
+    db.execute(
+        delete(WorkPlanMaterialPrice).where(
+            WorkPlanMaterialPrice.work_plan_id == plan.id
+        )
+    )
+
+    # Cargar tareas + recetas + insumos
+    tasks = list(db.scalars(
+        select(WorkTask)
+        .where(WorkTask.work_plan_id == plan.id)
+        .options(
+            selectinload(WorkTask.assembly)
+            .selectinload(Assembly.assembly_materials)
+            .selectinload(AssemblyMaterial.material)
+        )
+    ).all())
+
+    seen: dict[int, WorkPlanMaterialPrice] = {}
+    now = dt.datetime.now(dt.UTC)
+    for task in tasks:
+        asm = task.assembly
+        if asm is None:
+            continue
+        for am in asm.assembly_materials:
+            m = am.material
+            if m is None or m.id in seen:
+                continue
+            row = WorkPlanMaterialPrice(
+                work_plan_id=plan.id,
+                material_id=m.id,
+                unit_price=float(m.unit_price or 0.0),
+                unit=m.unit,
+                material_name=m.name,
+                captured_at=now,
+            )
+            db.add(row)
+            seen[m.id] = row
+    db.flush()
+    return list(seen.values())
+
+
+def price_map_for_plan(plan_id: int, db: Session) -> dict[int, float]:
+    """material_id → unit_price del snapshot del baseline (vacío si no hay)."""
+    rows = db.scalars(
+        select(WorkPlanMaterialPrice).where(
+            WorkPlanMaterialPrice.work_plan_id == plan_id
+        )
+    ).all()
+    return {r.material_id: r.unit_price for r in rows}
+
+
 def freeze(plan: WorkPlan, db: Session) -> WorkPlan:
     """Congela el borrador como baseline activo (inmutable). El activo
-    anterior pasa a superseded — queda como historial de reprogramaciones."""
+    anterior pasa a superseded — queda como historial de reprogramaciones.
+
+    Al congelar: (1) refresca costos auto con precios vivos, (2) snapshot de
+    precios de materiales, (3) marca active + frozen_at.
+    """
     if plan.status != "draft":
         raise ValueError("Solo se puede congelar un borrador.")
+
+    # Asegurar tasks cargadas para refresh/snapshot
+    plan = db.scalars(
+        select(WorkPlan)
+        .where(WorkPlan.id == plan.id)
+        .options(selectinload(WorkPlan.tasks))
+    ).one()
+
+    _refresh_auto_costs_at_freeze(plan, db)
+    snapshot_material_prices(plan, db)
+
     for prev in db.scalars(select(WorkPlan).where(
             WorkPlan.project_id == plan.project_id,
             WorkPlan.status == "active")).all():
@@ -298,6 +396,7 @@ def rebaseline(project_id: int, db: Session) -> WorkPlan:
             work_plan_id=clone.id, assembly_id=t.assembly_id, name=t.name,
             stage=t.stage, stage_order=t.stage_order,
             qty_planned=t.qty_planned, unit=t.unit,
+            level=t.level, level_order=t.level_order,
             duration_days=t.duration_days,
             planned_start=t.planned_start, planned_end=t.planned_end,
             cost_planned=t.cost_planned, source=t.source,
@@ -328,6 +427,9 @@ def serialize(plan: WorkPlan) -> dict:
         "cost": t.cost_planned,
         "daily_cost": round(t.cost_planned / max(1, t.duration_days), 2),
         "depends_on": t.depends_on or [], "source": t.source,
+        "assembly_id": t.assembly_id,
+        "level": t.level,
+        "level_order": t.level_order,
         # Flujo tipo Jira (metadata de ejecución).
         "status": t.status, "priority": t.priority,
         "description": t.description,
@@ -345,6 +447,15 @@ def serialize(plan: WorkPlan) -> dict:
     } for (order, stage), ts in sorted(stages_map.items())]
 
     end = max((t["end_date"] for t in tasks), default=plan.start_date.isoformat())
+    sess = object_session(plan)
+    if sess is not None:
+        snap_count = sess.scalar(
+            select(func.count()).select_from(WorkPlanMaterialPrice).where(
+                WorkPlanMaterialPrice.work_plan_id == plan.id
+            )
+        ) or 0
+    else:
+        snap_count = len(plan.material_prices or [])
     return {
         "plan_id": plan.id, "version": plan.version, "status": plan.status,
         "frozen_at": plan.frozen_at.isoformat() if plan.frozen_at else None,
@@ -352,5 +463,117 @@ def serialize(plan: WorkPlan) -> dict:
         "start_date": plan.start_date.isoformat(), "end_date": end,
         "total_days": (dt.date.fromisoformat(end) - plan.start_date).days,
         "total_cost": round(sum(t["cost"] for t in tasks), 2),
+        "price_snapshot_count": int(snap_count),
         "stages": stages, "tasks": tasks,
+    }
+
+
+def _task_diff_key(assembly_id: int | None, name: str) -> tuple:
+    return (assembly_id, name)
+
+
+def compute_diff(project_id: int, db: Session) -> dict:
+    """Compara el plan vigente (draft > active) contra compute_schedule actual.
+
+    Read-only: no escribe. Key = (assembly_id, name). Tareas manuales del plan
+    sin match en cómputo salen como `removed` del cómputo (siguen en el plan).
+    """
+    plan = get_current_plan(project_id, db)
+    try:
+        sched = compute_schedule(
+            project_id, db,
+            start_date=plan.start_date if plan else None,
+            crews=plan.crews if plan else 1,
+            overlap_pct=plan.overlap_pct if plan else 0.0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(str(exc)) from exc
+
+    compute_tasks = {
+        _task_diff_key(t.get("assembly_id"), t["assembly"]): t
+        for t in sched["tasks"]
+    }
+    plan_tasks: dict[tuple, dict] = {}
+    if plan is not None:
+        for t in plan.tasks:
+            plan_tasks[_task_diff_key(t.assembly_id, t.name)] = {
+                "name": t.name,
+                "assembly_id": t.assembly_id,
+                "level": t.level,
+                "qty": t.qty_planned,
+                "unit": t.unit,
+                "cost": t.cost_planned,
+                "duration_days": t.duration_days,
+                "source": t.source,
+            }
+
+    keys = set(plan_tasks) | set(compute_tasks)
+    rows: list[dict] = []
+    for key in sorted(keys, key=lambda k: (k[1] or "", k[0] or 0)):
+        p = plan_tasks.get(key)
+        c = compute_tasks.get(key)
+        if p and c:
+            qty_p, qty_c = float(p["qty"]), float(c["quantity"])
+            cost_p, cost_c = float(p["cost"]), float(c["cost"])
+            same_qty = abs(qty_p - qty_c) < 0.05
+            same_cost = abs(cost_p - cost_c) < 1.0
+            status = "same" if same_qty and same_cost else "changed"
+            rows.append({
+                "name": p["name"],
+                "assembly_id": p["assembly_id"] or c.get("assembly_id"),
+                "level": p.get("level") or c.get("level"),
+                "unit": p["unit"] or c.get("unit"),
+                "qty_plan": qty_p,
+                "qty_compute": qty_c,
+                "cost_plan": cost_p,
+                "cost_compute": cost_c,
+                "duration_plan": p["duration_days"],
+                "duration_compute": c["duration_days"],
+                "source": p.get("source"),
+                "status": status,
+            })
+        elif p and not c:
+            rows.append({
+                "name": p["name"],
+                "assembly_id": p["assembly_id"],
+                "level": p.get("level"),
+                "unit": p["unit"],
+                "qty_plan": float(p["qty"]),
+                "qty_compute": None,
+                "cost_plan": float(p["cost"]),
+                "cost_compute": None,
+                "duration_plan": p["duration_days"],
+                "duration_compute": None,
+                "source": p.get("source"),
+                "status": "removed",  # en plan, no en cómputo actual
+            })
+        else:
+            assert c is not None
+            rows.append({
+                "name": c["assembly"],
+                "assembly_id": c.get("assembly_id"),
+                "level": c.get("level"),
+                "unit": c.get("unit"),
+                "qty_plan": None,
+                "qty_compute": float(c["quantity"]),
+                "cost_plan": None,
+                "cost_compute": float(c["cost"]),
+                "duration_plan": None,
+                "duration_compute": c["duration_days"],
+                "source": "auto",
+                "status": "added",  # en cómputo, no en plan
+            })
+
+    plan_total = float(sum(t.cost_planned for t in plan.tasks)) if plan else 0.0
+    compute_total = float(sched.get("total_cost") or sum(t["cost"] for t in sched["tasks"]))
+    n_changed = sum(1 for r in rows if r["status"] != "same")
+    return {
+        "plan_id": plan.id if plan else None,
+        "plan_status": plan.status if plan else None,
+        "plan_version": plan.version if plan else None,
+        "plan_total": round(plan_total, 2),
+        "compute_total": round(compute_total, 2),
+        "delta_cost": round(compute_total - plan_total, 2),
+        "n_changed": n_changed,
+        "tasks": rows,
     }

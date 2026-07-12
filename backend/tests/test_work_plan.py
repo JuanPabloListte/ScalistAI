@@ -476,6 +476,119 @@ def test_reporte_comitente_descarga_directa():
         db.rollback(); db.close()
 
 
+def test_price_snapshot_on_freeze():
+    """Al congelar: snapshot de precios + cost_planned alineado a precios freeze-time.
+
+    Si el catálogo sube entre draft y freeze, el BAC del baseline debe reflejar
+    el precio al freeze (no el del draft), y el snapshot debe conservar ese valor
+    aunque después vuelva a cambiar el catálogo.
+    """
+    from app.core.database import SessionLocal
+    from app.models import Material
+    from app.models.work_plan import WorkPlanMaterialPrice
+    from app.services import work_plan as wp
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        draft = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        mat = db.scalars(
+            select(Material).where(Material.name == "__test_mat__")
+        ).first()
+        assert mat is not None
+        cost_before = sum(t.cost_planned for t in draft.tasks)
+
+        # Catálogo sube 50% entre draft y freeze
+        mat.unit_price = 150.0
+        db.flush()
+
+        wp.freeze(draft, db)
+        db.refresh(draft)
+        assert draft.status == "active"
+        assert draft.frozen_at is not None
+
+        snaps = list(db.scalars(
+            select(WorkPlanMaterialPrice).where(
+                WorkPlanMaterialPrice.work_plan_id == draft.id
+            )
+        ).all())
+        assert len(snaps) >= 1
+        assert all(abs(s.unit_price - 150.0) < 1e-6 for s in snaps)
+        assert wp.price_map_for_plan(draft.id, db)[mat.id] == 150.0
+
+        cost_after = sum(t.cost_planned for t in draft.tasks)
+        # Con precio 50% mayor, el costo auto debe subir (~1.5x) vs el draft
+        assert cost_after > cost_before * 1.2, (
+            f"cost_planned no se refrescó al freeze: before={cost_before} after={cost_after}"
+        )
+
+        ser = wp.serialize(draft)
+        assert ser["price_snapshot_count"] >= 1
+
+        # Cambiar catálogo post-freeze no muda el snapshot
+        mat.unit_price = 999.0
+        db.flush()
+        assert wp.price_map_for_plan(draft.id, db)[mat.id] == 150.0
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_compute_diff_and_draft_while_active():
+    """Diff detecta cambios de qty; draft desde cómputo no toca el baseline activo."""
+    from app.core.database import SessionLocal
+    from app.models import DetectedElement, Plan
+    from app.services import work_plan as wp
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        draft = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        ser = wp.serialize(draft)
+        assert all("assembly_id" in t for t in ser["tasks"])
+        assert "level" in ser["tasks"][0]
+
+        diff0 = wp.compute_diff(project.id, db)
+        assert diff0["n_changed"] == 0
+        assert abs(diff0["plan_total"] - diff0["compute_total"]) < 1.0
+
+        plan_row = db.scalars(select(Plan).where(Plan.project_id == project.id)).first()
+        wall = db.scalars(
+            select(DetectedElement).where(
+                DetectedElement.plan_id == plan_row.id,
+                DetectedElement.type == "wall",
+            )
+        ).first()
+        assert wall is not None
+        wall.length_m = 20.0  # antes 10 → qty muro ~56 m²
+        db.flush()
+
+        diff1 = wp.compute_diff(project.id, db)
+        assert diff1["n_changed"] >= 1
+        assert any(r["status"] == "changed" for r in diff1["tasks"])
+        assert abs(diff1["delta_cost"]) > 0
+
+        # Freeze + nuevo draft desde cómputo: active intacto
+        wp.freeze(draft, db)
+        assert draft.status == "active"
+        active_id = draft.id
+        new_draft = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        db.refresh(draft)
+        assert draft.status == "active" and draft.id == active_id
+        assert new_draft.status == "draft" and new_draft.id != active_id
+        assert wp.get_current_plan(project.id, db).id == new_draft.id
+
+        # El draft nuevo ya refleja el muro agrandado → diff same
+        diff2 = wp.compute_diff(project.id, db)
+        assert diff2["plan_id"] == new_draft.id
+        assert diff2["n_changed"] == 0
+    finally:
+        db.rollback()
+        db.close()
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

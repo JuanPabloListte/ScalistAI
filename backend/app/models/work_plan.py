@@ -14,7 +14,7 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
-    JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, func,
+    JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +52,34 @@ class WorkPlan(Base):
     tasks: Mapped[list["WorkTask"]] = relationship(
         back_populates="work_plan", cascade="all, delete-orphan",
         order_by="WorkTask.stage_order, WorkTask.name")
+    material_prices: Mapped[list["WorkPlanMaterialPrice"]] = relationship(
+        back_populates="work_plan", cascade="all, delete-orphan")
+
+
+class WorkPlanMaterialPrice(Base):
+    """Precio unitario de un material capturado al congelar el baseline.
+
+    Independiente del catálogo vivo (`materials.unit_price`) y de
+    `material_price_history` (serie org-wide). Es el contrato de precios
+    de ESA versión del plan de obra.
+    """
+    __tablename__ = "work_plan_material_prices"
+    __table_args__ = (
+        UniqueConstraint("work_plan_id", "material_id", name="uq_wpmp_plan_material"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_plan_id: Mapped[int] = mapped_column(
+        ForeignKey("work_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    material_id: Mapped[int] = mapped_column(
+        ForeignKey("materials.id", ondelete="CASCADE"), nullable=False)
+    unit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    material_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    work_plan: Mapped["WorkPlan"] = relationship(back_populates="material_prices")
 
 
 class WorkTask(Base):
@@ -72,6 +100,9 @@ class WorkTask(Base):
 
     qty_planned: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="un")
+    # Nivel BIM (IfcBuildingStorey); NULL en PDF/DXF/manual sin storey.
+    level: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    level_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     planned_start: Mapped[date] = mapped_column(Date, nullable=False)
     planned_end: Mapped[date] = mapped_column(Date, nullable=False)
