@@ -19,24 +19,133 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Project, User
 from app.models.work_plan import WorkPlan, WorkTask
+from app.services import project_access as pa
 from app.services import work_plan as wp
 
 router = APIRouter(tags=["work-plans"])
 
 
-def _project_guard(project_id: int, db: Session, user: User) -> Project:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+def _project_guard(
+    project_id: int, db: Session, user: User, *,
+    financials: bool = False,
+    edit_plan: bool = False,
+    register_progress: bool = False,
+    manage_members: bool = False,
+) -> Project:
+    """Acceso al proyecto según la membresía (ver services/project_access)."""
+    project, _ = pa.require_project(
+        project_id, db, user, financials=financials, edit_plan=edit_plan,
+        register_progress=register_progress, manage_members=manage_members,
+    )
     return project
 
 
-def _plan_guard(plan_id: int, db: Session, user: User) -> WorkPlan:
+def _access_of(project_id: int, db: Session, user: User) -> pa.ProjectAccess:
+    _, access = pa.require_project(project_id, db, user)
+    return access
+
+
+def _plan_guard(
+    plan_id: int, db: Session, user: User, *,
+    financials: bool = False,
+    edit_plan: bool = False,
+    register_progress: bool = False,
+) -> WorkPlan:
     plan = db.get(WorkPlan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan de obra no encontrado")
-    _project_guard(plan.project_id, db, user)
+    _project_guard(
+        plan.project_id, db, user, financials=financials, edit_plan=edit_plan,
+        register_progress=register_progress,
+    )
     return plan
+
+
+# Claves con plata que se ocultan a capataz/comitente (Gantt "sin $").
+_MONEY_TASK_KEYS = ("cost", "daily_cost")
+_MONEY_PLAN_KEYS = ("total_cost", "price_snapshot_count")
+
+
+def _strip_plan_money(payload: dict) -> dict:
+    """Quita los importes del plan serializado sin romper el shape del Gantt."""
+    clean = {k: v for k, v in payload.items() if k not in _MONEY_PLAN_KEYS}
+    clean["tasks"] = [
+        {k: v for k, v in t.items() if k not in _MONEY_TASK_KEYS}
+        for t in payload.get("tasks", [])
+    ]
+    clean["stages"] = [
+        {k: v for k, v in s.items() if k != "cost"}
+        for s in payload.get("stages", [])
+    ]
+    clean["hide_money"] = True  # el frontend oculta columnas/labels de $
+    return clean
+
+
+class MemberUpsert(BaseModel):
+    user_id: int
+    role: str = Field(..., pattern="^(jefe_obra|capataz|comitente)$")
+
+
+def _member_payload(m) -> dict:
+    from app.models.project_member import PROJECT_ROLE_LABELS
+    return {
+        "user_id": m.user_id,
+        "email": m.user.email if m.user else None,
+        "role": m.role,
+        "role_label": PROJECT_ROLE_LABELS.get(m.role, m.role),
+        "job_roles": [jr.name for jr in (m.user.job_roles or [])] if m.user else [],
+    }
+
+
+@router.get("/projects/{project_id}/members")
+def list_project_members(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Equipo del proyecto. `my_role` permite al frontend gatear pantallas.
+
+    Si la lista viene vacía, el proyecto todavía no usa membresías: cualquier
+    miembro de la org lo ve completo (comportamiento histórico)."""
+    access = _access_of(project_id, db, user)
+    return {
+        "members": [_member_payload(m) for m in pa.list_members(project_id, db)],
+        "my_role": access.role,
+        "can_manage_members": access.can_manage_members,
+    }
+
+
+@router.post("/projects/{project_id}/members")
+def upsert_project_member(
+    project_id: int,
+    payload: MemberUpsert,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Suma un usuario al proyecto o le cambia el rol."""
+    project = _project_guard(project_id, db, user, manage_members=True)
+    try:
+        member = pa.set_member(project, payload.user_id, payload.role, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    db.refresh(member)
+    return _member_payload(member)
+
+
+@router.delete("/projects/{project_id}/members/{user_id}", status_code=204)
+def remove_project_member(
+    project_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """Saca a un usuario del proyecto. OJO: al quitar el ÚLTIMO miembro, el
+    proyecto vuelve al modo histórico (visible para toda la org)."""
+    _project_guard(project_id, db, user, manage_members=True)
+    if not pa.remove_member(project_id, user_id, db):
+        raise HTTPException(status_code=404, detail="El usuario no es miembro del proyecto")
+    db.commit()
 
 
 class DraftRequest(BaseModel):
@@ -66,15 +175,27 @@ def get_work_plan(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Plan vigente (draft > active) + historial de versiones. `plan=None` si
-    el proyecto todavía no generó ninguno (el Gantt cae al cálculo al vuelo)."""
-    _project_guard(project_id, db, user)
+    el proyecto todavía no generó ninguno (el Gantt cae al cálculo al vuelo).
+
+    Capataz/comitente reciben el mismo cronograma pero SIN importes."""
+    access = _access_of(project_id, db, user)
     plan = wp.get_current_plan(project_id, db)
     versions = [{
         "plan_id": p.id, "version": p.version, "status": p.status,
         "frozen_at": p.frozen_at.isoformat() if p.frozen_at else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
     } for p in wp.list_versions(project_id, db)]
-    return {"plan": wp.serialize(plan) if plan else None, "versions": versions}
+    payload = wp.serialize(plan) if plan else None
+    if payload is not None and not access.can_view_financials:
+        payload = _strip_plan_money(payload)
+    return {
+        "plan": payload,
+        "versions": versions,
+        "my_role": access.role,
+        "can_view_financials": access.can_view_financials,
+        "can_edit_plan": access.can_edit_plan,
+        "can_register_progress": access.can_register_progress,
+    }
 
 
 @router.post("/projects/{project_id}/work-plan/draft")
@@ -89,7 +210,7 @@ def create_draft(
     Si ya hay un baseline `active`, no lo toca: solo reemplaza el draft (o
     crea uno nuevo). El active sigue vigente hasta que se congele el draft.
     """
-    _project_guard(project_id, db, user)
+    _project_guard(project_id, db, user, edit_plan=True)
     sd = dt.date.fromisoformat(payload.start_date) if payload.start_date else None
     try:
         plan = wp.generate_draft(project_id, db, start_date=sd,
@@ -115,6 +236,35 @@ def work_plan_compute_diff(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/projects/{project_id}/changes")
+def project_changes(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Vista unificada de cambios: cómputo IFC, precios vs baseline, versiones."""
+    _project_guard(project_id, db, user, financials=True)
+
+    budget_direct: float | None = None
+    try:
+        from app.models.plan import Plan
+        from app.api.v1.cost_intelligence import _compute_budget_summary
+
+        ifc_plan = db.scalars(
+            select(Plan).where(
+                Plan.project_id == project_id,
+                Plan.status == "ready",
+            ).order_by(Plan.id.desc())
+        ).first()
+        if ifc_plan is not None:
+            summary = _compute_budget_summary(db, ifc_plan.id, user.organization_id)
+            budget_direct = float(summary.direct_cost)
+    except Exception:  # noqa: BLE001 — presupuesto opcional; no bloquea Cambios
+        budget_direct = None
+
+    return wp.project_changes(project_id, db, budget_direct=budget_direct)
+
+
 @router.post("/work-plans/{plan_id}/freeze")
 def freeze_plan(
     plan_id: int,
@@ -122,14 +272,14 @@ def freeze_plan(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Congela el borrador como baseline activo (inmutable)."""
-    plan = _plan_guard(plan_id, db, user)
+    plan = _plan_guard(plan_id, db, user, edit_plan=True)
     try:
-        wp.freeze(plan, db)
+        plan, migration = wp.freeze(plan, db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
     db.refresh(plan)
-    return wp.serialize(plan)
+    return wp.serialize(plan, progress_migration=migration)
 
 
 @router.post("/projects/{project_id}/work-plan/rebaseline")
@@ -139,7 +289,7 @@ def rebaseline_plan(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Clona el baseline activo a un borrador vN+1 para re-programar."""
-    _project_guard(project_id, db, user)
+    _project_guard(project_id, db, user, edit_plan=True)
     try:
         plan = wp.rebaseline(project_id, db)
     except ValueError as exc:
@@ -162,17 +312,32 @@ def get_work_progress(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Avance físico del plan ACTIVO: % por tarea/etapa/obra (valor ganado),
-    rendimiento real observado y fin proyectado. 404 si no hay baseline."""
+    rendimiento real observado y fin proyectado. 404 si no hay baseline.
+
+    El % es físico (cantidades), así que lo ve todo el mundo; los importes que
+    lo sustentan (EV/PV/BAC, costo por tarea) solo quien ve financieros."""
     from app.services.work_progress import plan_progress
 
-    _project_guard(project_id, db, user)
+    access = _access_of(project_id, db, user)
     active = next((p for p in wp.list_versions(project_id, db)
                    if p.status == "active"), None)
     if active is None:
         raise HTTPException(status_code=404,
                             detail="No hay baseline activo: congelá el plan de obra primero.")
     db.refresh(active)  # carga tasks
-    return plan_progress(active, db)
+    prog = plan_progress(active, db)
+    if not access.can_view_financials:
+        prog = {
+            **prog,
+            "tasks": [{k: v for k, v in t.items() if k != "cost_planned"}
+                      for t in prog.get("tasks", [])],
+            "stages": [{k: v for k, v in s.items() if k not in ("cost_planned", "ev")}
+                       for s in prog.get("stages", [])],
+            "totals": {k: v for k, v in prog.get("totals", {}).items()
+                       if k not in ("ev", "pv", "bac")},
+            "hide_money": True,
+        }
+    return prog
 
 
 @router.post("/work-tasks/{task_id}/progress")
@@ -189,7 +354,7 @@ def add_progress(
     task = db.get(WorkTask, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    plan = _plan_guard(task.work_plan_id, db, user)
+    plan = _plan_guard(task.work_plan_id, db, user, register_progress=True)
     if plan.status != "active":
         raise HTTPException(status_code=409,
                             detail="El avance se registra sobre el baseline activo (congelá el plan primero).")
@@ -239,7 +404,7 @@ def delete_progress(
     if entry is None:
         raise HTTPException(status_code=404, detail="Registro no encontrado")
     task = db.get(WorkTask, entry.task_id)
-    _plan_guard(task.work_plan_id, db, user)
+    _plan_guard(task.work_plan_id, db, user, register_progress=True)
     db.delete(entry)
     db.commit()
 
@@ -264,7 +429,7 @@ def get_work_cost(
     proyección."""
     from app.services.work_cost import cost_summary
 
-    _project_guard(project_id, db, user)
+    _project_guard(project_id, db, user, financials=True)
     active = next((p for p in wp.list_versions(project_id, db)
                    if p.status == "active"), None)
     if active is None:
@@ -335,9 +500,12 @@ def get_work_report(
     `audience=interno` (default): EVM completo, alertas de costo, recalibración.
     `audience=comitente`: la misma info de avance/cronograma pero SIN nada
     financiero (para bajar el PDF y reenviarlo vos mismo al cliente, sin
-    exponer un link público). 404 si no hay baseline activo."""
-    project = _project_guard(project_id, db, user)
+    exponer un link público). 404 si no hay baseline activo.
+
+    El reporte interno lleva financieros → exige ese permiso; el de comitente
+    no, así que lo puede bajar cualquiera con acceso al proyecto."""
     public = audience == "comitente"
+    project = _project_guard(project_id, db, user, financials=not public)
     pdf = _render_report(project, db, public=public)
     suffix = "_comitente" if public else ""
     return _pdf_response(pdf, project.name + suffix, inline=False)
@@ -353,7 +521,7 @@ async def parse_invoice_pdf(
     """Lee una factura (PDF con capa de texto) y PROPONE monto/fecha/proveedor
     para un costo real. NO persiste nada: el usuario revisa y confirma con
     POST /actual-costs. Extracción determinística — no fabrica datos."""
-    _project_guard(project_id, db, user)
+    _project_guard(project_id, db, user, financials=True)
     name = (file.filename or "").lower()
     if not name.endswith(".pdf") and file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Subí la factura en PDF (con texto).")
@@ -373,7 +541,7 @@ def list_actual_costs(
     from app.models.work_plan import ActualCost
     from sqlalchemy import select as _select
 
-    _project_guard(project_id, db, user)
+    _project_guard(project_id, db, user, financials=True)
     return [{
         "id": a.id, "date": a.date.isoformat(), "amount": a.amount,
         "kind": a.kind, "work_task_id": a.work_task_id, "stage": a.stage,
@@ -395,7 +563,7 @@ def add_actual_cost(
     from app.models.work_plan import ActualCost, WorkTask
     from app.services.work_cost import cost_summary
 
-    _project_guard(project_id, db, user)
+    _project_guard(project_id, db, user, financials=True)
     stage = payload.stage
     if payload.work_task_id is not None:
         task = db.get(WorkTask, payload.work_task_id)
@@ -430,7 +598,7 @@ def delete_actual_cost(
     cost = db.get(ActualCost, cost_id)
     if cost is None:
         raise HTTPException(status_code=404, detail="Costo no encontrado")
-    _project_guard(cost.project_id, db, user)
+    _project_guard(cost.project_id, db, user, financials=True)
     db.delete(cost)
     db.commit()
 
@@ -453,11 +621,20 @@ def patch_task(
     task = db.get(WorkTask, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    plan = _plan_guard(task.work_plan_id, db, user)
+    patch = payload.model_dump(exclude_unset=True)
+    # El capataz marca estado/prioridad/responsable de SU tarea (trabajo de
+    # campo), pero mover fechas/duración/deps es replanificar → jefe de obra.
+    touches_baseline = bool(
+        {"name", "planned_start", "duration_days", "depends_on"} & set(patch)
+    )
+    plan = _plan_guard(
+        task.work_plan_id, db, user,
+        edit_plan=touches_baseline,
+        register_progress=not touches_baseline,
+    )
     project = db.get(Project, plan.project_id)
     try:
-        wp.edit_task(task, plan, project.organization_id,
-                     payload.model_dump(exclude_unset=True), user.id, db)
+        wp.edit_task(task, plan, project.organization_id, patch, user.id, db)
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
@@ -495,7 +672,7 @@ def create_task(
     sobre borrador y sobre el baseline activo: es aditiva, no altera las tareas
     del cronograma congelado. Si `planned_start` es None, arranca al terminar
     su(s) predecesora(s) (o al inicio del plan si no tiene dependencias)."""
-    plan = _plan_guard(plan_id, db, user)
+    plan = _plan_guard(plan_id, db, user, edit_plan=True)
     project = db.get(Project, plan.project_id)
     try:
         wp.create_manual_task(plan, project.organization_id,
@@ -519,7 +696,7 @@ def delete_task(
     task = db.get(WorkTask, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    _plan_guard(task.work_plan_id, db, user)
+    _plan_guard(task.work_plan_id, db, user, edit_plan=True)
     if task.source != "manual":
         raise HTTPException(
             status_code=409,

@@ -22,13 +22,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _setup(db):
-    """Proyecto efímero con 1 plan + elementos + receta default, todo en la
-    transacción del test."""
-    from app.models import Assembly, AssemblyMaterial, DetectedElement, Material, Plan, Project, User
-    from sqlalchemy import select
+    """Proyecto efímero con 1 plan + elementos + receta default.
 
-    user = db.scalars(select(User)).first()
-    project = Project(organization_id=user.organization_id, user_id=user.id,
+    OJO: crea su propia ORGANIZACIÓN de test. Antes reusaba la primera org real
+    (`select(User).first()`) y las recetas del fixture —marcadas
+    `is_default_alternative=True`— se filtraban al catálogo real: los tests que
+    hacen commit (los de TestClient) las dejaban persistidas y el cómputo de
+    proyectos REALES terminaba usando `__test_muro__`/`__test_viga__` a $100.
+    Aislando la org, el fixture no puede contaminar datos de producción y los
+    tests quedan deterministas (no compiten con las recetas reales de la org).
+    """
+    import uuid as _uuid
+
+    from app.models import (
+        Assembly, AssemblyMaterial, DetectedElement, Material, Organization,
+        Plan, Project, User,
+    )
+
+    org = Organization(name=f"__test_org__{_uuid.uuid4().hex[:8]}")
+    db.add(org); db.flush()
+    user = User(
+        email=f"__test_{_uuid.uuid4().hex[:8]}@test.local",
+        password_hash="x", organization_id=org.id, org_role="admin",
+    )
+    db.add(user); db.flush()
+    project = Project(organization_id=org.id, user_id=user.id,
                       name="__test_workplan__", status="active", wizard_step=6)
     db.add(project); db.flush()
     plan = Plan(project_id=project.id, original_filename="t.pdf", pdf_path="/tmp/t.pdf",
@@ -93,10 +111,10 @@ def test_full_lifecycle():
         assert wp.get_current_plan(project.id, db).status == "draft"
 
         # --- freeze: draft→active; freeze de nuevo debe fallar ---
-        wp.freeze(draft2, db)
+        wp.freeze(draft2, db)[0]
         assert draft2.status == "active" and draft2.frozen_at is not None
         try:
-            wp.freeze(draft2, db)
+            wp.freeze(draft2, db)[0]
             raise AssertionError("freeze de un plan activo debería fallar")
         except ValueError:
             pass
@@ -112,7 +130,7 @@ def test_full_lifecycle():
         assert wp.get_current_plan(project.id, db).id == clone.id
 
         # --- freeze del clon: el activo anterior pasa a superseded ---
-        wp.freeze(clone, db)
+        wp.freeze(clone, db)[0]
         db.refresh(draft2)
         assert draft2.status == "superseded" and clone.status == "active"
         versions = wp.list_versions(project.id, db)
@@ -188,7 +206,7 @@ def test_etapa4_cpm_alerts():
     try:
         project = _setup(db)
         draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1), crews=1)
-        wp.freeze(draft, db)
+        wp.freeze(draft, db)[0]
         s = wp.serialize(draft)
         muro = next(t for t in s["tasks"] if t["unit"] == "m²" and abs(t["quantity"] - 28.0) < 0.1)
         viga = next(t for t in s["tasks"] if t["unit"] == "ml" and abs(t["quantity"] - 40.0) < 0.1)
@@ -264,7 +282,7 @@ def test_jira_workflow_fields():
         assert st_ev.note == "arranca la cuadrilla"
 
         # congelar y probar inmutabilidad del baseline vs flujo
-        wp.freeze(draft, db)
+        wp.freeze(draft, db)[0]
         try:
             wp.edit_task(t, draft, org_id, {"duration_days": 99}, me, db)
             raise AssertionError("editar duración sobre baseline activo debería fallar")
@@ -335,7 +353,7 @@ def test_work_report_pdf():
     try:
         project = _setup(db)
         draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
-        wp.freeze(draft, db)
+        wp.freeze(draft, db)[0]
         s = wp.serialize(draft)
         muro = next(t for t in s["tasks"] if t["unit"] == "m²")
         today = _dt.date(2026, 8, 6)
@@ -439,7 +457,7 @@ def test_reporte_comitente_descarga_directa():
         project = _setup(db)
         user = db.get(User, project.user_id)
         draft = wp.generate_draft(project.id, db, start_date=_dt.date(2026, 8, 1))
-        wp.freeze(draft, db)
+        wp.freeze(draft, db)[0]
         db.commit()
 
         app.dependency_overrides[get_current_user] = lambda: user
@@ -493,8 +511,14 @@ def test_price_snapshot_on_freeze():
     try:
         project = _setup(db)
         draft = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        # Scopear a la org del fixture: si hubiera otros "__test_mat__" en la
+        # base, .first() podría devolver el de otra org y el test mutaría el
+        # material equivocado.
         mat = db.scalars(
-            select(Material).where(Material.name == "__test_mat__")
+            select(Material).where(
+                Material.name == "__test_mat__",
+                Material.organization_id == project.organization_id,
+            )
         ).first()
         assert mat is not None
         cost_before = sum(t.cost_planned for t in draft.tasks)
@@ -503,7 +527,7 @@ def test_price_snapshot_on_freeze():
         mat.unit_price = 150.0
         db.flush()
 
-        wp.freeze(draft, db)
+        wp.freeze(draft, db)[0]
         db.refresh(draft)
         assert draft.status == "active"
         assert draft.frozen_at is not None
@@ -530,6 +554,57 @@ def test_price_snapshot_on_freeze():
         mat.unit_price = 999.0
         db.flush()
         assert wp.price_map_for_plan(draft.id, db)[mat.id] == 150.0
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_progress_migration_on_refreeze():
+    """Avances del baseline viejo se reasignan a tareas equivalentes al re-congelar."""
+    import datetime as _dt
+
+    from app.core.database import SessionLocal
+    from app.models.work_plan import ProgressEntry
+    from app.services import work_plan as wp
+    from app.services.work_progress import plan_progress
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        v1 = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        v1, _ = wp.freeze(v1, db)
+        assert v1.status == "active"
+
+        muro = next(t for t in v1.tasks if t.unit == "m²" and abs(t.qty_planned - 28.0) < 0.1)
+        old_id = muro.id
+        db.add(ProgressEntry(task_id=old_id, date=_dt.date(2026, 8, 3), qty_done=8))
+        db.add(ProgressEntry(task_id=old_id, date=_dt.date(2026, 8, 4), qty_done=6))
+        db.flush()
+
+        # Nuevo draft desde cómputo (nuevos task ids) y re-freeze
+        v2 = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        assert v2.id != v1.id
+        v2, migration = wp.freeze(v2, db)
+        db.refresh(v1)
+        assert v1.status == "superseded" and v2.status == "active"
+        assert migration["migrated_tasks"] >= 1
+        assert migration["entries_moved"] == 2
+
+        # Los entries ya no apuntan al id viejo
+        left = db.scalars(
+            select(ProgressEntry).where(ProgressEntry.task_id == old_id)
+        ).all()
+        assert left == []
+
+        prog = plan_progress(v2, db, today=_dt.date(2026, 8, 5))
+        muro2 = next(
+            t for t in prog["tasks"]
+            if t["unit"] == "m²" and abs(t["qty_planned"] - 28.0) < 0.1
+        )
+        assert muro2["qty_done"] == 14.0
+        assert muro2["pct"] == 50.0
+        assert muro2["task_id"] != old_id
     finally:
         db.rollback()
         db.close()
@@ -571,7 +646,7 @@ def test_compute_diff_and_draft_while_active():
         assert abs(diff1["delta_cost"]) > 0
 
         # Freeze + nuevo draft desde cómputo: active intacto
-        wp.freeze(draft, db)
+        wp.freeze(draft, db)[0]
         assert draft.status == "active"
         active_id = draft.id
         new_draft = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
@@ -584,6 +659,50 @@ def test_compute_diff_and_draft_while_active():
         diff2 = wp.compute_diff(project.id, db)
         assert diff2["plan_id"] == new_draft.id
         assert diff2["n_changed"] == 0
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_project_changes_prices_and_compute():
+    """Vista Cambios: drift de precios vs snapshot + sección cómputo."""
+    from app.core.database import SessionLocal
+    from app.models import Material
+    from app.services import work_plan as wp
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        project = _setup(db)
+        draft = wp.generate_draft(project.id, db, start_date=dt.date(2026, 8, 1))
+        wp.freeze(draft, db)[0]
+
+        # Scopear a la org del fixture (ver nota en _setup).
+        mat = db.scalars(
+            select(Material).where(
+                Material.name == "__test_mat__",
+                Material.organization_id == project.organization_id,
+            )
+        ).first()
+        assert mat is not None
+        mat.unit_price = float(mat.unit_price or 0) + 50.0
+        db.flush()
+
+        changes = wp.project_changes(project.id, db, budget_direct=12345.0)
+        assert changes["summary"]["budget_direct"] == 12345.0
+        assert changes["summary"]["active_version"] == draft.version
+        assert changes["summary"]["n_price_changed"] >= 1
+        assert changes["prices"]["baseline_plan_id"] == draft.id
+        assert any(m["status"] == "changed" for m in changes["prices"]["materials"])
+
+        # compute section present (shape of compute_diff)
+        assert "n_changed" in changes["compute"]
+        assert "tasks" in changes["compute"]
+        assert changes["summary"]["n_compute_changed"] == changes["compute"]["n_changed"]
+
+        assert len(changes["versions"]) >= 1
+        assert "total_cost" in changes["versions"][0]
+        assert "task_count" in changes["versions"][0]
     finally:
         db.rollback()
         db.close()

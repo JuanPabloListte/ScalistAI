@@ -15,5 +15,7 @@ from app.models.material_group import MaterialGroup
 from app.models.work_plan import (
     ActualCost, ProgressEntry, WorkPlan, WorkPlanMaterialPrice, WorkTask,
 )
+from app.models.job_role import JobRole, user_job_roles
+from app.models.project_member import PROJECT_ROLES, ProjectMember
 
-__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries", "CostSettings", "MaterialGroup", "WorkPlan", "WorkPlanMaterialPrice", "WorkTask", "ProgressEntry", "ActualCost"]
+__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries", "CostSettings", "MaterialGroup", "WorkPlan", "WorkPlanMaterialPrice", "WorkTask", "ProgressEntry", "ActualCost", "JobRole", "user_job_roles", "ProjectMember", "PROJECT_ROLES"]

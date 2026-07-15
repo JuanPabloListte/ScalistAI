@@ -8,6 +8,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.plan import Plan
+    from app.models.project_member import ProjectMember
     from app.models.user import User
     from app.models.organization import Organization
 
@@ -53,3 +54,5 @@ class Project(Base):
     owner: Mapped["User"] = relationship(back_populates="projects")
     organization: Mapped["Organization"] = relationship(back_populates="projects")
     plans: Mapped[list["Plan"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    members: Mapped[list["ProjectMember"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", lazy="selectin")
