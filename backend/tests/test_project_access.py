@@ -180,6 +180,76 @@ def test_endpoints_respetan_la_linea_de_la_plata():
         db.rollback(); db.close()
 
 
+def test_lista_de_proyectos_filtra_por_membresia():
+    """El endpoint GET /projects: el admin ve todo; un miembro común ve solo
+    los proyectos sin equipo (retrocompat) + donde es miembro."""
+    from fastapi.testclient import TestClient
+
+    from app.core.database import SessionLocal
+    from app.core.deps import get_current_user
+    from app.main import app
+    from app.models import Organization, Project, User
+    from app.services import project_access as pa
+
+    db = SessionLocal()
+    org_id = None
+    try:
+        org, sin_equipo, admin, jefe, capataz, _ = _org_with_users(db)
+        org_id = org.id
+        sin_equipo.name = "__test_sin_equipo__"
+        con_mio = Project(organization_id=org.id, user_id=admin.id,
+                          name="__test_con_mio__", status="active", wizard_step=6)
+        con_ajeno = Project(organization_id=org.id, user_id=admin.id,
+                            name="__test_ajeno__", status="active", wizard_step=6)
+        db.add_all([con_mio, con_ajeno]); db.flush()
+
+        pa.set_member(con_mio, capataz.id, "capataz", db)      # capataz SÍ
+        pa.set_member(con_ajeno, jefe.id, "jefe_obra", db)     # capataz NO
+        db.commit()
+
+        c = TestClient(app)
+        try:
+            app.dependency_overrides[get_current_user] = lambda: capataz
+            names = {p["name"] for p in c.get("/api/v1/projects").json()}
+            assert "__test_con_mio__" in names, "no vio un proyecto donde es miembro"
+            assert "__test_sin_equipo__" in names, "no vio un proyecto sin equipo (retrocompat)"
+            assert "__test_ajeno__" not in names, "vio un proyecto ajeno con equipo"
+
+            app.dependency_overrides[get_current_user] = lambda: admin
+            names_admin = {p["name"] for p in c.get("/api/v1/projects").json()}
+            assert "__test_ajeno__" in names_admin, "el admin debe ver todo"
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        # Limpieza total: proyectos (cascade → members), usuarios y la org.
+        d2 = SessionLocal()
+        if org_id is not None:
+            for p in d2.scalars(
+                select_projects_of_org(org_id)
+            ).all():
+                d2.delete(p)
+            for u in d2.scalars(select_users_of_org(org_id)).all():
+                d2.delete(u)
+            org = d2.get(Organization, org_id)
+            if org is not None:
+                d2.delete(org)
+            d2.commit()
+        d2.close()
+        db.rollback(); db.close()
+
+
+def select_projects_of_org(org_id):
+    from sqlalchemy import select
+    from app.models import Project
+    return select(Project).where(Project.organization_id == org_id)
+
+
+def select_users_of_org(org_id):
+    from sqlalchemy import select
+    from app.models import User
+    return select(User).where(User.organization_id == org_id)
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

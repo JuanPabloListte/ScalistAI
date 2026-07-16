@@ -50,8 +50,24 @@ def list_projects(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[Project]:
-    stmt = select(Project).where(Project.organization_id == user.organization_id).order_by(Project.created_at.desc())
-    return list(db.scalars(stmt).all())
+    stmt = (
+        select(Project)
+        .where(Project.organization_id == user.organization_id)
+        .order_by(Project.created_at.desc())
+    )
+    projects = list(db.scalars(stmt).all())
+
+    # El admin (y superadmin) ve todos los proyectos de la org. Un miembro común
+    # solo ve los suyos: los que NO tienen equipo asignado (retrocompat, todos
+    # ven todo) + aquellos donde figura como miembro. Misma regla que
+    # services/project_access.get_access; `project.members` viene con selectin,
+    # así que el filtro es en memoria (sin N+1).
+    if user.is_superadmin or user.org_role == "admin":
+        return projects
+    return [
+        p for p in projects
+        if not p.members or any(m.user_id == user.id for m in p.members)
+    ]
 
 
 @router.get("/{project_id}", response_model=ProjectRead)
