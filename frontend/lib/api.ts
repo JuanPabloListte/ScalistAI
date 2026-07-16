@@ -357,6 +357,32 @@ export type WorkPlanData = ScheduleResponse & {
   crews: number;
   overlap_pct: number;
   price_snapshot_count?: number;
+  hide_money?: boolean;   // capataz/comitente: el backend ya quitó los importes
+  progress_migration?: {
+    migrated_tasks: number;
+    unmatched_old: number;
+    new_tasks: number;
+    entries_moved: number;
+    costs_moved: number;
+    capped_tasks: number;
+  };
+};
+
+// Rol de permiso del usuario DENTRO de un proyecto (distinto del oficio).
+export type ProjectRole = "admin" | "jefe_obra" | "capataz" | "comitente" | "none";
+
+export type ProjectMember = {
+  user_id: number;
+  email: string | null;
+  role: "jefe_obra" | "capataz" | "comitente";
+  role_label: string;
+  job_roles: string[];
+};
+
+export type ProjectMembersState = {
+  members: ProjectMember[];
+  my_role: ProjectRole;
+  can_manage_members: boolean;
 };
 
 export type WorkPlanComputeDiffRow = {
@@ -385,6 +411,50 @@ export type WorkPlanComputeDiff = {
   tasks: WorkPlanComputeDiffRow[];
 };
 
+export type ProjectChangesPriceRow = {
+  material_id: number;
+  name: string;
+  unit: string | null;
+  price_baseline: number;
+  price_live: number | null;
+  delta: number | null;
+  delta_pct: number | null;
+  status: "same" | "changed" | "missing_live";
+};
+
+export type ProjectChangesPrices = {
+  baseline_plan_id: number | null;
+  baseline_version: number | null;
+  frozen_at: string | null;
+  n_changed: number;
+  materials: ProjectChangesPriceRow[];
+};
+
+export type ProjectChangesVersion = {
+  plan_id: number;
+  version: number;
+  status: string;
+  frozen_at: string | null;
+  created_at: string | null;
+  total_cost: number;
+  task_count: number;
+};
+
+export type ProjectChanges = {
+  summary: {
+    budget_direct: number | null;
+    plan_total: number | null;
+    compute_total: number | null;
+    n_compute_changed: number;
+    n_price_changed: number;
+    active_version: number | null;
+    draft_version: number | null;
+  };
+  compute: WorkPlanComputeDiff;
+  prices: ProjectChangesPrices;
+  versions: ProjectChangesVersion[];
+};
+
 export type WorkPlanVersion = {
   plan_id: number; version: number; status: string;
   frozen_at: string | null; created_at: string | null;
@@ -392,6 +462,10 @@ export type WorkPlanVersion = {
 
 export type WorkPlanState = {
   plan: WorkPlanData | null;
+  my_role?: ProjectRole;
+  can_view_financials?: boolean;
+  can_edit_plan?: boolean;
+  can_register_progress?: boolean;
   versions: WorkPlanVersion[];
 };
 
@@ -441,12 +515,19 @@ export type ActualCostRow = {
 
 // ---- Admin / Team ----
 
+export type JobRole = {
+  id: number;
+  name: string;
+  is_default?: boolean;
+};
+
 export type OrgUser = {
   id: number;
   email: string;
   role: string;
   is_superadmin: boolean;
   created_at: string;
+  job_roles?: JobRole[];
 };
 
 export type Organization = {
@@ -483,12 +564,14 @@ export type AdminUserCreatePayload = {
   email: string;
   password: string;
   role: "admin" | "member";
+  job_role_ids?: number[];
 };
 
 export type AdminUserUpdatePayload = {
   email?: string;
   password?: string;
   role?: "admin" | "member";
+  job_role_ids?: number[];
 };
 
 export type AiConfigRead = {
@@ -1135,11 +1218,30 @@ export const api = {
     );
   },
 
+  // ----- Equipo del proyecto (roles de permiso) -----
+  getProjectMembers: (projectId: number) =>
+    request<ProjectMembersState>(`/api/v1/projects/${projectId}/members`),
+  upsertProjectMember: (projectId: number, userId: number, role: string) =>
+    request<ProjectMember>(`/api/v1/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+  removeProjectMember: async (projectId: number, userId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/members/${userId}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok && res.status !== 204) throw new Error(`No se pudo quitar (HTTP ${res.status})`);
+  },
+
   // ----- Plan de obra persistido (módulo Obra) -----
   getWorkPlan: (projectId: number) =>
     request<WorkPlanState>(`/api/v1/projects/${projectId}/work-plan`),
   getWorkPlanComputeDiff: (projectId: number) =>
     request<WorkPlanComputeDiff>(`/api/v1/projects/${projectId}/work-plan/compute-diff`),
+  getProjectChanges: (projectId: number) =>
+    request<ProjectChanges>(`/api/v1/projects/${projectId}/changes`),
   createWorkPlanDraft: (projectId: number, opts: { startDate?: string; crews?: number; overlapPct?: number }) =>
     request<WorkPlanData>(`/api/v1/projects/${projectId}/work-plan/draft`, {
       method: "POST",
@@ -1341,6 +1443,19 @@ export const api = {
 
   // ---- Team (org admin / member) ----
   listTeam: () => request<OrgUser[]>(`/api/v1/team/users`),
+  listTeamJobRoles: () => request<JobRole[]>(`/api/v1/team/job-roles`),
+  createTeamJobRole: (name: string) =>
+    request<JobRole>(`/api/v1/team/job-roles`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  listOrgJobRoles: (orgId: number) =>
+    request<JobRole[]>(`/api/v1/admin/organizations/${orgId}/job-roles`),
+  createOrgJobRole: (orgId: number, name: string) =>
+    request<JobRole>(`/api/v1/admin/organizations/${orgId}/job-roles`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
   createTeamUser: (payload: AdminUserCreatePayload) =>
     request<OrgUser>(`/api/v1/team/users`, {
       method: "POST",

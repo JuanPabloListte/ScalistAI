@@ -24,12 +24,20 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.getProject(projectId), api.listPlans(projectId)])
-      .then(([proj, planList]) => {
+    Promise.all([
+      api.getProject(projectId),
+      api.listPlans(projectId),
+      api.getProjectMembers(projectId).catch(() => null),
+    ])
+      .then(([proj, planList, membersState]) => {
         if (cancelled) return;
-        // IFC (modelo BIM): no tiene visor de planos -> va directo al presupuesto.
+        // IFC (modelo BIM): no tiene visor de planos -> va directo a su vista.
+        // El destino depende del ROL: quien no ve financieros (capataz/
+        // comitente) iría a un 403 en /presupuesto → lo mandamos a su obra.
         if (planList.some((p) => p.original_filename?.toLowerCase().endsWith(".ifc"))) {
-          router.replace(`/projects/${projectId}/presupuesto`);
+          const role = membersState?.my_role;
+          const dest = role === "capataz" || role === "comitente" ? "obra" : "presupuesto";
+          router.replace(`/projects/${projectId}/${dest}`);
           return;
         }
         setProject(proj);
@@ -195,6 +203,7 @@ export default function ProjectDetailPage() {
                     <div className="absolute right-0 z-20 mt-1.5 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
                       <ViewMenuItem href={`/projects/${project.id}/presupuesto`} title="Presupuesto completo" desc="Cómputo y costos del proyecto" />
                       <ViewMenuItem href={`/projects/${project.id}/costos`} title="Presupuesto Inteligente" desc="Precio de venta + proyección" />
+                      <ViewMenuItem href={`/projects/${project.id}/changes`} title="Cambios" desc="Qué se movió desde el baseline" />
                       <ViewMenuItem href={`/projects/${project.id}/gantt`} title="Cronograma (Gantt)" desc="Plan de obra en el tiempo" />
                     </div>
                   </>

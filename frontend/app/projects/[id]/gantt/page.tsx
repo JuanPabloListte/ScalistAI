@@ -19,8 +19,10 @@ import {
 import { 
   Check, AlertTriangle, Play, CheckCircle, Ban, HelpCircle, X, 
   Plus, Calendar, Clock, User, Clipboard, FileText, 
-  ArrowRight, Search, Filter, Lock, Unlock, ChevronRight, Trash2, Edit
+  ArrowRight, Search, Filter, Lock, Unlock, ChevronRight, Trash2, Edit,
+  Maximize2, Minimize2, Users,
 } from "lucide-react";
+import { ProjectTeam } from "@/components/project-team";
 
 const STAGE_COLORS: Record<string, string> = {
   "Fundación": "#0ea5e9",
@@ -78,14 +80,21 @@ export default function ProjectGanttPage() {
   const [schedule, setSchedule] = useState<ScheduleResponse | null>(null);
   const [plan, setPlan] = useState<WorkPlanData | null>(null);
   const [versions, setVersions] = useState<WorkPlanVersion[]>([]);
+  // Permisos del usuario en ESTE proyecto (backend). hideMoney: el server ya
+  // quitó los importes; canEdit: puede replanificar; canProgress: cargar avance.
+  const [canEdit, setCanEdit] = useState(true);
+  const [canProgress, setCanProgress] = useState(true);
+  const [myRole, setMyRole] = useState<string>("jefe_obra");
   const [progress, setProgress] = useState<WorkProgress | null>(null);
   const [budgetSummary, setBudgetSummary] = useState<ProjectBudgetSummary | null>(null);
   const [computeDiff, setComputeDiff] = useState<WorkPlanComputeDiff | null>(null);
   const [showComputeDiff, setShowComputeDiff] = useState(false);
+  const [ganttMaximized, setGanttMaximized] = useState(false);
   const [team, setTeam] = useState<OrgUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [crews, setCrews] = useState<number>(1);
@@ -157,7 +166,10 @@ export default function ProjectGanttPage() {
         setProject(proj);
         setVersions(wpState.versions);
         setTeam(teamUsers);
-        
+        setCanEdit(wpState.can_edit_plan ?? true);
+        setCanProgress(wpState.can_register_progress ?? true);
+        setMyRole(wpState.my_role ?? "jefe_obra");
+
         if (wpState.plan) {
           setPlan(wpState.plan);
           setSchedule(wpState.plan);
@@ -247,6 +259,28 @@ export default function ProjectGanttPage() {
       document.removeEventListener("mouseup", handleGlobalMouseUp);
     };
   }, []);
+
+  useEffect(() => {
+    if (!ganttMaximized) {
+      document.body.classList.remove("gantt-maximized");
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Modal/drawer abierto: no cerrar maximizado (el overlay manda).
+      if (isDrawerOpen || isAddModalOpen) return;
+      setGanttMaximized(false);
+    };
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.body.classList.add("gantt-maximized");
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.body.classList.remove("gantt-maximized");
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [ganttMaximized, isDrawerOpen, isAddModalOpen]);
 
   const handleMouseDownPan = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -436,6 +470,7 @@ export default function ProjectGanttPage() {
   async function act(fn: () => Promise<WorkPlanData>) {
     setActing(true);
     setError(null);
+    setInfo(null);
     try {
       const p = await fn();
       setPlan(p);
@@ -452,6 +487,17 @@ export default function ProjectGanttPage() {
         setProgress(null);
       }
       api.getWorkPlanComputeDiff(projectId).then(setComputeDiff).catch(() => setComputeDiff(null));
+      const m = p.progress_migration;
+      if (m && (m.entries_moved > 0 || m.migrated_tasks > 0 || m.unmatched_old > 0)) {
+        const parts = [
+          `${m.migrated_tasks} tarea(s) con avances trasladados`,
+          m.entries_moved ? `${m.entries_moved} registro(s) de avance` : null,
+          m.unmatched_old ? `${m.unmatched_old} sin match (quedan en historial)` : null,
+          m.new_tasks ? `${m.new_tasks} nueva(s) en 0%` : null,
+          m.capped_tasks ? `${m.capped_tasks} con tope al 100%` : null,
+        ].filter(Boolean);
+        setInfo(`Avances migrados al nuevo baseline: ${parts.join(" · ")}.`);
+      }
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
@@ -759,6 +805,7 @@ export default function ProjectGanttPage() {
 
   // Drag handlers
   const startDrag = (e: React.MouseEvent, task: any) => {
+    if (!canEdit) return;  // capataz/comitente: cronograma de solo lectura
     e.preventDefault();
     e.stopPropagation();
     const tOffset = (new Date(task.start_date + "T00:00:00").getTime() - projStart) / 86400000;
@@ -779,6 +826,7 @@ export default function ProjectGanttPage() {
   };
 
   const startResize = (e: React.MouseEvent, task: any) => {
+    if (!canEdit) return;  // capataz/comitente: cronograma de solo lectura
     e.preventDefault();
     e.stopPropagation();
     dragInfo.current = {
@@ -925,7 +973,7 @@ export default function ProjectGanttPage() {
         <div className="flex flex-wrap gap-2 items-center">
           {plan ? (
             <>
-              {plan.status === "draft" && (
+              {plan.status === "draft" && canEdit && (
                 <>
                   <button onClick={() => act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))} disabled={acting}
                     className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50">
@@ -939,47 +987,69 @@ export default function ProjectGanttPage() {
               )}
               {plan.status === "active" && (
                 <>
-                  <Link href={`/projects/${projectId}/obra`}
-                    className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors">
-                    Registrar avances →
-                  </Link>
-                  <button
-                    onClick={() =>
-                      act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))
-                    }
-                    disabled={acting}
-                    title="Genera borrador vN+1 desde el cómputo IFC actual. El baseline activo no cambia hasta que congelés el borrador."
-                    className="rounded-lg border border-sky-600 text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/20 px-3.5 py-2 text-xs font-semibold transition-colors disabled:opacity-50"
-                  >
-                    {acting ? "…" : "Actualizar borrador desde cómputo"}
-                  </button>
-                  <button onClick={downloadReport} disabled={acting}
-                    className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50">
-                    {acting ? "…" : "Reporte PDF"}
-                  </button>
+                  {canProgress && (
+                    <Link href={`/projects/${projectId}/obra`}
+                      className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors">
+                      Registrar avances →
+                    </Link>
+                  )}
+                  {canEdit && (
+                    <button
+                      onClick={() =>
+                        act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))
+                      }
+                      disabled={acting}
+                      title="Genera borrador vN+1 desde el cómputo IFC actual. El baseline activo no cambia hasta que congelés el borrador."
+                      className="rounded-lg border border-sky-600 text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/20 px-3.5 py-2 text-xs font-semibold transition-colors disabled:opacity-50"
+                    >
+                      {acting ? "…" : "Actualizar borrador desde cómputo"}
+                    </button>
+                  )}
+                  {!plan.hide_money && (
+                    <button onClick={downloadReport} disabled={acting}
+                      className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50">
+                      {acting ? "…" : "Reporte PDF"}
+                    </button>
+                  )}
                   <button onClick={downloadComitenteReport} disabled={acting}
                     className="rounded-lg border border-slate-300 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 dark:border-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50"
                     title="Descarga el PDF sin datos financieros, para reenviarlo al comitente">
                     {acting ? "…" : "Descargar para comitente"}
                   </button>
-                  <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
-                    className="rounded-lg border border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/20 px-3.5 py-2 text-xs font-semibold transition-colors disabled:opacity-50">
-                    {acting ? "…" : "Reprogramar"}
-                  </button>
+                  {canEdit && (
+                    <button onClick={() => act(() => api.rebaselineWorkPlan(projectId))} disabled={acting}
+                      className="rounded-lg border border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/20 px-3.5 py-2 text-xs font-semibold transition-colors disabled:opacity-50">
+                      {acting ? "…" : "Reprogramar"}
+                    </button>
+                  )}
                 </>
               )}
             </>
-          ) : (
+          ) : canEdit ? (
             <button onClick={() => act(() => api.createWorkPlanDraft(projectId, { startDate, crews }))} disabled={acting}
               className="rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors disabled:opacity-50">
               {acting ? "Generando…" : "Generar plan de obra"}
             </button>
-          )}
+          ) : null}
         </div>
       </header>
 
-      {/* Alineación medición (presupuesto) ↔ plan de obra */}
-      {(budgetSummary || computeDiff) && (
+      {/* Equipo del proyecto (roles de permiso). Colapsable; se auto-gatea:
+          solo jefe/admin ven los controles, el resto lo ve de solo lectura. */}
+      <details className="mb-4 group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+          <Users className="h-4 w-4 text-brand-600" />
+          Equipo del proyecto
+          <span className="ml-auto text-xs font-normal text-slate-400 group-open:hidden">mostrar</span>
+        </summary>
+        <div className="mt-2">
+          <ProjectTeam projectId={projectId} />
+        </div>
+      </details>
+
+      {/* Alineación medición (presupuesto) ↔ plan de obra — trae importes,
+          oculto a capataz/comitente. */}
+      {!plan?.hide_money && (budgetSummary || computeDiff) && (
         <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -990,6 +1060,12 @@ export default function ProjectGanttPage() {
                 Plan = materiales por receta (tareas del Gantt). Presupuesto = obra gris
                 (+ mano de obra en categorías) + rubros paramétricos.
               </p>
+              <Link
+                href={`/projects/${projectId}/changes`}
+                className="mt-2 inline-block text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
+              >
+                Ver todos los cambios →
+              </Link>
             </div>
             {computeDiff && computeDiff.n_changed > 0 && (
               <button
@@ -1109,6 +1185,11 @@ export default function ProjectGanttPage() {
           {error}
         </div>
       )}
+      {info && (
+        <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-300 animate-fade-in">
+          {info}
+        </div>
+      )}
 
       {/* Controles & Filtros */}
       <div className="mb-6 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1144,10 +1225,12 @@ export default function ProjectGanttPage() {
               <div className="text-xs text-slate-500">Fin estimado</div>
               <div className="text-lg font-bold text-slate-900 dark:text-white">{fmtDate(scheduleEndDate)}</div>
             </div>
-            <div>
-              <div className="text-xs text-slate-500">Costo total</div>
-              <div className="text-lg font-bold text-brand-600 dark:text-brand-400">${fmtARS(scheduleTotalCost)}</div>
-            </div>
+            {!plan?.hide_money && (
+              <div>
+                <div className="text-xs text-slate-500">Costo total</div>
+                <div className="text-lg font-bold text-brand-600 dark:text-brand-400">${fmtARS(scheduleTotalCost)}</div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1209,6 +1292,15 @@ export default function ProjectGanttPage() {
             >
               <Plus className="h-3.5 w-3.5" /> Crear Tarea
             </button>
+            <button
+              type="button"
+              onClick={() => setGanttMaximized(true)}
+              title="Maximizar cronograma"
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 flex items-center gap-1.5"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Maximizar</span>
+            </button>
           </div>
         </div>
 
@@ -1222,13 +1314,46 @@ export default function ProjectGanttPage() {
       ) : (
         <>
           {/* Gantt Enterprise Split View */}
-          <div className="mb-8 rounded-xl border border-slate-200 bg-white shadow-md dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
-            <div ref={scrollContainerRef} className="flex min-w-full overflow-x-auto overflow-y-auto h-[calc(100vh-280px)] min-h-[400px] relative [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
+          <div
+            className={
+              ganttMaximized
+                ? "fixed inset-0 z-[60] flex h-dvh flex-col bg-white dark:bg-slate-950"
+                : "mb-8 rounded-xl border border-slate-200 bg-white shadow-md dark:border-slate-800 dark:bg-slate-900 overflow-hidden"
+            }
+          >
+            {ganttMaximized && (
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 dark:border-slate-800 dark:bg-slate-900">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                    Cronograma · {project.name}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Esc para salir del modo maximizado
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setGanttMaximized(false)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  Salir
+                </button>
+              </div>
+            )}
+            <div
+              ref={scrollContainerRef}
+              className={
+                ganttMaximized
+                  ? "relative flex min-h-0 w-full flex-1 overflow-x-auto overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
+                  : "relative flex min-w-full overflow-x-auto overflow-y-auto h-[calc(100vh-280px)] min-h-[400px] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
+              }
+            >
               
-              {/* Left Panel: WBS Table (Sticky left) */}
-              <div className="shrink-0 bg-slate-50 dark:bg-slate-950 w-[760px] z-30 min-h-fit">
+              {/* Left Panel: WBS Table — sticky left so only dates scroll horizontally */}
+              <div className="sticky left-0 z-30 w-[760px] shrink-0 self-start min-h-fit bg-slate-50 dark:bg-slate-950">
                 {/* Table Header */}
-                <div className="flex h-20 sticky left-0 top-0 z-40 border-r border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]">
+                <div className="flex h-20 sticky top-0 z-40 border-r border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider items-center bg-slate-100 dark:bg-slate-900 px-3 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]">
                   <div className="w-8 shrink-0">ID</div>
                   <div className="w-40 shrink-0 truncate pl-2">Tarea</div>
                   <div className="w-20 shrink-0 text-center" title="Cantidad desde cómputo IFC">Cant.</div>
@@ -1281,7 +1406,7 @@ export default function ProjectGanttPage() {
                         <div 
                           key={t.assembly} 
                           onDoubleClick={() => openTask(t)}
-                          className="flex h-10 sticky left-0 z-30 items-center px-3 text-xs bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer group border-r border-slate-100 dark:border-slate-800/60 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]"
+                          className="flex h-10 items-center px-3 text-xs bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer group border-r border-slate-100 dark:border-slate-800/60 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.15)]"
                         >
                           <div className="w-8 shrink-0 font-mono text-slate-400">{id}</div>
                           <div className="w-40 shrink-0 font-medium text-slate-800 dark:text-slate-200 truncate pl-2 flex items-center gap-1.5">
@@ -1530,7 +1655,9 @@ export default function ProjectGanttPage() {
                                   {pct > 0 ? `${pct}%` : ""}
                                 </span>
                                 
-                                <span className="font-mono">${fmtARS(t.cost)}</span>
+                                {!plan?.hide_money && typeof t.cost === "number" && (
+                                  <span className="font-mono">${fmtARS(t.cost)}</span>
+                                )}
 
                                 {/* Resize handle (right edge) */}
                                 <div 
@@ -1551,7 +1678,8 @@ export default function ProjectGanttPage() {
             </div>
           </div>
 
-          {/* Curva de inversión */}
+          {/* Curva de inversión — financiera, oculta a capataz/comitente */}
+          {!plan?.hide_money && (
           <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h2 className="mb-1 text-lg font-bold text-slate-900 dark:text-white">Curva de inversión</h2>
             <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">Cuánto se invierte por mes y el acumulado a lo largo de la obra.</p>
@@ -1576,6 +1704,7 @@ export default function ProjectGanttPage() {
               <span>Inversión total: <strong className="text-brand-600 dark:text-brand-400">${fmtARS(scheduleTotalCost)}</strong></span>
             </div>
           </div>
+          )}
         </>
       )}
 
@@ -1611,7 +1740,7 @@ export default function ProjectGanttPage() {
         }
 
         return (
-          <div className="fixed inset-0 z-50 overflow-hidden flex items-center justify-center">
+          <div className="fixed inset-0 z-[70] overflow-hidden flex items-center justify-center">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsDrawerOpen(false)} />
             <div className="relative max-w-lg w-full bg-white dark:bg-slate-900 shadow-2xl rounded-xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col h-[580px] animate-scale-up">
               
@@ -1929,7 +2058,7 @@ export default function ProjectGanttPage() {
 
       {/* Task Creation Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-hidden flex items-center justify-center">
+        <div className="fixed inset-0 z-[70] overflow-hidden flex items-center justify-center">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsAddModalOpen(false)} />
           <div className="relative bg-white dark:bg-slate-900 shadow-2xl rounded-xl border border-slate-200 dark:border-slate-800 p-6 max-w-lg w-full animate-scale-up text-xs space-y-4 max-h-[90vh] overflow-y-auto">
             
