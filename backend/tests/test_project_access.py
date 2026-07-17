@@ -159,6 +159,16 @@ def test_endpoints_respetan_la_linea_de_la_plata():
             assert c.get(f"/api/v1/projects/{project.id}/work-cost").status_code == 403
             assert c.get(f"/api/v1/projects/{project.id}/actual-costs").status_code == 403
             assert c.get(f"/api/v1/projects/{project.id}/changes").status_code == 403
+            # Cronograma y flujo de fondos con costos: prohibidos
+            assert c.get(f"/api/v1/projects/{project.id}/schedule").status_code == 403
+            assert c.get(f"/api/v1/projects/{project.id}/cashflow").status_code == 403
+            # Presupuesto y export de materiales (traen precios): prohibidos
+            from app.models import Plan
+            from sqlalchemy import select as _sel
+            pid = db.scalar(_sel(Plan.id).where(Plan.project_id == project.id))
+            assert c.get(f"/api/v1/plans/{pid}/materials-summary").status_code == 403
+            assert c.get(f"/api/v1/plans/{pid}/export/xlsx").status_code == 403
+            assert c.get(f"/api/v1/plans/{pid}/budget-summary").status_code == 403
             # Replanificar: prohibido
             assert c.post(f"/api/v1/projects/{project.id}/work-plan/draft",
                           json={"crews": 1}).status_code == 403

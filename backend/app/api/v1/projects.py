@@ -13,6 +13,7 @@ from app.models.detected_element import DetectedElement
 from app.models.plan import Plan
 from app.models.project import Project
 from app.models.user import User
+from app.services import project_access as pa
 from app.schemas.project import (
     BuildingInfoUpdate,
     LocationUpdate,
@@ -76,9 +77,7 @@ def get_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user)[0]
     return project
 
 
@@ -89,9 +88,7 @@ def update_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
     if payload.name is not None:
         project.name = payload.name
     if payload.description is not None:
@@ -109,9 +106,7 @@ def update_project_location(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
 
     project.address = payload.address
     project.latitude = payload.latitude
@@ -132,9 +127,7 @@ def update_project_building_info(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
 
     project.building_type = payload.building_type
     project.building_info = payload.building_info
@@ -153,9 +146,7 @@ def activate_project(
     user: User = Depends(get_current_user),
 ) -> Project:
     """Cierra el wizard: valida que esten todos los datos y activa el proyecto."""
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
 
     if not project.name:
         raise HTTPException(status_code=400, detail="Falta el nombre del proyecto")
@@ -386,9 +377,7 @@ def set_training_consent(
     Cambiarlo a False **después** de activar no borra las variaciones ya
     generadas — para eso usar el endpoint de purge (Sprint 6).
     """
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
     project.allow_training_data = payload.allow_training_data
     db.commit()
     db.refresh(project)
@@ -401,9 +390,7 @@ def delete_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
 
     # IDs de los planes ANTES de la cascada — los necesitamos para limpiar sus
     # datos sintéticos de entrenamiento. Si no, quedan huérfanos en disco y
@@ -448,9 +435,7 @@ def get_schedule(
 
     from app.services.schedule import compute_schedule
 
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    pa.require_project(project_id, db, user, financials=True)  # trae costos
     sd = _dt.date.fromisoformat(start_date) if start_date else None
     return compute_schedule(project_id, db, sd, max(1, crews), overlap_pct)
 
@@ -469,8 +454,6 @@ def get_cashflow(
 
     from app.services.schedule import compute_cashflow
 
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    pa.require_project(project_id, db, user, financials=True)  # trae costos
     sd = _dt.date.fromisoformat(start_date) if start_date else None
     return compute_cashflow(project_id, db, sd, max(1, crews), overlap_pct)

@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import DetectedElement, Plan, User
 from app.schemas.material import MaterialSummaryItem
+from app.services import project_access as pa
 
 router = APIRouter(tags=["plans"])
 
@@ -145,9 +146,8 @@ def get_materials_summary(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
+    pa.require_plan(plan_id, db, user, financials=True)  # muestra precios → solo quien ve la plata
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
     return _get_materials_summary_data(plan_id, page, db)
 
 
@@ -158,9 +158,8 @@ def export_xlsx(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
+    pa.require_plan(plan_id, db, user, financials=True)  # muestra precios → solo quien ve la plata
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     summary_items = _get_materials_summary_data(plan_id, page, db)
 
@@ -272,9 +271,8 @@ def export_pdf(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
+    pa.require_plan(plan_id, db, user, financials=True)  # muestra precios → solo quien ve la plata
     plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
 
     summary_items = _get_materials_summary_data(plan_id, page, db)
 

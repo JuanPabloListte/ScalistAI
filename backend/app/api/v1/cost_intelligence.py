@@ -51,12 +51,12 @@ _FORECAST_HORIZONS = (3, 6, 12)
 router = APIRouter(tags=["cost-intelligence"])
 
 
-def _assert_plan_in_org(db: Session, plan_id: int, organization_id: int) -> None:
-    """Aísla por org: el plano debe pertenecer a un proyecto de la org."""
-    plan = db.get(Plan, plan_id)
-    project = db.get(Project, plan.project_id) if plan else None
-    if project is None or project.organization_id != organization_id:
-        raise HTTPException(status_code=404, detail="Plano no encontrado")
+def _assert_plan_in_org(db: Session, plan_id: int, user: User) -> None:
+    """Acceso al plano por rol de proyecto: TODA la inteligencia de costos es
+    financiera, así que exige `can_view_financials` (capataz/comitente → 403)."""
+    from app.services import project_access as pa
+
+    pa.require_plan(plan_id, db, user, financials=True)
 
 
 def _to_read(sim: Simulation) -> SimulationRead:
@@ -72,7 +72,7 @@ def create_simulation(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SimulationRead:
-    _assert_plan_in_org(db, payload.plan_id, user.organization_id)
+    _assert_plan_in_org(db, payload.plan_id, user)
     run = RunSimulation(SqlMeasurementProvider(db), SqlRecipeCatalog(db))
     name = payload.name or "Simulación"
     scenario = run.execute(
@@ -91,7 +91,7 @@ def list_simulations(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[SimulationRead]:
-    _assert_plan_in_org(db, plan_id, user.organization_id)
+    _assert_plan_in_org(db, plan_id, user)
     sims = SqlSimulationStore(db).list_for_plan(plan_id, user.organization_id)
     return [_to_read(s) for s in sims]
 
@@ -114,7 +114,7 @@ def compare_scenarios(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CompareResponse:
-    _assert_plan_in_org(db, payload.plan_id, user.organization_id)
+    _assert_plan_in_org(db, payload.plan_id, user)
     run = RunSimulation(SqlMeasurementProvider(db), SqlRecipeCatalog(db))
     catalog = SqlRecipeCatalog(db)
     try:
@@ -343,7 +343,7 @@ def budget_summary(
 ) -> ProjectBudgetSummary:
     """Presupuesto COMPLETO del proyecto: total, desglose por rubro y resumen de
     cómputo (ml de muro, aberturas, etc.). Corre la simulación y agrega."""
-    _assert_plan_in_org(db, plan_id, user.organization_id)
+    _assert_plan_in_org(db, plan_id, user)
     summary = _compute_budget_summary(db, plan_id, user.organization_id)
     db.commit()
     return summary
@@ -360,7 +360,7 @@ def export_budget_summary(
     Incluye obra gris + rubros paramétricos + precio de venta + cómputo.
     Reemplaza el download vía simulación (que omitía los paramétricos).
     """
-    _assert_plan_in_org(db, plan_id, user.organization_id)
+    _assert_plan_in_org(db, plan_id, user)
     summary = _compute_budget_summary(db, plan_id, user.organization_id)
     db.commit()
     xlsx = build_budget_workbook(summary.model_dump())

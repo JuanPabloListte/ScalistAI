@@ -22,6 +22,7 @@ from app.schemas.plan import PlanRead
 from app.services.auto_scale import detect_scales
 from app.services.pdf import classify_pages, page_count, recommend_pages
 from app.services.prewarm import prewarm_plan_pages
+from app.services import project_access as pa
 
 from ._common import MAX_IFC_BYTES, MAX_PDF_BYTES, RASTER_DPI, _page_raster_path
 
@@ -44,9 +45,7 @@ async def upload_plan(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Plan:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    project = pa.require_project(project_id, db, user, edit_plan=True)[0]
 
     contents = await file.read()
     fname_lower = (file.filename or "").lower()
@@ -144,9 +143,7 @@ def list_plans(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[Plan]:
-    project = db.get(Project, project_id)
-    if project is None or project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    pa.require_project(project_id, db, user)  # cualquier miembro del proyecto lo lista
     stmt = select(Plan).where(Plan.project_id == project_id).order_by(Plan.created_at.desc())
     return list(db.scalars(stmt).all())
 
@@ -157,9 +154,7 @@ def get_plan(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Plan:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan, _, _ = pa.require_plan(plan_id, db, user)
     return plan
 
 

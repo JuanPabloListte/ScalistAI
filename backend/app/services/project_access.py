@@ -155,6 +155,27 @@ def require_project(
     return project, access
 
 
+def require_plan(
+    plan_id: int, db: Session, user: User, *,
+    financials: bool = False,
+    edit_plan: bool = False,
+    register_progress: bool = False,
+):
+    """Igual que require_project pero partiendo de un `plans.id` (el recurso vive
+    colgado del proyecto). Devuelve (plan, project, access). 404 si no ve el
+    proyecto del plano."""
+    from app.models.plan import Plan
+
+    plan = db.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plano no encontrado")
+    project, access = require_project(
+        plan.project_id, db, user, financials=financials, edit_plan=edit_plan,
+        register_progress=register_progress,
+    )
+    return plan, project, access
+
+
 def list_members(project_id: int, db: Session) -> list[ProjectMember]:
     return list(db.scalars(
         select(ProjectMember)
