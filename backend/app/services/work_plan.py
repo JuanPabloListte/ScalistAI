@@ -19,8 +19,10 @@ import datetime as dt
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
-from app.models.material import Assembly, AssemblyMaterial
-from app.models.work_plan import WorkPlan, WorkPlanMaterialPrice, WorkTask, WorkTaskEvent
+from app.models.material import Assembly, AssemblyMaterial, Material
+from app.models.work_plan import (
+    ActualCost, ProgressEntry, WorkPlan, WorkPlanMaterialPrice, WorkTask, WorkTaskEvent,
+)
 from app.services.schedule import compute_schedule
 
 
@@ -336,34 +338,146 @@ def price_map_for_plan(plan_id: int, db: Session) -> dict[int, float]:
     return {r.material_id: r.unit_price for r in rows}
 
 
-def freeze(plan: WorkPlan, db: Session) -> WorkPlan:
+def _task_match_key(task: WorkTask) -> tuple:
+    """Clave estable para migrar avances entre versiones del plan.
+
+    Auto con assembly: (assembly_id, level). Manual / sin assembly: ("name", name).
+    """
+    if task.assembly_id is not None and task.source != "manual":
+        return ("asm", task.assembly_id, task.level)
+    return ("name", task.name, None)
+
+
+def migrate_progress_between_plans(
+    old_plan: WorkPlan, new_plan: WorkPlan, db: Session,
+) -> dict:
+    """Reasigna ProgressEntry y ActualCost de old→new por clave de tarea.
+
+    Política de cantidades: conserva qty_done; si el total supera qty_planned
+    de la tarea nueva, escala proporcionalmente (tope 100%).
+    Copia status/priority/description/assignees de la tarea vieja a la nueva.
+    """
+    old_by_key: dict[tuple, WorkTask] = {}
+    for t in old_plan.tasks:
+        old_by_key.setdefault(_task_match_key(t), t)
+
+    new_by_key: dict[tuple, WorkTask] = {}
+    for t in new_plan.tasks:
+        new_by_key.setdefault(_task_match_key(t), t)
+
+    id_map: dict[int, int] = {}
+    matched_new_ids: set[int] = set()
+    for key, old_t in old_by_key.items():
+        new_t = new_by_key.get(key)
+        if new_t is None:
+            continue
+        id_map[old_t.id] = new_t.id
+        matched_new_ids.add(new_t.id)
+        # Workflow de ejecución: no perder estado al re-congelar.
+        new_t.status = old_t.status
+        new_t.priority = old_t.priority
+        if old_t.description and not new_t.description:
+            new_t.description = old_t.description
+        if old_t.assignees:
+            new_t.assignees = list(old_t.assignees)
+
+    unmatched_old = len(old_by_key) - len(id_map)
+    new_tasks = len(new_plan.tasks) - len(matched_new_ids)
+
+    entries_moved = 0
+    capped_tasks = 0
+    if id_map:
+        old_ids = list(id_map.keys())
+        entries = list(db.scalars(
+            select(ProgressEntry).where(ProgressEntry.task_id.in_(old_ids))
+        ).all())
+        by_new: dict[int, list[ProgressEntry]] = {}
+        for e in entries:
+            new_id = id_map[e.task_id]
+            e.task_id = new_id
+            by_new.setdefault(new_id, []).append(e)
+            entries_moved += 1
+
+        # Tope 100%: si sum(qty_done) > qty_planned, escalar.
+        new_qty = {t.id: t.qty_planned for t in new_plan.tasks}
+        for new_id, ents in by_new.items():
+            total = sum(e.qty_done for e in ents)
+            planned = new_qty.get(new_id) or 0.0
+            if planned > 0 and total > planned + 1e-6:
+                factor = planned / total
+                for e in ents:
+                    e.qty_done = round(e.qty_done * factor, 4)
+                capped_tasks += 1
+
+        costs_moved = 0
+        costs = list(db.scalars(
+            select(ActualCost).where(ActualCost.work_task_id.in_(old_ids))
+        ).all())
+        for c in costs:
+            if c.work_task_id in id_map:
+                c.work_task_id = id_map[c.work_task_id]
+                costs_moved += 1
+    else:
+        costs_moved = 0
+
+    db.flush()
+    return {
+        "migrated_tasks": len(id_map),
+        "unmatched_old": unmatched_old,
+        "new_tasks": new_tasks,
+        "entries_moved": entries_moved,
+        "costs_moved": costs_moved,
+        "capped_tasks": capped_tasks,
+    }
+
+
+def freeze(plan: WorkPlan, db: Session) -> tuple[WorkPlan, dict]:
     """Congela el borrador como baseline activo (inmutable). El activo
     anterior pasa a superseded — queda como historial de reprogramaciones.
 
-    Al congelar: (1) refresca costos auto con precios vivos, (2) snapshot de
-    precios de materiales, (3) marca active + frozen_at.
+    Al congelar: (1) refresca costos auto, (2) snapshot de precios,
+    (3) migra avances/costos del active previo a tareas equivalentes,
+    (4) marca active + frozen_at.
+
+    Devuelve (plan, progress_migration).
     """
     if plan.status != "draft":
         raise ValueError("Solo se puede congelar un borrador.")
 
-    # Asegurar tasks cargadas para refresh/snapshot
+    # Asegurar tasks cargadas para refresh/snapshot/migración
     plan = db.scalars(
         select(WorkPlan)
         .where(WorkPlan.id == plan.id)
-        .options(selectinload(WorkPlan.tasks))
+        .options(selectinload(WorkPlan.tasks).selectinload(WorkTask.assignees))
     ).one()
 
     _refresh_auto_costs_at_freeze(plan, db)
     snapshot_material_prices(plan, db)
 
-    for prev in db.scalars(select(WorkPlan).where(
+    migration = {
+        "migrated_tasks": 0,
+        "unmatched_old": 0,
+        "new_tasks": 0,
+        "entries_moved": 0,
+        "costs_moved": 0,
+        "capped_tasks": 0,
+    }
+    prev_actives = list(db.scalars(
+        select(WorkPlan)
+        .where(
             WorkPlan.project_id == plan.project_id,
-            WorkPlan.status == "active")).all():
+            WorkPlan.status == "active",
+        )
+        .options(selectinload(WorkPlan.tasks).selectinload(WorkTask.assignees))
+    ).all())
+    for prev in prev_actives:
+        migration = migrate_progress_between_plans(prev, plan, db)
         prev.status = "superseded"
+
     plan.status = "active"
     plan.frozen_at = dt.datetime.now(dt.UTC)
     db.flush()
-    return plan
+    return plan, migration
 
 
 def rebaseline(project_id: int, db: Session) -> WorkPlan:
@@ -415,7 +529,7 @@ def rebaseline(project_id: int, db: Session) -> WorkPlan:
     return clone
 
 
-def serialize(plan: WorkPlan) -> dict:
+def serialize(plan: WorkPlan, *, progress_migration: dict | None = None) -> dict:
     """Mismo shape que compute_schedule (el Gantt del frontend lo reusa) +
     metadata del plan (id, versión, estado)."""
     tasks = [{
@@ -465,6 +579,7 @@ def serialize(plan: WorkPlan) -> dict:
         "total_cost": round(sum(t["cost"] for t in tasks), 2),
         "price_snapshot_count": int(snap_count),
         "stages": stages, "tasks": tasks,
+        **({"progress_migration": progress_migration} if progress_migration else {}),
     }
 
 
@@ -576,4 +691,159 @@ def compute_diff(project_id: int, db: Session) -> dict:
         "delta_cost": round(compute_total - plan_total, 2),
         "n_changed": n_changed,
         "tasks": rows,
+    }
+
+
+def get_active_plan(project_id: int, db: Session) -> WorkPlan | None:
+    """Baseline congelado vigente (status=active), o None."""
+    return db.scalars(
+        select(WorkPlan)
+        .where(WorkPlan.project_id == project_id, WorkPlan.status == "active")
+        .options(selectinload(WorkPlan.material_prices))
+        .order_by(WorkPlan.version.desc())
+    ).first()
+
+
+def price_snapshot_diff(project_id: int, db: Session) -> dict:
+    """Compara precios del snapshot del baseline activo vs catálogo vivo.
+
+    Ancla = WorkPlan active. Sin baseline → sección vacía (n_changed=0).
+    Umbral: |delta| >= $1 o |delta_pct| >= 0.5% → changed.
+    """
+    active = get_active_plan(project_id, db)
+    empty = {
+        "baseline_plan_id": None,
+        "baseline_version": None,
+        "frozen_at": None,
+        "n_changed": 0,
+        "materials": [],
+    }
+    if active is None:
+        return empty
+
+    snaps = list(active.material_prices or [])
+    if not snaps:
+        snaps = list(db.scalars(
+            select(WorkPlanMaterialPrice).where(
+                WorkPlanMaterialPrice.work_plan_id == active.id
+            )
+        ).all())
+
+    mat_ids = [s.material_id for s in snaps]
+    live_by_id: dict[int, Material] = {}
+    if mat_ids:
+        live_by_id = {
+            m.id: m
+            for m in db.scalars(select(Material).where(Material.id.in_(mat_ids))).all()
+        }
+
+    materials: list[dict] = []
+    for s in sorted(snaps, key=lambda r: (r.material_name or "", r.material_id)):
+        baseline = float(s.unit_price or 0.0)
+        live_mat = live_by_id.get(s.material_id)
+        if live_mat is None:
+            materials.append({
+                "material_id": s.material_id,
+                "name": s.material_name or f"#{s.material_id}",
+                "unit": s.unit,
+                "price_baseline": round(baseline, 2),
+                "price_live": None,
+                "delta": None,
+                "delta_pct": None,
+                "status": "missing_live",
+            })
+            continue
+
+        live = float(live_mat.unit_price or 0.0)
+        delta = live - baseline
+        delta_pct = (delta / baseline * 100.0) if abs(baseline) >= 1e-9 else (
+            100.0 if abs(delta) >= 1e-9 else 0.0
+        )
+        changed = abs(delta) >= 1.0 or abs(delta_pct) >= 0.5
+        materials.append({
+            "material_id": s.material_id,
+            "name": s.material_name or live_mat.name,
+            "unit": s.unit or live_mat.unit,
+            "price_baseline": round(baseline, 2),
+            "price_live": round(live, 2),
+            "delta": round(delta, 2),
+            "delta_pct": round(delta_pct, 2),
+            "status": "changed" if changed else "same",
+        })
+
+    n_changed = sum(1 for m in materials if m["status"] != "same")
+    return {
+        "baseline_plan_id": active.id,
+        "baseline_version": active.version,
+        "frozen_at": active.frozen_at.isoformat() if active.frozen_at else None,
+        "n_changed": n_changed,
+        "materials": materials,
+    }
+
+
+def _version_rows(project_id: int, db: Session) -> list[dict]:
+    """Timeline de versiones con total_cost y task_count."""
+    plans = db.scalars(
+        select(WorkPlan)
+        .where(WorkPlan.project_id == project_id)
+        .options(selectinload(WorkPlan.tasks))
+        .order_by(WorkPlan.version.desc())
+    ).all()
+    rows: list[dict] = []
+    for p in plans:
+        rows.append({
+            "plan_id": p.id,
+            "version": p.version,
+            "status": p.status,
+            "frozen_at": p.frozen_at.isoformat() if p.frozen_at else None,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "total_cost": round(sum(float(t.cost_planned or 0) for t in p.tasks), 2),
+            "task_count": len(p.tasks),
+        })
+    return rows
+
+
+def project_changes(project_id: int, db: Session, *, budget_direct: float | None = None) -> dict:
+    """Vista unificada de cambios (cómputo + precios vs baseline + versiones).
+
+    `budget_direct` lo inyecta el endpoint si puede calcular el presupuesto IFC
+    (obra gris + paramétricos); None si no hay Plan ready.
+    """
+    try:
+        compute = compute_diff(project_id, db)
+    except ValueError:
+        compute = {
+            "plan_id": None, "plan_status": None, "plan_version": None,
+            "plan_total": 0.0, "compute_total": 0.0, "delta_cost": 0.0,
+            "n_changed": 0, "tasks": [],
+        }
+
+    prices = price_snapshot_diff(project_id, db)
+    versions = _version_rows(project_id, db)
+
+    active_version = next(
+        (v["version"] for v in versions if v["status"] == "active"), None
+    )
+    draft_version = next(
+        (v["version"] for v in versions if v["status"] == "draft"), None
+    )
+    current = get_current_plan(project_id, db)
+    plan_total = (
+        round(sum(float(t.cost_planned or 0) for t in current.tasks), 2)
+        if current else (compute.get("plan_total") if compute.get("plan_id") else None)
+    )
+
+    return {
+        "summary": {
+            "budget_direct": budget_direct,
+            "plan_total": plan_total,
+            "compute_total": compute.get("compute_total"),
+            "n_compute_changed": int(compute.get("n_changed") or 0),
+            "n_price_changed": int(prices.get("n_changed") or 0),
+            "active_version": active_version,
+            "draft_version": draft_version,
+        },
+        "compute": compute,
+        "prices": prices,
+        "versions": versions,
     }

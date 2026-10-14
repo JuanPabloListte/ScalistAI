@@ -86,3 +86,11 @@ body {
   background: rgba(14, 165, 233, 0.22);
   color: inherit;
 }
+
+/* Ocultar barra lateral en modo maximizado de cronograma */
+body.gantt-maximized aside {
+  display: none !important;
+}
+body.gantt-maximized .pl-16 {
+  padding-left: 0 !important;
+}
