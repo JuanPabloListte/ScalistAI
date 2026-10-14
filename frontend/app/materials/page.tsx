@@ -50,7 +50,7 @@ function appliesLabel(value: string): string {
 
 export default function MaterialsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"assemblies" | "materials">("assemblies");
+  const [tab, setTab] = useState<"assemblies" | "materials">("materials");
 
   const [materials, setMaterials] = useState<Material[]>([]);
   const [assemblies, setAssemblies] = useState<Assembly[]>([]);
@@ -182,16 +182,6 @@ export default function MaterialsPage() {
       {/* TABS */}
       <div className="mb-6 flex gap-4 border-b border-slate-200 dark:border-slate-800">
         <button
-          onClick={() => setTab("assemblies")}
-          className={`border-b-2 px-1 pb-2 text-sm font-medium transition ${
-            tab === "assemblies"
-              ? "border-brand-500 text-brand-600 dark:border-brand-400 dark:text-brand-400"
-              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
-          }`}
-        >
-          Sistemas Constructivos
-        </button>
-        <button
           onClick={() => setTab("materials")}
           className={`border-b-2 px-1 pb-2 text-sm font-medium transition ${
             tab === "materials"
@@ -200,6 +190,16 @@ export default function MaterialsPage() {
           }`}
         >
           Insumos Base
+        </button>
+        <button
+          onClick={() => setTab("assemblies")}
+          className={`border-b-2 px-1 pb-2 text-sm font-medium transition ${
+            tab === "assemblies"
+              ? "border-brand-500 text-brand-600 dark:border-brand-400 dark:text-brand-400"
+              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+          }`}
+        >
+          Sistemas Constructivos
         </button>
       </div>
 
