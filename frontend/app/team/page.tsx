@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { api, isUnauthorized, type OrgUser, type User } from "@/lib/api";
 import { AiConfigSection } from "@/components/AiConfigSection";
+import { JobRolesPicker, ManageJobRolesModal } from "@/components/job-roles-picker";
 
 export default function TeamPage() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export default function TeamPage() {
 
   const [creating, setCreating] = useState(false);
   const [showAiConfig, setShowAiConfig] = useState(false);
+  const [showJobRoles, setShowJobRoles] = useState(false);
   const [editing, setEditing] = useState<OrgUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<OrgUser | null>(null);
 
@@ -59,6 +61,16 @@ export default function TeamPage() {
         </div>
         {isAdmin && (
           <button
+            type="button"
+            onClick={() => setShowJobRoles(true)}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            Roles de obra
+          </button>
+        )}
+        {/* PIVOTE: BYOK oculto — reactivar cuando se ofrezca config de IA por org
+        {isAdmin && (
+          <button
             onClick={() => setShowAiConfig(true)}
             className="group flex items-center gap-2 rounded-xl bg-cyan-600/10 px-4 py-2 text-sm font-semibold text-cyan-700 transition-colors hover:bg-cyan-600/20 dark:bg-cyan-500/10 dark:text-cyan-400 dark:hover:bg-cyan-500/20"
           >
@@ -66,6 +78,7 @@ export default function TeamPage() {
             Configurar IA BYOK
           </button>
         )}
+        */}
       </header>
 
       {error && (
@@ -115,6 +128,15 @@ export default function TeamPage() {
                     }`}>
                       {u.role}
                     </span>
+                    {isAdmin &&
+                      (u.job_roles ?? []).map((r) => (
+                        <span
+                          key={r.id}
+                          className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                        >
+                          {r.name}
+                        </span>
+                      ))}
                   </div>
                 </div>
                 {isAdmin && !isSelf && (
@@ -143,6 +165,10 @@ export default function TeamPage() {
           );
         })}
       </ul>
+
+      {isAdmin && showJobRoles && (
+        <ManageJobRolesModal onClose={() => setShowJobRoles(false)} />
+      )}
 
       {isAdmin && showAiConfig && (
         <Modal onCancel={() => setShowAiConfig(false)}>
@@ -208,11 +234,19 @@ function UserModal({
   mode: "create" | "edit";
   user?: OrgUser;
   onCancel: () => void;
-  onSubmit: (payload: { email: string; password?: string; role: "admin" | "member" }) => Promise<void>;
+  onSubmit: (payload: {
+    email: string;
+    password?: string;
+    role: "admin" | "member";
+    job_role_ids: number[];
+  }) => Promise<void>;
 }) {
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "member">((user?.role as "admin" | "member") ?? "member");
+  const [jobRoleIds, setJobRoleIds] = useState<number[]>(
+    () => (user?.job_roles ?? []).map((r) => r.id),
+  );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -221,9 +255,15 @@ function UserModal({
     setSaving(true);
     setErr(null);
     try {
-      const payload: { email: string; password?: string; role: "admin" | "member" } = {
+      const payload: {
+        email: string;
+        password?: string;
+        role: "admin" | "member";
+        job_role_ids: number[];
+      } = {
         email: email.trim(),
         role,
+        job_role_ids: jobRoleIds,
       };
       if (password) payload.password = password;
       await onSubmit(payload);
@@ -273,7 +313,7 @@ function UserModal({
           </label>
 
           <label className="block text-sm">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Rol</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">Permiso</span>
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as "admin" | "member")}
@@ -283,6 +323,12 @@ function UserModal({
               <option value="admin">Admin</option>
             </select>
           </label>
+
+          <JobRolesPicker
+            selectedIds={jobRoleIds}
+            onChange={setJobRoleIds}
+            disabled={saving}
+          />
         </div>
 
         {err && <p className="mt-4 text-sm text-red-600 dark:text-red-400">{err}</p>}
@@ -375,7 +421,7 @@ function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md surface p-6"
+        className="w-full max-w-lg surface p-6 max-h-[90vh] overflow-y-auto"
       >
         {children}
       </div>

@@ -9,6 +9,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.project import Project
+    from app.models.job_role import JobRole
 
 class Organization(Base):
     __tablename__ = "organizations"
@@ -32,3 +33,6 @@ class Organization(Base):
 
     users: Mapped[list["User"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     projects: Mapped[list["Project"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    job_roles: Mapped[list["JobRole"]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan",
+    )

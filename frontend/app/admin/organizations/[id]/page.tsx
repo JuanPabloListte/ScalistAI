@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api, ApiError, isUnauthorized, type OrganizationDetail, type OrgUser } from "@/lib/api";
+import { JobRolesPicker } from "@/components/job-roles-picker";
 
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   active: { label: "Activa", tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
@@ -150,6 +151,14 @@ export default function OrgDetailPage() {
                       Superadmin
                     </span>
                   )}
+                  {(u.job_roles ?? []).map((r) => (
+                    <span
+                      key={r.id}
+                      className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                    >
+                      {r.name}
+                    </span>
+                  ))}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
@@ -179,6 +188,7 @@ export default function OrgDetailPage() {
       {creatingUser && (
         <UserModal
           mode="create"
+          organizationId={org.id}
           onCancel={() => setCreatingUser(false)}
           onSubmit={async (payload) => {
             await api.createOrgUser(org.id, payload);
@@ -191,6 +201,7 @@ export default function OrgDetailPage() {
       {editingUser && (
         <UserModal
           mode="edit"
+          organizationId={org.id}
           user={editingUser}
           onCancel={() => setEditingUser(null)}
           onSubmit={async (payload) => {
@@ -244,17 +255,27 @@ export default function OrgDetailPage() {
 function UserModal({
   mode,
   user,
+  organizationId,
   onCancel,
   onSubmit,
 }: {
   mode: "create" | "edit";
   user?: OrgUser;
+  organizationId: number;
   onCancel: () => void;
-  onSubmit: (payload: { email: string; password: string; role: "admin" | "member" }) => Promise<void>;
+  onSubmit: (payload: {
+    email: string;
+    password: string;
+    role: "admin" | "member";
+    job_role_ids: number[];
+  }) => Promise<void>;
 }) {
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "member">((user?.role as "admin" | "member") ?? "member");
+  const [jobRoleIds, setJobRoleIds] = useState<number[]>(
+    () => (user?.job_roles ?? []).map((r) => r.id),
+  );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -263,7 +284,11 @@ function UserModal({
     setSaving(true);
     setErr(null);
     try {
-      const payload: any = { email: email.trim(), role };
+      const payload: any = {
+        email: email.trim(),
+        role,
+        job_role_ids: jobRoleIds,
+      };
       if (password) payload.password = password;
       if (mode === "create") payload.password = password;
       await onSubmit(payload);
@@ -310,7 +335,7 @@ function UserModal({
           </label>
 
           <label className="block text-sm">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Rol</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">Permiso</span>
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as "admin" | "member")}
@@ -320,6 +345,13 @@ function UserModal({
               <option value="admin">Admin (puede gestionar el equipo)</option>
             </select>
           </label>
+
+          <JobRolesPicker
+            organizationId={organizationId}
+            selectedIds={jobRoleIds}
+            onChange={setJobRoleIds}
+            disabled={saving}
+          />
         </div>
 
         {err && <p className="mt-4 text-sm text-red-600 dark:text-red-400">{err}</p>}
@@ -489,7 +521,7 @@ function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-surface-lg dark:border-slate-700 dark:bg-slate-900"
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-surface-lg dark:border-slate-700 dark:bg-slate-900"
       >
         {children}
       </div>
