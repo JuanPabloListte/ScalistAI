@@ -22,12 +22,14 @@ const NAV_ITEMS: NavItem[] = [
     matchPrefix: "/projects",
     icon: <FolderIcon />,
   },
-  {
-    href: "/materials",
-    label: "Cómputos / Sistemas",
-    matchPrefix: "/materials",
-    icon: <PackageIcon />,
-  },
+  ...(FEATURES.computos
+    ? [{
+        href: "/materials",
+        label: "Cómputos / Sistemas",
+        matchPrefix: "/materials",
+        icon: <PackageIcon />,
+      }]
+    : []),
   ...(FEATURES.priceIntelligence
     ? [{
         href: "/precios",

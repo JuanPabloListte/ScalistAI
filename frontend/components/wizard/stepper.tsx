@@ -1,5 +1,7 @@
 "use client";
 
+import { FEATURES } from "@/lib/features";
+
 // `num` = índice INTERNO del wizard (matchea currentStep / onJump). `display`
 // = número VISIBLE en el círculo (secuencial 1..N). En IFC el paso interno 3
 // ("Páginas") no existe, así que display desacopla la numeración mostrada
@@ -18,13 +20,15 @@ export const WIZARD_STEPS: WizardStep[] = [
 
 // IFC: modelo BIM exacto -> sin "Páginas" (no tiene láminas).
 // PIVOTE IFC (jul-2026): este es el stepper activo del MVP.
+// El paso 5 "Construcción" se oculta con FEATURES.wizardBuildingStep (el IFC
+// ya autocompleta tipo + datos de obra).
 export const IFC_WIZARD_STEPS: WizardStep[] = [
-  { num: 1, label: "Datos", display: 1 },
-  { num: 2, label: "Modelo BIM", display: 2 },
-  { num: 4, label: "Ubicación", display: 3 },
-  { num: 5, label: "Construcción", display: 4 },
-  { num: 6, label: "Revisión", display: 5 },
-];
+  { num: 1, label: "Datos" },
+  { num: 2, label: "Modelo BIM" },
+  { num: 4, label: "Ubicación" },
+  ...(FEATURES.wizardBuildingStep ? [{ num: 5, label: "Construcción" }] : []),
+  { num: 6, label: "Revisión" },
+].map((s, i) => ({ ...s, display: i + 1 }));
 
 export function Stepper({
   currentStep,

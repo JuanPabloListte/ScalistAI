@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, type Plan, type Project } from "@/lib/api";
 import { IfcParseProgress, IfcQualityCard, planErrorMessage } from "@/components/ifc-status";
 
+import { FEATURES } from "@/lib/features";
 import { BUILDING_FIELDS } from "./step-4-building";
 
 export function Step5Review({
@@ -183,6 +184,7 @@ export function Step5Review({
         {project.country && <Row label="País" value={project.country} />}
       </Section>
 
+      {FEATURES.wizardBuildingStep && (
       <Section title="Construcción" onEdit={() => onEditStep(5)}>
         <Row
           label="Tipo"
@@ -203,6 +205,7 @@ export function Step5Review({
             />
           ))}
       </Section>
+      )}
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 

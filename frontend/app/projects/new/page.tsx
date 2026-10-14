@@ -14,6 +14,10 @@ import { Step3Location } from "@/components/wizard/step-3-location";
 import { Step4Building } from "@/components/wizard/step-4-building";
 import { Step5Review } from "@/components/wizard/step-5-review";
 import { api, isUnauthorized, type Project } from "@/lib/api";
+import { FEATURES } from "@/lib/features";
+
+// Paso interno "Construcción" (5) oculto → se salta a Revisión (6).
+const skipHidden = (s: number) => (s === 5 && !FEATURES.wizardBuildingStep ? 6 : s);
 
 function NewProjectWizardInner() {
   const router = useRouter();
@@ -40,7 +44,7 @@ function NewProjectWizardInner() {
         let startStep = editMode ? 4 : Math.min(6, Math.max(1, p.wizard_step + 1));
         // PIVOTE IFC: no hay paso "Páginas" (step 3).
         if (startStep === 3) startStep = 4;
-        setStep(startStep);
+        setStep(skipHidden(startStep));
       })
       .catch((err) => {
         if (isUnauthorized(err)) {
@@ -53,12 +57,16 @@ function NewProjectWizardInner() {
   }, [resumeId, router, editMode]);
 
   const goBack = useCallback(
-    () => setStep((s) => (s === 4 ? 2 : Math.max(1, s - 1))),
+    () => setStep((s) => {
+      if (s === 4) return 2;
+      if (s === 6 && !FEATURES.wizardBuildingStep) return 4;
+      return Math.max(1, s - 1);
+    }),
     [],
   );
   const jumpTo = useCallback((target: number) => {
     // PIVOTE IFC: el step 3 (páginas) no existe — redirigir a ubicación.
-    setStep(target === 3 ? 4 : target);
+    setStep(skipHidden(target === 3 ? 4 : target));
   }, []);
 
   if (loading) {
@@ -131,13 +139,13 @@ function NewProjectWizardInner() {
             project={project}
             onSaved={(p) => {
               setProject(p);
-              setStep(5);
+              setStep(skipHidden(5));
             }}
             onBack={goBack}
           />
         )}
 
-        {step === 5 && project && (
+        {step === 5 && FEATURES.wizardBuildingStep && project && (
           <Step4Building
             project={project}
             onSaved={(p) => {

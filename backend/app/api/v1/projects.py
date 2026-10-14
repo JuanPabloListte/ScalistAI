@@ -180,8 +180,8 @@ def activate_project(
     if project.address is None or project.latitude is None or project.longitude is None:
         raise HTTPException(status_code=400, detail="Falta la ubicacion del proyecto")
 
-    if project.building_type is None or not project.building_info:
-        raise HTTPException(status_code=400, detail="Falta la informacion de construccion")
+    # El paso "Construcción" del wizard está oculto: tipo + datos de obra los
+    # autocompleta el import IFC (_autofill_building) y ya no bloquean activar.
 
     project.status = "active"
     project.wizard_step = 6
