@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { ProfileMenu } from "@/components/profile-menu";
 import { api, type User } from "@/lib/api";
+import { FEATURES } from "@/lib/features";
 
 type NavItem = {
   href: string;
@@ -27,12 +28,14 @@ const NAV_ITEMS: NavItem[] = [
     matchPrefix: "/materials",
     icon: <PackageIcon />,
   },
-  {
-    href: "/precios",
-    label: "Inteligencia de Precios",
-    matchPrefix: "/precios",
-    icon: <ChartIcon />,
-  },
+  ...(FEATURES.priceIntelligence
+    ? [{
+        href: "/precios",
+        label: "Inteligencia de Precios",
+        matchPrefix: "/precios",
+        icon: <ChartIcon />,
+      }]
+    : []),
 ];
 
 export function AppSidebar() {
@@ -64,12 +67,14 @@ export function AppSidebar() {
       matchPrefix: "/admin/organizations",
       icon: <BuildingIcon />,
     });
-    items.push({
-      href: "/admin/model",
-      label: "Modelo ML",
-      matchPrefix: "/admin/model",
-      icon: <BrainIcon />,
-    });
+    if (FEATURES.mlModel) {
+      items.push({
+        href: "/admin/model",
+        label: "Modelo ML",
+        matchPrefix: "/admin/model",
+        icon: <BrainIcon />,
+      });
+    }
   }
 
   return (

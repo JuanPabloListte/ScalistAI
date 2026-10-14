@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { DISABLED_PATHS } from "@/lib/features";
+
 // Rutas del app que no deben ser accesibles en el deploy de landing (Vercel).
 // Para el deploy completo (Docker/VPS) esta lista se ignora porque
 // LANDING_ONLY no está seteado.
@@ -14,9 +16,15 @@ const APP_PATHS = [
 ];
 
 export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Secciones apagadas por feature flag (lib/features.ts) → a Proyectos.
+  if (DISABLED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return NextResponse.redirect(new URL("/projects", request.url));
+  }
+
   if (process.env.LANDING_ONLY !== "true") return NextResponse.next();
 
-  const { pathname } = request.nextUrl;
   const blocked = APP_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + "/"),
   );
