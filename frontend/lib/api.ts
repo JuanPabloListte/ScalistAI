@@ -679,6 +679,36 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+// --- Reglas de cómputo (IFC → productos del presupuesto del proveedor) ---
+export type RuleUnit = "kg" | "m3" | "m2" | "m" | "l" | "u";
+export type RuleMode = "fixed" | "brick_dims" | "rebar";
+export type RuleInput = {
+  measure: string;
+  label: string;
+  keywords: string[];
+  exclude_keywords: string[];
+  unit: RuleUnit;
+  factor: number;
+  mode: RuleMode;
+  waste_pct: number;
+  notes: string | null;
+};
+export type Rule = RuleInput & { id: number; position: number };
+export type RuleSet = {
+  id: number;
+  name: string;
+  description: string | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+  rules: Rule[];
+};
+export type RuleSetsMeta = {
+  measures: { key: string; label: string; unit: string }[];
+  units: RuleUnit[];
+  modes: { key: RuleMode; label: string }[];
+};
+
 // --- Motor de Inteligencia de Costos ---
 export type SimulationResult = {
   id: number;
@@ -1440,6 +1470,19 @@ export const api = {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   },
+
+  // ---- Reglas de cómputo ----
+  getRuleSetsMeta: () => request<RuleSetsMeta>(`/api/v1/rule-sets/meta`),
+  listRuleSets: () => request<RuleSet[]>(`/api/v1/rule-sets`),
+  getRuleSet: (id: number) => request<RuleSet>(`/api/v1/rule-sets/${id}`),
+  createRuleSet: (payload: { name: string; description?: string | null; copy_from_id?: number | null }) =>
+    request<RuleSet>(`/api/v1/rule-sets`, { method: "POST", body: JSON.stringify(payload) }),
+  updateRuleSet: (
+    id: number,
+    payload: { name: string; description: string | null; is_default: boolean; rules: RuleInput[] },
+  ) => request<RuleSet>(`/api/v1/rule-sets/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteRuleSet: (id: number) =>
+    request<void>(`/api/v1/rule-sets/${id}`, { method: "DELETE" }),
 
   // ---- Team (org admin / member) ----
   listTeam: () => request<OrgUser[]>(`/api/v1/team/users`),

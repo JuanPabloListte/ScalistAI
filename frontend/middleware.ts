@@ -11,6 +11,7 @@ const APP_PATHS = [
   "/profile",
   "/projects",
   "/materials",
+  "/reglas",
   "/team",
   "/admin",
 ];
