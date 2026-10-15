@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Plan, type Project } from "@/lib/api";
+import { api, type Plan, type Project, type ProjectBudgetView } from "@/lib/api";
 import { IfcParseProgress, IfcQualityCard, planErrorMessage } from "@/components/ifc-status";
 
 import { FEATURES } from "@/lib/features";
@@ -27,6 +27,11 @@ export function Step5Review({
     "unknown",
   );
   const [bimPlan, setBimPlan] = useState<Plan | null>(null);
+  const [prices, setPrices] = useState<ProjectBudgetView | null>(null);
+
+  useEffect(() => {
+    api.getProjectPriceList(project.id).then(setPrices).catch(() => setPrices(null));
+  }, [project.id]);
 
   // Bloquea "Crear proyecto" mientras el IFC sigue en el worker.
   useEffect(() => {
@@ -169,7 +174,32 @@ export function Step5Review({
         <Row label="Descripción" value={project.description || "—"} />
       </Section>
 
-      {/* Steps: 1 Datos · 2 Plano · 3 Páginas(PDF) · 4 Ubicación · 5 Construcción · 6 Review */}
+      {/* Steps: 1 Datos · 2 Modelo · 3 Precios · 4 Ubicación · 5 Construcción (oculto) · 6 Review */}
+      <Section title="Presupuesto del proveedor" onEdit={() => onEditStep(3)}>
+        {prices?.price_list ? (
+          <>
+            <Row label="Archivo" value={prices.price_list.filename} />
+            {prices.price_list.supplier && <Row label="Proveedor" value={prices.price_list.supplier} />}
+            <Row label="Reglas de cómputo" value={prices.rule_set?.name ?? "—"} />
+            <Row
+              label="Materiales (neto)"
+              value={
+                prices.budget
+                  ? prices.budget.totals.net.toLocaleString("es-AR", {
+                      style: "currency", currency: "ARS", maximumFractionDigits: 0,
+                    })
+                  : "se calcula cuando termine el modelo"
+              }
+            />
+            {prices.budget && prices.budget.counts.sin_precio > 0 && (
+              <Row label="Sin precio" value={`${prices.budget.counts.sin_precio} ítems`} />
+            )}
+          </>
+        ) : (
+          <Row label="Archivo" value="Sin cargar (podés agregarlo después)" />
+        )}
+      </Section>
+
       <Section title="Localización" onEdit={() => onEditStep(4)}>
         <Row label="Dirección" value={project.address || "—"} />
         <Row

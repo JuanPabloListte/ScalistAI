@@ -11,6 +11,7 @@ import { Step2Plan } from "@/components/wizard/step-2-plan";
 // junto con WIZARD_STEPS y la rama step===3 al volver a PDF/DXF/DWG.
 // import { Step3PageRoles } from "@/components/wizard/step-3-page-roles";
 import { Step3Location } from "@/components/wizard/step-3-location";
+import { Step3Prices } from "@/components/wizard/step-3-prices";
 import { Step4Building } from "@/components/wizard/step-4-building";
 import { Step5Review } from "@/components/wizard/step-5-review";
 import { api, isUnauthorized, type Project } from "@/lib/api";
@@ -42,8 +43,7 @@ function NewProjectWizardInner() {
         }
         // edit: arranca en ubicación; wizard normal: siguiente al completado.
         let startStep = editMode ? 4 : Math.min(6, Math.max(1, p.wizard_step + 1));
-        // PIVOTE IFC: no hay paso "Páginas" (step 3).
-        if (startStep === 3) startStep = 4;
+        // IFC: el índice 3 ya no es "Páginas" sino "Precios" (proveedor).
         setStep(skipHidden(startStep));
       })
       .catch((err) => {
@@ -58,15 +58,14 @@ function NewProjectWizardInner() {
 
   const goBack = useCallback(
     () => setStep((s) => {
-      if (s === 4) return 2;
+      if (s === 4) return 3;
       if (s === 6 && !FEATURES.wizardBuildingStep) return 4;
       return Math.max(1, s - 1);
     }),
     [],
   );
   const jumpTo = useCallback((target: number) => {
-    // PIVOTE IFC: el step 3 (páginas) no existe — redirigir a ubicación.
-    setStep(skipHidden(target === 3 ? 4 : target));
+    setStep(skipHidden(target));
   }, []);
 
   if (loading) {
@@ -117,14 +116,23 @@ function NewProjectWizardInner() {
           <Step2Plan
             project={project}
             onUploaded={() => {
-              // PIVOTE IFC: siempre salta "Páginas" → ubicación
-              setStep(4);
+              // IFC: después del modelo va el presupuesto del proveedor.
+              setStep(3);
             }}
             onBack={goBack}
           />
         )}
 
-        {/* PIVOTE IFC: step 3 (páginas PDF / capas DXF) desactivado.
+        {step === 3 && project && (
+          <Step3Prices
+            project={project}
+            onSaved={() => setStep(4)}
+            onBack={goBack}
+          />
+        )}
+
+        {/* PIVOTE IFC: step 3 (páginas PDF / capas DXF) desactivado — el índice
+            lo usa ahora Step3Prices; al volver a PDF/DXF renumerar.
         {step === 3 && project && (
           <Step3PageRoles
             project={project}

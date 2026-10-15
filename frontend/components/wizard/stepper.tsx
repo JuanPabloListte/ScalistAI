@@ -25,6 +25,8 @@ export const WIZARD_STEPS: WizardStep[] = [
 export const IFC_WIZARD_STEPS: WizardStep[] = [
   { num: 1, label: "Datos" },
   { num: 2, label: "Modelo BIM" },
+  // El índice 3 (antes "Páginas" de PDF/DXF) es ahora el presupuesto del proveedor.
+  { num: 3, label: "Precios" },
   { num: 4, label: "Ubicación" },
   ...(FEATURES.wizardBuildingStep ? [{ num: 5, label: "Construcción" }] : []),
   { num: 6, label: "Revisión" },

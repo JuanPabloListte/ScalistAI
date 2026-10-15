@@ -1,4 +1,8 @@
+from pathlib import Path
+from typing import Literal
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -7,6 +11,7 @@ from app.core.deps import get_current_user
 from app.models.rule_set import RuleSet
 from app.models.user import User
 from app.services import budget_rules as br
+from app.services import project_budget as pb
 from app.services.price_list_parse import parse_price_list
 from app.services.project_access import require_project
 
@@ -77,3 +82,102 @@ async def preview_project_budget(
         "measures": measures.as_dict(),
         "budget": budget,
     }
+
+
+# --- Lista del proveedor guardada en el proyecto (paso "Precios" del wizard) ---
+
+class LinePatch(BaseModel):
+    amount: float = Field(gt=0)
+    unit: Literal["kg", "m3", "m2", "m", "l", "u"]
+
+
+class PriceListPatch(BaseModel):
+    rule_set_id: int | None = None
+    iva_mode: Literal["auto", "included", "excluded"] | None = None
+    # Reemplazan el dict completo (item_key → row | null; row → {amount, unit}).
+    overrides: dict[str, int | None] | None = None
+    line_patches: dict[str, LinePatch] | None = None
+
+
+@project_router.get("/{project_id}/price-list")
+def get_project_price_list(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Lista del proveedor del proyecto + presupuesto recalculado en vivo.
+    `price_list` es null si todavía no se subió; `budget` es null mientras el
+    IFC no esté procesado (`model_status`)."""
+    project, _ = require_project(project_id, db, user, financials=True)
+    view = pb.build_view(project, db)
+    db.commit()  # seed del juego por defecto, si hizo falta
+    return view
+
+
+@project_router.post("/{project_id}/price-list")
+async def upload_project_price_list(
+    project_id: int,
+    file: UploadFile = File(...),
+    rule_set_id: int | None = Form(default=None),
+    iva_included: bool | None = Form(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    project, _ = require_project(project_id, db, user, financials=True)
+    data = await file.read()
+    if len(data) > MAX_PRICE_LIST_BYTES:
+        raise HTTPException(status_code=413, detail="El archivo supera los 15 MB.")
+    try:
+        pb.save_price_list(project, file.filename or "presupuesto", data, db,
+                           rule_set_id=rule_set_id, iva_included=iva_included)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return pb.build_view(project, db)
+
+
+@project_router.patch("/{project_id}/price-list")
+def update_project_price_list(
+    project_id: int,
+    payload: PriceListPatch,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    project, _ = require_project(project_id, db, user, financials=True)
+    pl = pb.get_price_list(project.id, db)
+    try:
+        if pl is None:
+            # Sin archivo todavía solo se puede elegir el juego de reglas.
+            if payload.rule_set_id is None:
+                raise HTTPException(status_code=404, detail="El proyecto no tiene presupuesto de proveedor")
+            project.rule_set_id = pb.resolve_rule_set(project, db, payload.rule_set_id).id
+        else:
+            pb.update_price_list(
+                project, pl, db,
+                rule_set_id=payload.rule_set_id,
+                iva_mode=payload.iva_mode,
+                overrides=payload.overrides,
+                line_patches=({k: v.model_dump() for k, v in payload.line_patches.items()}
+                              if payload.line_patches is not None else None),
+            )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    return pb.build_view(project, db)
+
+
+@project_router.delete("/{project_id}/price-list", status_code=204)
+def delete_project_price_list(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    project, _ = require_project(project_id, db, user, financials=True)
+    pl = pb.get_price_list(project.id, db)
+    if pl is not None:
+        path = pl.file_path
+        db.delete(pl)
+        db.commit()
+        Path(path).unlink(missing_ok=True)

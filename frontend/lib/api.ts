@@ -709,6 +709,80 @@ export type RuleSetsMeta = {
   modes: { key: RuleMode; label: string }[];
 };
 
+// --- Presupuesto del proveedor en el proyecto (paso "Precios") ---
+export type Presentation = { amount: number; unit: string; attrs: { diameter_mm?: number; dims?: number[] } };
+export type PriceLine = {
+  row: number;
+  code: string | null;
+  description: string;
+  quantity: number;
+  unit_price: number | null;
+  total: number | null;
+  unit_price_net: number | null;
+  presentation: Presentation;
+  patched?: boolean;
+};
+export type PriceLineRef = Pick<PriceLine, "row" | "code" | "description" | "unit_price_net" | "presentation">;
+export type BudgetItemStatus = "ok" | "sin_precio" | "sin_medida" | "unidad_incompatible" | "regla_invalida";
+export type BudgetItem = {
+  key: string;
+  rule_id: number | null;
+  label: string;
+  measure: string;
+  measure_label: string;
+  measure_unit: string;
+  measure_value: number;
+  unit: string;
+  waste_pct: number;
+  notes: string | null;
+  factor: number;
+  quantity: number | null;
+  line: PriceLineRef | null;
+  per_sale?: number;
+  units_to_buy: number | null;
+  subtotal: number | null;
+  alternatives: PriceLineRef[];
+  status: BudgetItemStatus;
+  manual?: boolean;
+  diameter_mm?: number;
+};
+export type ShoppingRow = PriceLineRef & { units: number; units_to_buy: number; subtotal: number; items: string[] };
+export type RuleBudget = {
+  items: BudgetItem[];
+  shopping_list: ShoppingRow[];
+  unused_lines: PriceLineRef[];
+  totals: { net: number; iva: number; total: number; iva_rate: number };
+  counts: { ok: number; sin_precio: number; sin_medida: number };
+};
+export type ModelMeasures = {
+  measures: { key: string; label: string; unit: string; value: number; count: number }[];
+  rebar_by_diameter: { diameter_mm: number; kg: number }[];
+  warnings: string[];
+};
+export type IvaMode = "auto" | "included" | "excluded";
+export type ProjectPriceList = {
+  source: "pdf" | "excel";
+  filename: string;
+  supplier: string | null;
+  document_date: string | null;
+  number_format: string;
+  iva: { included: boolean; rate: number; method: string };
+  totals: { lines_sum: number; document_total: number | null; check: "ok" | "mismatch" | null };
+  lines: PriceLine[];
+  warnings: string[];
+  iva_mode: IvaMode;
+  overrides: Record<string, number | null>;
+  line_patches: Record<string, { amount: number; unit: string }>;
+  updated_at: string | null;
+};
+export type ProjectBudgetView = {
+  rule_set: { id: number; name: string } | null;
+  model_status: "ready" | "processing" | "error" | "missing";
+  price_list: ProjectPriceList | null;
+  measures: ModelMeasures | null;
+  budget: RuleBudget | null;
+};
+
 // --- Motor de Inteligencia de Costos ---
 export type SimulationResult = {
   id: number;
@@ -1470,6 +1544,34 @@ export const api = {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   },
+
+  // ---- Presupuesto del proveedor del proyecto ----
+  getProjectPriceList: (projectId: number) =>
+    request<ProjectBudgetView>(`/api/v1/projects/${projectId}/price-list`),
+  uploadProjectPriceList: (projectId: number, file: File, ruleSetId?: number | null) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (ruleSetId != null) fd.append("rule_set_id", String(ruleSetId));
+    return request<ProjectBudgetView>(`/api/v1/projects/${projectId}/price-list`, {
+      method: "POST",
+      body: fd,
+    });
+  },
+  patchProjectPriceList: (
+    projectId: number,
+    payload: {
+      rule_set_id?: number;
+      iva_mode?: IvaMode;
+      overrides?: Record<string, number | null>;
+      line_patches?: Record<string, { amount: number; unit: string }>;
+    },
+  ) =>
+    request<ProjectBudgetView>(`/api/v1/projects/${projectId}/price-list`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProjectPriceList: (projectId: number) =>
+    request<void>(`/api/v1/projects/${projectId}/price-list`, { method: "DELETE" }),
 
   // ---- Reglas de cómputo ----
   getRuleSetsMeta: () => request<RuleSetsMeta>(`/api/v1/rule-sets/meta`),
