@@ -8,6 +8,7 @@ from app.api.v1 import (
     integrations,
     materials,
     plans,
+    price_lists,
     projects,
     team,
     organization,
@@ -28,3 +29,4 @@ api_router.include_router(organization.router)
 api_router.include_router(ai_providers.router)
 api_router.include_router(cost_intelligence.router)
 api_router.include_router(work_plans.router)
+api_router.include_router(price_lists.router)
