@@ -1572,6 +1572,22 @@ export const api = {
     }),
   deleteProjectPriceList: (projectId: number) =>
     request<void>(`/api/v1/projects/${projectId}/price-list`, { method: "DELETE" }),
+  downloadProjectBudgetXlsx: async (projectId: number, projectName?: string) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/price-list/export.xlsx`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new ApiError(parseFastApiDetail(await res.text(), res.status), res.status);
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    const safe = (projectName || `proyecto_${projectId}`).replace(/[^\w\-]+/g, "_").slice(0, 60);
+    a.download = `presupuesto_${safe}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 
   // ---- Reglas de cómputo ----
   getRuleSetsMeta: () => request<RuleSetsMeta>(`/api/v1/rule-sets/meta`),

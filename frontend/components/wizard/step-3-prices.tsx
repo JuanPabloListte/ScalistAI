@@ -14,8 +14,7 @@ import {
 const ACCEPT = ".pdf,.xlsx,.xlsm,.csv,application/pdf";
 const MAX_BYTES = 15 * 1024 * 1024;
 
-/** Paso "Precios": presupuesto del proveedor (PDF/Excel) + juego de reglas,
- *  con la revisión del cruce contra el modelo IFC. */
+/** Paso "Precios" del wizard: el panel + navegación. */
 export function Step3Prices({
   project,
   onSaved,
@@ -25,6 +24,61 @@ export function Step3Prices({
   onSaved: () => void;
   onBack: () => void;
 }) {
+  return (
+    <ProjectPricesPanel
+      projectId={project.id}
+      renderFooter={({ hasList, working }) => (
+        <div className="mt-2 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={working}
+            className="text-sm text-slate-500 hover:text-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:text-slate-100"
+          >
+            ← Volver
+          </button>
+          <div className="flex items-center gap-4">
+            {!hasList && (
+              <button
+                type="button"
+                onClick={onSaved}
+                className="text-sm text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+              >
+                Omitir por ahora
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onSaved}
+              disabled={!hasList || working}
+              title={hasList ? "" : "Subí el presupuesto del proveedor para continuar"}
+              className="rounded-md bg-brand px-5 py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              Siguiente →
+            </button>
+          </div>
+        </div>
+      )}
+    />
+  );
+}
+
+/** Presupuesto del proveedor (PDF/Excel) + juego de reglas, con la revisión
+ *  del cruce contra el modelo IFC. Lo usan el wizard y la página Presupuesto. */
+export function ProjectPricesPanel({
+  projectId,
+  showIntro = true,
+  showTotals = true,
+  renderFooter,
+  onViewChange,
+}: {
+  projectId: number;
+  showIntro?: boolean;
+  /** false cuando la página ya muestra los totales (Presupuesto). */
+  showTotals?: boolean;
+  renderFooter?: (s: { hasList: boolean; working: boolean }) => React.ReactNode;
+  onViewChange?: (v: ProjectBudgetView) => void;
+}) {
   const [view, setView] = useState<ProjectBudgetView | null>(null);
   const [ruleSets, setRuleSets] = useState<RuleSet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,37 +87,42 @@ export function Step3Prices({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.getProjectPriceList(project.id), api.listRuleSets()])
+    if (view) onViewChange?.(view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  useEffect(() => {
+    Promise.all([api.getProjectPriceList(projectId), api.listRuleSets()])
       .then(([v, rs]) => {
         setView(v);
         setRuleSets(rs);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [project.id]);
+  }, [projectId]);
 
   // Mientras el IFC se procesa no hay medidas: re-consultar hasta que esté.
   useEffect(() => {
     if (view?.model_status !== "processing") return;
     const t = setTimeout(() => {
-      api.getProjectPriceList(project.id).then(setView).catch(() => {});
+      api.getProjectPriceList(projectId).then(setView).catch(() => {});
     }, 3000);
     return () => clearTimeout(t);
-  }, [project.id, view]);
+  }, [projectId, view]);
 
   const patch = useCallback(
     async (payload: Parameters<typeof api.patchProjectPriceList>[1]) => {
       setBusy(true);
       setError(null);
       try {
-        setView(await api.patchProjectPriceList(project.id, payload));
+        setView(await api.patchProjectPriceList(projectId, payload));
       } catch (e) {
         setError(e instanceof Error ? e.message : "No se pudo guardar");
       } finally {
         setBusy(false);
       }
     },
-    [project.id],
+    [projectId],
   );
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -81,7 +140,7 @@ export function Step3Prices({
     setUploading(true);
     setError(null);
     try {
-      setView(await api.uploadProjectPriceList(project.id, file, view?.rule_set?.id));
+      setView(await api.uploadProjectPriceList(projectId, file, view?.rule_set?.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo leer el archivo");
     } finally {
@@ -97,14 +156,14 @@ export function Step3Prices({
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
+      {showIntro && <div>
         <h2 className="text-lg font-semibold">Presupuesto del proveedor</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
           Subí el presupuesto del corralón en <strong>PDF o Excel</strong>. Lo cruzamos con el modelo
           IFC usando las <a href="/reglas" target="_blank" className="text-brand hover:underline dark:text-sky-400">reglas de cómputo</a>:
           cuánto cemento, arena, ladrillos y hierro lleva la obra, y a qué precio.
         </p>
-      </div>
+      </div>}
 
       <div className="flex flex-wrap items-end gap-4">
         <label className="text-sm">
@@ -187,6 +246,7 @@ export function Step3Prices({
         <PriceReview
           view={view}
           busy={busy}
+          showTotals={showTotals}
           onOverride={(key, row) => {
             const next = { ...overrides };
             if (row === "auto") delete next[key];
@@ -202,36 +262,7 @@ export function Step3Prices({
         />
       )}
 
-      <div className="mt-2 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={uploading}
-          className="text-sm text-slate-500 hover:text-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:text-slate-100"
-        >
-          ← Volver
-        </button>
-        <div className="flex items-center gap-4">
-          {!pl && (
-            <button
-              type="button"
-              onClick={onSaved}
-              className="text-sm text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-            >
-              Omitir por ahora
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onSaved}
-            disabled={!pl || uploading || busy}
-            title={pl ? "" : "Subí el presupuesto del proveedor para continuar"}
-            className="rounded-md bg-brand px-5 py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-          >
-            Siguiente →
-          </button>
-        </div>
-      </div>
+      {renderFooter?.({ hasList: !!pl, working: uploading || busy })}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -181,3 +181,25 @@ def delete_project_price_list(
         db.delete(pl)
         db.commit()
         Path(path).unlink(missing_ok=True)
+
+
+@project_router.get("/{project_id}/price-list/export.xlsx")
+def export_project_budget_xlsx(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    project, _ = require_project(project_id, db, user, financials=True)
+    view = pb.build_view(project, db)
+    if view["budget"] is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Todavía no hay presupuesto: falta el presupuesto del proveedor "
+                   "o el modelo IFC procesado.")
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in project.name)[:60]
+    return Response(
+        content=pb.budget_xlsx(project, view),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="presupuesto_{safe or project.id}.xlsx"'},
+    )

@@ -238,6 +238,52 @@ def test_api_juegos_de_reglas():
         db.close()
 
 
+def test_seed_concurrente_no_duplica():
+    """La UI pide la lista de juegos y el presupuesto a la vez: los dos
+    requests siembran en paralelo y antes se creaban dos predeterminados."""
+    import threading
+    import time
+
+    from app.core.database import SessionLocal
+    from app.models import Organization, RuleSet
+    from app.services.budget_rules import ensure_default_rule_set
+
+    db = SessionLocal()
+    org = Organization(name=f"__test_org__{uuid.uuid4().hex[:8]}")
+    db.add(org); db.commit()
+    org_id = org.id  # no tocar `org` desde los threads (es de otra sesión)
+    barrier = threading.Barrier(4)
+    errors = []
+
+    def seed():
+        s = SessionLocal()
+        try:
+            barrier.wait()
+            ensure_default_rule_set(org_id, s)
+            # Transacción abierta un rato: sin el lock, los demás threads no
+            # ven el seed sin confirmar y siembran otro.
+            time.sleep(0.5)
+            s.commit()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=seed) for _ in range(4)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, errors
+        n = db.query(RuleSet).filter_by(organization_id=org_id).count()
+        assert n == 1, f"se crearon {n} juegos por defecto"
+    finally:
+        db.delete(db.get(Organization, org_id))
+        db.commit()
+        db.close()
+
+
 if __name__ == "__main__":
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

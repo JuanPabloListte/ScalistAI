@@ -37,11 +37,13 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 export function PriceReview({
   view,
   busy,
+  showTotals = true,
   onOverride,
   onPatchLine,
 }: {
   view: ProjectBudgetView;
   busy?: boolean;
+  showTotals?: boolean;
   onOverride: (key: string, row: number | null | "auto") => void;
   onPatchLine: (row: number, patch: { amount: number; unit: string } | null) => void;
 }) {
@@ -65,7 +67,7 @@ export function PriceReview({
 
   return (
     <div className={`flex flex-col gap-5 ${busy ? "pointer-events-none opacity-60" : ""}`}>
-      <div className="grid gap-3 sm:grid-cols-4">
+      {showTotals && <div className="grid gap-3 sm:grid-cols-4">
         <Kpi label="Materiales (neto)" value={money(budget.totals.net)} />
         <Kpi label={`IVA ${Math.round(budget.totals.iva_rate * 100)}%`} value={money(budget.totals.iva)} />
         <Kpi label="Total con IVA" value={money(budget.totals.total)} strong />
@@ -77,7 +79,7 @@ export function PriceReview({
             budget.counts.sin_medida ? `${budget.counts.sin_medida} sin medida` : null,
           ].filter(Boolean).join(" · ") || undefined}
         />
-      </div>
+      </div>}
 
       {groups.map((g) => (
         <section key={g.label}>

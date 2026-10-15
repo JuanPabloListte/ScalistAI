@@ -12,6 +12,9 @@ export const FEATURES = {
   /** Paso "Construcción" del wizard (tipo de obra). Con IFC se autocompleta
    *  desde el modelo, así que por defecto no se le pide al usuario. */
   wizardBuildingStep: process.env.NEXT_PUBLIC_FEATURE_WIZARD_BUILDING === "true",
+  /** Presupuesto viejo (insumos/sistemas + paramétricos + mano de obra). El
+   *  actual sale del presupuesto del proveedor × reglas de cómputo. */
+  legacyBudget: process.env.NEXT_PUBLIC_FEATURE_LEGACY_BUDGET === "true",
 } as const;
 
 /** Prefijos de ruta de las secciones apagadas. */

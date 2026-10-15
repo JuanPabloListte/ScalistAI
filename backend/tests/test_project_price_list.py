@@ -93,6 +93,17 @@ def test_flujo_completo():
         stored = db.query(ProjectPriceList).filter_by(project_id=project.id).one()
         assert Path(stored.file_path).exists()
 
+        # Exportación a Excel: 4 hojas, total neto al pie de la lista de compras.
+        import io
+
+        import openpyxl
+        x = client.get(url + "/export.xlsx")
+        assert x.status_code == 200, x.text
+        wb = openpyxl.load_workbook(io.BytesIO(x.content))
+        assert wb.sheetnames == ["Resumen", "Lista de compras", "Detalle", "Medidas del modelo"]
+        compras = wb["Lista de compras"]
+        assert compras.cell(compras.max_row, 6).value == b["totals"]["net"]
+
         # Override: cemento sin precio a propósito.
         v = client.patch(url, json={"overrides": {cem["key"]: None}}).json()
         cem2 = next(i for i in v["budget"]["items"] if i["key"] == cem["key"])
@@ -121,6 +132,7 @@ def test_flujo_completo():
 
         assert client.delete(url).status_code == 204
         assert client.get(url).json()["price_list"] is None
+        assert client.get(url + "/export.xlsx").status_code == 400
     finally:
         reset()
         _cleanup(db, org.id, project.id)

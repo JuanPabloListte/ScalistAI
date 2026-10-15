@@ -427,9 +427,15 @@ def _default_rules():
 
 
 def ensure_default_rule_set(organization_id: int, db: Session):
-    """Siembra el juego por defecto si la org no tiene ninguno. Idempotente."""
+    """Siembra el juego por defecto si la org no tiene ninguno. Idempotente,
+    también entre requests concurrentes (la UI pide lista + presupuesto a la
+    vez): un lock de transacción por org serializa el chequeo y el insert."""
+    from sqlalchemy import func
+
     from app.models.rule_set import RuleSet
 
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext("rule_sets_seed"), organization_id)))
     existing = db.scalar(select(RuleSet).where(RuleSet.organization_id == organization_id))
     if existing is not None:
         return None
