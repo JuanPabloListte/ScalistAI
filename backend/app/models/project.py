@@ -46,6 +46,9 @@ class Project(Base):
 
     # Fecha de inicio de obra — base del cronograma (Gantt) y la curva de inversión.
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Juego de reglas de cómputo elegido al subir el presupuesto del proveedor.
+    rule_set_id: Mapped[int | None] = mapped_column(
+        ForeignKey("rule_sets.id", ondelete="SET NULL"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
