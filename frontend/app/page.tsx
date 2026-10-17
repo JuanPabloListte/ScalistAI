@@ -5,6 +5,12 @@ import { useState } from "react";
 import { ArrowRight, Zap, Layers, FileSpreadsheet, Lock, Mail, Phone, Upload, ScanLine, Download, Check, ChevronDown, Ruler, DoorOpen, PencilRuler, ChevronLeft, Folder, Package, Users, Building2, Globe, Trash2, Box, CalendarRange, LineChart, Scale } from "lucide-react";
 
 import { QuoteCalculator } from "@/components/landing/quote-calculator";
+import { FEATURES } from "@/lib/features";
+
+// FOCO PRESUPUESTO: lo que describe funciones ocultas en la app se muestra
+// solo si su flag está activo (lib/features.ts), así vuelve solo al
+// reactivarlas. El cotizador tiene su propio flag (landingPricing).
+const WHATSAPP_URL = "https://wa.me/549357161909";
 
 const STEPS = [
   {
@@ -16,16 +22,20 @@ const STEPS = [
   {
     icon: ScanLine,
     title: "Cómputo exacto, no estimado",
-    desc: "La geometría del BIM se convierte en cantidades reales: muros, aberturas, estructura, fundaciones y hasta el acero en kilos. Los rubros que el modelo no trae se marcan como estimados — y vos aprobás.",
+    desc: FEATURES.legacyBudget
+      ? "La geometría del BIM se convierte en cantidades reales: muros, aberturas, estructura, fundaciones y hasta el acero en kilos. Los rubros que el modelo no trae se marcan como estimados — y vos aprobás."
+      : "La geometría del BIM se convierte en cantidades reales: muros, aberturas, estructura, fundaciones y hasta el acero en kilos.",
   },
   {
     icon: Download,
     title: "Presupuesto y cronograma",
-    desc: "Presupuesto de obra llave en mano con precios reales de mercado, cronograma Gantt y curva de inversión. Exportá a Excel en un clic.",
+    desc: FEATURES.priceIntelligence
+      ? "Presupuesto de obra llave en mano con precios reales de mercado, cronograma Gantt y curva de inversión. Exportá a Excel en un clic."
+      : "Presupuesto de obra, cronograma Gantt y curva de inversión. Exportá a Excel en un clic.",
   },
 ];
 
-const FAQS = [
+const FAQS: { q: string; a: string; show?: boolean }[] = [
   {
     q: "¿Qué formatos acepta?",
     // PIVOTE IFC
@@ -33,11 +43,14 @@ const FAQS = [
   },
   {
     q: "¿Qué tan preciso es el cómputo?",
-    a: "Lo que viene del modelo BIM (IFC) es la geometría exacta del archivo — no una estimación. Donde hay que estimar —por ejemplo instalaciones que el modelo no trae— el presupuesto lo marca explícitamente como estimado y podés ajustar los porcentajes. Nunca te mezclamos las dos cosas sin avisarte.",
+    a: FEATURES.legacyBudget
+      ? "Lo que viene del modelo BIM (IFC) es la geometría exacta del archivo — no una estimación. Donde hay que estimar —por ejemplo instalaciones que el modelo no trae— el presupuesto lo marca explícitamente como estimado y podés ajustar los porcentajes. Nunca te mezclamos las dos cosas sin avisarte."
+      : "Lo que viene del modelo BIM (IFC) es la geometría exacta del archivo — no una estimación.",
   },
   {
     q: "¿De dónde salen los precios?",
     a: "De relevamientos reales de proveedores argentinos, con historial de evolución y comparación contra la inflación. Nada de índices inventados: cada material tiene su fuente. Además podés cargar tus propios precios y recetas constructivas, que quedan privados de tu organización.",
+    show: FEATURES.priceIntelligence,
   },
   {
     q: "¿Mis modelos están seguros?",
@@ -49,7 +62,9 @@ const FAQS = [
   },
   {
     q: "¿Cómo empiezo?",
-    a: "Armá tu cotización online acá arriba y escribinos: coordinamos una demo con tu propio modelo IFC para que veas el resultado sobre tu trabajo real, sin compromiso.",
+    a: FEATURES.landingPricing
+      ? "Armá tu cotización online acá arriba y escribinos: coordinamos una demo con tu propio modelo IFC para que veas el resultado sobre tu trabajo real, sin compromiso."
+      : "Escribinos y coordinamos una demo con tu propio modelo IFC para que veas el resultado sobre tu trabajo real, sin compromiso.",
   },
 ];
 
@@ -95,12 +110,18 @@ export default function LandingPage() {
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
           <a href="#how" className="transition hover:text-white">Cómo funciona</a>
           <a href="#features" className="transition hover:text-white">Funciones</a>
-          <a href="#cotizacion" className="transition hover:text-white">Precios</a>
+          {FEATURES.landingPricing && (
+            <a href="#cotizacion" className="transition hover:text-white">Precios</a>
+          )}
           <a href="#faq" className="transition hover:text-white">Preguntas</a>
         </div>
         <div className="flex gap-4">
-          <a href="#cotizacion" className="hidden sm:inline-flex items-center justify-center rounded-full bg-brand-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-500 hover:shadow-lg hover:shadow-brand-500/25">
-            Calcular precio
+          <a
+            href={FEATURES.landingPricing ? "#cotizacion" : WHATSAPP_URL}
+            {...(FEATURES.landingPricing ? {} : { target: "_blank", rel: "noreferrer" })}
+            className="hidden sm:inline-flex items-center justify-center rounded-full bg-brand-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-500 hover:shadow-lg hover:shadow-brand-500/25"
+          >
+            {FEATURES.landingPricing ? "Calcular precio" : "Pedí una demo"}
           </a>
         </div>
       </nav>
@@ -111,7 +132,7 @@ export default function LandingPage() {
         <div className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold text-brand-300 mb-8 animate-fade-in">
           <Zap className="h-3 w-3" />
           {/* PIVOTE IFC — original: PDF · DXF · DWG · BIM (IFC) */}
-          <span>BIM (IFC) — con precios reales de mercado</span>
+          <span>{FEATURES.priceIntelligence ? "BIM (IFC) — con precios reales de mercado" : "BIM (IFC) — cómputo exacto del modelo"}</span>
         </div>
 
         <h1 className="max-w-4xl text-5xl font-extrabold tracking-tight text-white sm:text-6xl md:text-7xl lg:text-8xl animate-slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
@@ -120,12 +141,18 @@ export default function LandingPage() {
 
         <p className="mt-8 max-w-2xl text-lg text-slate-400 sm:text-xl animate-slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
           {/* PIVOTE IFC */}
-          ScalistAI computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto llave en mano con precios reales, cronograma y curva de inversión.
+          {FEATURES.priceIntelligence
+            ? "ScalistAI computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto llave en mano con precios reales, cronograma y curva de inversión."
+            : "ScalistAI computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto, el cronograma y la curva de inversión."}
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center animate-slide-up" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
-          <a href="#cotizacion" className="group relative inline-flex items-center justify-center overflow-hidden rounded-full bg-brand-600 px-8 py-3.5 text-base font-semibold text-white transition hover:bg-brand-500 hover:shadow-[0_0_40px_rgba(14,165,233,0.4)]">
-            <span>Calcular mi precio</span>
+          <a
+            href={FEATURES.landingPricing ? "#cotizacion" : WHATSAPP_URL}
+            {...(FEATURES.landingPricing ? {} : { target: "_blank", rel: "noreferrer" })}
+            className="group relative inline-flex items-center justify-center overflow-hidden rounded-full bg-brand-600 px-8 py-3.5 text-base font-semibold text-white transition hover:bg-brand-500 hover:shadow-[0_0_40px_rgba(14,165,233,0.4)]"
+          >
+            <span>{FEATURES.landingPricing ? "Calcular mi precio" : "Pedí una demo"}</span>
             <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
           </a>
           <a href="#how" className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-800/50 backdrop-blur-sm px-8 py-3.5 text-base font-semibold text-slate-200 transition hover:bg-slate-800 hover:border-slate-600">
@@ -346,8 +373,9 @@ export default function LandingPage() {
           ))}
         </div>
 
-        {/* Control manual / human-in-the-loop */}
-        <div className="mt-16 flex flex-col items-center gap-5 rounded-3xl border border-brand-500/20 bg-brand-500/[0.04] p-8 text-center sm:flex-row sm:gap-6 sm:p-10 sm:text-left">
+        {/* Control manual / human-in-the-loop — describe la edición de
+            detecciones IA del visor: se muestra junto con el Modelo ML. */}
+        {FEATURES.mlModel && <div className="mt-16 flex flex-col items-center gap-5 rounded-3xl border border-brand-500/20 bg-brand-500/[0.04] p-8 text-center sm:flex-row sm:gap-6 sm:p-10 sm:text-left">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-brand-500/30 bg-slate-900">
             <PencilRuler className="h-7 w-7 text-brand-400" />
           </div>
@@ -357,7 +385,7 @@ export default function LandingPage() {
               La IA hace el trabajo pesado, pero ningún resultado se exporta sin tu visto bueno. Si algo no quedó perfecto, podés ajustar cada muro, abertura o área a mano antes de generar el cómputo. Cero cajas negras: el control siempre es tuyo.
             </p>
           </div>
-        </div>
+        </div>}
       </section>
 
       {/* Feature Grids */}
@@ -369,7 +397,7 @@ export default function LandingPage() {
             <p className="mt-4 text-slate-400">El impacto real en tu estudio va más allá de automatizar tareas.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className={`grid grid-cols-1 gap-8 ${FEATURES.priceIntelligence && FEATURES.legacyBudget ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
             <div className="group rounded-3xl border border-slate-800 bg-slate-900 p-8 transition hover:border-brand-500/50 hover:bg-slate-800/50">
               <div className="h-12 w-12 rounded-xl bg-brand-500/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                 <Box className="h-6 w-6 text-brand-400" />
@@ -380,7 +408,7 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="group rounded-3xl border border-slate-800 bg-slate-900 p-8 transition hover:border-sky-500/50 hover:bg-slate-800/50">
+            {FEATURES.legacyBudget && <div className="group rounded-3xl border border-slate-800 bg-slate-900 p-8 transition hover:border-sky-500/50 hover:bg-slate-800/50">
               <div className="h-12 w-12 rounded-xl bg-sky-500/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                 <Scale className="h-6 w-6 text-sky-400" />
               </div>
@@ -388,9 +416,9 @@ export default function LandingPage() {
               <p className="text-slate-400 text-sm leading-relaxed">
                 El desglose separa lo que se computó <span className="text-slate-200 font-medium">exacto</span> del modelo BIM de lo que se <span className="text-slate-200 font-medium">estimó</span> — y te lo dice. Sin cajas negras ni doble conteo: sabés exactamente qué estás presentando.
               </p>
-            </div>
+            </div>}
 
-            <div className="group rounded-3xl border border-slate-800 bg-slate-900 p-8 transition hover:border-indigo-500/50 hover:bg-slate-800/50">
+            {FEATURES.priceIntelligence && <div className="group rounded-3xl border border-slate-800 bg-slate-900 p-8 transition hover:border-indigo-500/50 hover:bg-slate-800/50">
               <div className="h-12 w-12 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                 <LineChart className="h-6 w-6 text-indigo-400" />
               </div>
@@ -398,7 +426,7 @@ export default function LandingPage() {
               <p className="text-slate-400 text-sm leading-relaxed">
                 Relevamiento de precios de proveedores argentinos con historial y comparación contra la inflación. Cada material tiene fuente y fecha. Y podés cargar tus propios precios y recetas.
               </p>
-            </div>
+            </div>}
 
             <div className="group rounded-3xl border border-slate-800 bg-slate-900 p-8 transition hover:border-brand-500/50 hover:bg-slate-800/50">
               <div className="h-12 w-12 rounded-xl bg-brand-500/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
@@ -426,15 +454,17 @@ export default function LandingPage() {
               </div>
               <h3 className="text-xl font-semibold text-white mb-3">Pensado para equipos</h3>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Multi-organización con datos aislados, control de roles y permisos, y catálogos de precios privados. Cada estudio con sus datos y su control.
+                {FEATURES.computos
+                  ? "Multi-organización con datos aislados, control de roles y permisos, y catálogos de precios privados. Cada estudio con sus datos y su control."
+                  : "Multi-organización con datos aislados y control de roles y permisos. Cada estudio con sus datos y su control."}
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Cotización */}
-      <section id="cotizacion" className="relative z-10 mx-auto max-w-7xl scroll-mt-24 px-6 py-24 md:px-12 lg:px-24">
+      {/* Cotización — oculto con FEATURES.landingPricing */}
+      {FEATURES.landingPricing && <section id="cotizacion" className="relative z-10 mx-auto max-w-7xl scroll-mt-24 px-6 py-24 md:px-12 lg:px-24">
         <div className="text-center mb-14">
           <span className="text-sm font-semibold uppercase tracking-wider text-brand-400">Precios</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -446,7 +476,7 @@ export default function LandingPage() {
           </p>
         </div>
         <QuoteCalculator />
-      </section>
+      </section>}
 
       {/* FAQ */}
       <section id="faq" className="relative z-10 mx-auto max-w-3xl px-6 py-24 md:px-12">
@@ -455,7 +485,7 @@ export default function LandingPage() {
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">¿Tenés dudas? Las despejamos.</h2>
         </div>
         <div className="space-y-4">
-          {FAQS.map((f) => (
+          {FAQS.filter((f) => f.show !== false).map((f) => (
             <FaqItem key={f.q} q={f.q} a={f.a} />
           ))}
         </div>
@@ -471,12 +501,20 @@ export default function LandingPage() {
             Traé un modelo IFC real de tu estudio y armamos la demo sobre tu propio proyecto. Vas a ver el presupuesto completo antes de que termine la reunión.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <a href="#cotizacion" className="inline-flex items-center justify-center rounded-full bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:bg-slate-200 hover:scale-105">
-              Calcular mi precio
-            </a>
-            <a href="https://wa.me/549357161909" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-full border border-slate-600 px-8 py-4 text-base font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white">
-              Hablemos por WhatsApp
-            </a>
+            {FEATURES.landingPricing ? (
+              <>
+                <a href="#cotizacion" className="inline-flex items-center justify-center rounded-full bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:bg-slate-200 hover:scale-105">
+                  Calcular mi precio
+                </a>
+                <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-full border border-slate-600 px-8 py-4 text-base font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white">
+                  Hablemos por WhatsApp
+                </a>
+              </>
+            ) : (
+              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-full bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:bg-slate-200 hover:scale-105">
+                Hablemos por WhatsApp
+              </a>
+            )}
           </div>
         </div>
       </section>
@@ -495,8 +533,8 @@ export default function LandingPage() {
               </div>
               <p className="text-slate-400 max-w-sm">
                 {/* PIVOTE IFC */}
-                Cómputo y presupuesto de obra automático desde modelos BIM (IFC),
-                con precios reales de mercado. Para estudios y constructoras de Argentina.
+                Cómputo y presupuesto de obra automático desde modelos BIM (IFC)
+                {FEATURES.priceIntelligence ? ", con precios reales de mercado" : ""}. Para estudios y constructoras de Argentina.
               </p>
             </div>
 

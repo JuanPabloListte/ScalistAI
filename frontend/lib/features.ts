@@ -15,6 +15,8 @@ export const FEATURES = {
   /** Presupuesto viejo (insumos/sistemas + paramétricos + mano de obra). El
    *  actual sale del presupuesto del proveedor × reglas de cómputo. */
   legacyBudget: process.env.NEXT_PUBLIC_FEATURE_LEGACY_BUDGET === "true",
+  /** Landing: cotizador de planes (sección Precios y "Calcular mi precio"). */
+  landingPricing: process.env.NEXT_PUBLIC_FEATURE_LANDING_PRICING === "true",
 } as const;
 
 /** Prefijos de ruta de las secciones apagadas. */
