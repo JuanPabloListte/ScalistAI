@@ -1,5 +1,4 @@
 import logging
-import shutil
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,18 +15,6 @@ async def _lifespan(app: FastAPI):
     from app.core.auth_security import validate_jwt_secret_on_startup
 
     validate_jwt_secret_on_startup()
-
-    # Health-check de dependencias externas: avisar a ops ANTES de que un
-    # usuario pegue contra el error. Ninguna es fatal (el resto de la app anda).
-    for binary, feature in [
-        ("ODAFileConverter", "import de archivos DWG"),
-        ("xvfb-run", "conversión DWG headless"),
-    ]:
-        if not shutil.which(binary):
-            logger.warning(
-                "startup: %s no está instalado — %s deshabilitado "
-                "(los DXF/PDF/IFC no se ven afectados)", binary, feature,
-            )
     yield
 
 
