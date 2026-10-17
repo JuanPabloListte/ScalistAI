@@ -79,3 +79,9 @@ backend/backend/
 
 # Notas de progreso de agentes (scratch, no forma parte del código)
 /memory/
+# Config local de Claude Code (permisos de la máquina de cada dev)
+.claude/settings.local.json
+
+# Scripts sueltos de debug contra la DB local
+backend/query_db.py
+backend/count_openings.py
