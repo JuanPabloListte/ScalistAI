@@ -183,6 +183,10 @@ def export_project_budget_xlsx(
     user: User = Depends(get_current_user),
 ) -> Response:
     project, _ = require_project(project_id, db, user, financials=True)
+    if project.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="El Excel se descarga cuando el proyecto está creado (terminá el asistente).")
     view = pb.build_view(project, db)
     if view["budget"] is None:
         raise HTTPException(

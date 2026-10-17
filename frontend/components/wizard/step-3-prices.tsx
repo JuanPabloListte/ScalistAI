@@ -27,6 +27,7 @@ export function Step3Prices({
   return (
     <ProjectPricesPanel
       projectId={project.id}
+      showShoppingList={false}
       renderFooter={({ hasList, working }) => (
         <div className="mt-2 flex items-center justify-between">
           <button
@@ -69,6 +70,7 @@ export function ProjectPricesPanel({
   projectId,
   showIntro = true,
   showTotals = true,
+  showShoppingList = true,
   renderFooter,
   onViewChange,
 }: {
@@ -76,6 +78,7 @@ export function ProjectPricesPanel({
   showIntro?: boolean;
   /** false cuando la página ya muestra los totales (Presupuesto). */
   showTotals?: boolean;
+  showShoppingList?: boolean;
   renderFooter?: (s: { hasList: boolean; working: boolean }) => React.ReactNode;
   onViewChange?: (v: ProjectBudgetView) => void;
 }) {
@@ -247,6 +250,7 @@ export function ProjectPricesPanel({
           view={view}
           busy={busy}
           showTotals={showTotals}
+          showShoppingList={showShoppingList}
           onOverride={(key, row) => {
             const next = { ...overrides };
             if (row === "auto") delete next[key];

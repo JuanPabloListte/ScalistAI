@@ -58,8 +58,12 @@ function SupplierBudget() {
         <button
           type="button"
           onClick={() => void download()}
-          disabled={!budget || downloading}
-          title={budget ? "" : "Subí el presupuesto del proveedor para poder exportar"}
+          disabled={!budget || downloading || project?.status !== "active"}
+          title={
+            project && project.status !== "active"
+              ? "El Excel se descarga cuando el proyecto está creado"
+              : budget ? "" : "Subí el presupuesto del proveedor para poder exportar"
+          }
           className="flex items-center gap-1.5 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>

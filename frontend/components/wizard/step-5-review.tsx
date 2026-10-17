@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api, type Plan, type Project, type ProjectBudgetView } from "@/lib/api";
 import { IfcParseProgress, IfcQualityCard, planErrorMessage } from "@/components/ifc-status";
+import { ShoppingList } from "@/components/price-review";
 
 import { FEATURES } from "@/lib/features";
 import { BUILDING_FIELDS } from "./step-4-building";
@@ -199,6 +200,25 @@ export function Step5Review({
           <Row label="Archivo" value="Sin cargar (podés agregarlo después)" />
         )}
       </Section>
+
+      {/* Cierre: qué hay que comprar y cuánto sale, antes de crear el proyecto. */}
+      {prices?.budget && (
+        <div className="rounded-md border border-slate-200 p-4 dark:border-slate-700">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100">Lista de compras</h3>
+            {prices.budget.counts.sin_precio > 0 && (
+              <button
+                type="button"
+                onClick={() => onEditStep(3)}
+                className="text-xs text-amber-600 hover:underline dark:text-amber-400"
+              >
+                {prices.budget.counts.sin_precio} ítems sin precio · revisar
+              </button>
+            )}
+          </div>
+          <ShoppingList budget={prices.budget} />
+        </div>
+      )}
 
       <Section title="Localización" onEdit={() => onEditStep(4)}>
         <Row label="Dirección" value={project.address || "—"} />

@@ -97,6 +97,11 @@ def test_flujo_completo():
         import io
 
         import openpyxl
+        # Proyecto en borrador (wizard sin terminar): no hay Excel.
+        assert client.get(url + "/export.xlsx").status_code == 400
+        db.expire_all()
+        db.get(Project, project.id).status = "active"
+        db.commit()
         x = client.get(url + "/export.xlsx")
         assert x.status_code == 200, x.text
         wb = openpyxl.load_workbook(io.BytesIO(x.content))

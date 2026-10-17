@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import type {
   BudgetItem,
+  RuleBudget,
   PriceLine,
   ProjectBudgetView,
 } from "@/lib/api";
@@ -38,12 +39,15 @@ export function PriceReview({
   view,
   busy,
   showTotals = true,
+  showShoppingList = true,
   onOverride,
   onPatchLine,
 }: {
   view: ProjectBudgetView;
   busy?: boolean;
   showTotals?: boolean;
+  /** false en el wizard: la lista de compras se muestra en Revisión. */
+  showShoppingList?: boolean;
   onOverride: (key: string, row: number | null | "auto") => void;
   onPatchLine: (row: number, patch: { amount: number; unit: string } | null) => void;
 }) {
@@ -105,31 +109,14 @@ export function PriceReview({
         </section>
       ))}
 
-      <section>
-        <h3 className="mb-1.5 text-sm font-semibold text-slate-800 dark:text-slate-200">
-          Lista de compras <span className="font-normal text-slate-400">· unidades enteras por renglón</span>
-        </h3>
-        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-          <table className="w-full min-w-[600px] text-sm">
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {budget.shopping_list.map((s) => (
-                <tr key={s.row}>
-                  <td className="px-3 py-2">
-                    {s.description}
-                    <span className="ml-2 text-xs text-slate-400">{presentationLabel(s.presentation)}</span>
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{s.units_to_buy}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{money(s.unit_price_net)}</td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums">{money(s.subtotal)}</td>
-                </tr>
-              ))}
-              {budget.shopping_list.length === 0 && (
-                <tr><td className="px-3 py-3 text-xs text-slate-400">Ningún ítem tiene precio todavía.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {showShoppingList && (
+        <section>
+          <h3 className="mb-1.5 text-sm font-semibold text-slate-800 dark:text-slate-200">
+            Lista de compras <span className="font-normal text-slate-400">· unidades enteras por renglón</span>
+          </h3>
+          <ShoppingList budget={budget} />
+        </section>
+      )}
 
       <Collapsible
         open={showLines}
@@ -176,6 +163,56 @@ export function PriceReview({
           )}
         </Collapsible>
       )}
+    </div>
+  );
+}
+
+/** Unidades enteras a comprar por renglón del proveedor, con total neto. */
+export function ShoppingList({ budget }: { budget: RuleBudget }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+      <table className="w-full min-w-[600px] text-sm">
+        <thead className="bg-slate-50 text-left text-xs text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+          <tr>
+            <th className="px-3 py-2 font-medium">Producto del proveedor</th>
+            <th className="px-3 py-2 text-right font-medium">Unidades</th>
+            <th className="px-3 py-2 text-right font-medium">Precio neto</th>
+            <th className="px-3 py-2 text-right font-medium">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {budget.shopping_list.map((s) => (
+            <tr key={s.row}>
+              <td className="px-3 py-2">
+                {s.description}
+                <span className="ml-2 text-xs text-slate-400">{presentationLabel(s.presentation)}</span>
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">{s.units_to_buy}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-slate-500">{money(s.unit_price_net)}</td>
+              <td className="px-3 py-2 text-right font-medium tabular-nums">{money(s.subtotal)}</td>
+            </tr>
+          ))}
+          {budget.shopping_list.length === 0 && (
+            <tr><td colSpan={4} className="px-3 py-3 text-xs text-slate-400">Ningún ítem tiene precio todavía.</td></tr>
+          )}
+        </tbody>
+        {budget.shopping_list.length > 0 && (
+          <tfoot className="border-t border-slate-200 text-sm dark:border-slate-700">
+            <tr>
+              <td colSpan={3} className="px-3 py-1.5 text-right text-slate-500">Neto</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money(budget.totals.net)}</td>
+            </tr>
+            <tr>
+              <td colSpan={3} className="px-3 py-1.5 text-right text-slate-500">IVA {Math.round(budget.totals.iva_rate * 100)}%</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money(budget.totals.iva)}</td>
+            </tr>
+            <tr>
+              <td colSpan={3} className="px-3 py-2 text-right font-semibold">Total con IVA</td>
+              <td className="px-3 py-2 text-right font-bold tabular-nums text-brand dark:text-sky-400">{money(budget.totals.total)}</td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
     </div>
   );
 }
