@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.uploads import read_upload
 from app.models import Project, User
 from app.models.work_plan import WorkPlan, WorkTask
 from app.services import project_access as pa
@@ -511,6 +512,10 @@ def get_work_report(
     return _pdf_response(pdf, project.name + suffix, inline=False)
 
 
+# Una factura PDF con texto pesa KB; 20 MB cubre escaneos y anexos.
+MAX_INVOICE_BYTES = 20 * 1024 * 1024
+
+
 @router.post("/projects/{project_id}/invoices/parse")
 async def parse_invoice_pdf(
     project_id: int,
@@ -525,7 +530,7 @@ async def parse_invoice_pdf(
     name = (file.filename or "").lower()
     if not name.endswith(".pdf") and file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Subí la factura en PDF (con texto).")
-    data = await file.read()
+    data = await read_upload(file, MAX_INVOICE_BYTES)
     if not data:
         raise HTTPException(status_code=400, detail="El archivo está vacío.")
     from app.services.invoice_parse import parse_invoice

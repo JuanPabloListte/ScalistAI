@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.uploads import read_upload
 from app.models.user import User
 from app.services import budget_rules as br
 from app.services import project_budget as pb
@@ -20,9 +21,7 @@ MAX_PRICE_LIST_BYTES = 15 * 1024 * 1024
 
 
 async def _read_and_parse(file: UploadFile, iva_included: bool | None) -> dict:
-    data = await file.read()
-    if len(data) > MAX_PRICE_LIST_BYTES:
-        raise HTTPException(status_code=413, detail="El archivo supera los 15 MB.")
+    data = await read_upload(file, MAX_PRICE_LIST_BYTES)
     try:
         return parse_price_list(file.filename or "", data, iva_included=iva_included)
     except ValueError as exc:
@@ -117,9 +116,7 @@ async def upload_project_price_list(
     user: User = Depends(get_current_user),
 ) -> dict:
     project, _ = require_project(project_id, db, user, financials=True)
-    data = await file.read()
-    if len(data) > MAX_PRICE_LIST_BYTES:
-        raise HTTPException(status_code=413, detail="El archivo supera los 15 MB.")
+    data = await read_upload(file, MAX_PRICE_LIST_BYTES)
     try:
         pb.save_price_list(project, file.filename or "presupuesto", data, db,
                            rule_set_id=rule_set_id, iva_included=iva_included)

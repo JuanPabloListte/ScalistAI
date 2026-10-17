@@ -704,9 +704,12 @@ def _autofill_building(project, meta: dict) -> None:
         project.building_info = info
 
 
-def build_ifc_plan(project_id: int, contents: bytes, filename: str, db) -> "object":
+def build_ifc_plan(project_id: int, contents: "bytes | Path", filename: str, db) -> "object":
     """Guarda el .ifc y crea el Plan (sin páginas, status 'processing'). El parseo
-    a elementos lo hace `process_ifc` en background (puede tardar en modelos grandes)."""
+    a elementos lo hace `process_ifc` en background (puede tardar en modelos grandes).
+
+    `contents` puede ser el archivo ya volcado a disco (upload por bloques): se
+    mueve al storage sin pasar por memoria."""
     import uuid
     from pathlib import Path
 
@@ -716,7 +719,10 @@ def build_ifc_plan(project_id: int, contents: bytes, filename: str, db) -> "obje
     plan_storage = Path(settings.STORAGE_DIR) / "plans" / str(project_id)
     plan_storage.mkdir(parents=True, exist_ok=True)
     ifc_path = plan_storage / f"{uuid.uuid4().hex}.ifc"
-    ifc_path.write_bytes(contents)
+    if isinstance(contents, Path):
+        contents.replace(ifc_path)
+    else:
+        ifc_path.write_bytes(contents)
 
     quality = assess_ifc_quality(str(ifc_path))
 

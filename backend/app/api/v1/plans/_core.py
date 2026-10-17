@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.uploads import save_upload
 from app.models import DetectedElement, Plan, Project, User
 from app.schemas.plan import PlanRead
 from app.services.auto_scale import detect_scales
@@ -47,20 +48,21 @@ async def upload_plan(
 ) -> Plan:
     project = pa.require_project(project_id, db, user, edit_plan=True)[0]
 
-    contents = await file.read()
     fname_lower = (file.filename or "").lower()
     is_ifc = fname_lower.endswith(".ifc")
-    max_bytes = MAX_IFC_BYTES if is_ifc else MAX_PDF_BYTES
-    if len(contents) > max_bytes:
-        mb = max_bytes // (1024 * 1024)
-        raise HTTPException(status_code=413, detail=f"Archivo demasiado grande (máx {mb} MB)")
 
     # IFC (BIM): modelo exacto, sin páginas ni raster. Salta el visor -> presupuesto.
     if is_ifc:
         from app.core.jobs import enqueue
         from app.services.ifc_import import build_ifc_plan, process_ifc
 
-        plan = build_ifc_plan(project_id, contents, file.filename or "modelo.ifc", db)
+        # Hasta 500 MB: se vuelca a disco por bloques, nunca entero en memoria.
+        tmp = Path(settings.STORAGE_DIR) / "plans" / str(project_id) / f"{uuid.uuid4().hex}.part"
+        await save_upload(file, tmp, MAX_IFC_BYTES)
+        try:
+            plan = build_ifc_plan(project_id, tmp, file.filename or "modelo.ifc", db)
+        finally:
+            tmp.unlink(missing_ok=True)
         if project.wizard_step < 2:
             project.wizard_step = 2
         db.commit()
@@ -81,6 +83,8 @@ async def upload_plan(
         ),
     )
 
+    # contents = await read_upload(file, MAX_PDF_BYTES)
+    #
     # # DXF / DWG: se plotea a PDF vectorial; los elementos salen del mapeo de capas.
     # if fname_lower.endswith(".dxf") or fname_lower.endswith(".dwg"):
     #     from app.services.dxf_import import build_dxf_plan
