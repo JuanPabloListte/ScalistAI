@@ -187,15 +187,6 @@ export type ElementGeometry = {
   subtype?: string;
 };
 
-export type MaterialYield = {
-  id: number;
-  material_id: number;
-  applies_to: string;
-  consumption: number;
-  waste_factor: number;
-  unit_price: number;
-};
-
 export type Material = {
   id: number;
   name: string;
@@ -787,15 +778,6 @@ export type ProjectBudgetView = {
 };
 
 // --- Motor de Inteligencia de Costos ---
-export type SimulationResult = {
-  id: number;
-  plan_id: number;
-  name: string;
-  status: string;
-  created_at: string;
-  totals: { materials: number; labor_cost: number; labor_hours: number; duration_days: number };
-  lines: { material_id: number; material_name: string; quantity: number; unit: string; unit_cost: number; total: number }[];
-};
 export type ForecastResult = {
   cost_today: number;
   projected_cost: number;
@@ -926,24 +908,6 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ allow_training_data: allow }),
     }),
-  generateSynthetic: (planId: number, page: number, numVariations: number = 50) =>
-    request<{
-      plan_id: number;
-      page: number;
-      variations_generated: number;
-      sample: Array<{
-        variation_id: string;
-        rotation: number;
-        flip: string | null;
-        style_ops: string[];
-        image_size: number;
-        image_path: string;
-        mask_path: string;
-      }>;
-    }>(`/api/v1/plans/${planId}/generate-synthetic`, {
-      method: "POST",
-      body: JSON.stringify({ page, num_variations: numVariations }),
-    }),
   regenerateAllSynthetic: () =>
     request<{
       projects_processed: number;
@@ -977,16 +941,6 @@ export const api = {
     request<Plan[]>(`/api/v1/projects/${projectId}/plans`),
 
   // Motor de Inteligencia de Costos
-  runSimulation: (planId: number, name?: string) =>
-    request<SimulationResult>("/api/v1/simulations", {
-      method: "POST",
-      body: JSON.stringify({ plan_id: planId, name }),
-    }),
-  forecastCost: (simulationId: number, horizonMonths: number) =>
-    request<ForecastResult>("/api/v1/forecast", {
-      method: "POST",
-      body: JSON.stringify({ simulation_id: simulationId, horizon_months: horizonMonths }),
-    }),
   /** Proyecta un monto (p.ej. direct_cost del budget-summary) con IPC. */
   forecastCostByAmount: (amount: number, horizonMonths: number) =>
     request<ForecastResult>("/api/v1/forecast", {
@@ -1034,22 +988,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ rubros }),
     }),
-  downloadSimulationXlsx: async (simulationId: number) => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/export/${simulationId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`No se pudo exportar (HTTP ${res.status})`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `presupuesto_${simulationId}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  },
 
   uploadPlan: (projectId: number, file: File) => {
     const formData = new FormData();
@@ -1092,12 +1030,6 @@ export const api = {
       body: JSON.stringify({ p1, p2, real_distance_m, page }),
     }),
 
-  autoDetectScales: (planId: number) =>
-    request<Plan>(`/api/v1/plans/${planId}/auto-detect-scale`, {
-      method: "POST",
-      body: "{}",
-    }),
-
   previewAutoDetectScales: (planId: number) =>
     request<Record<string, number>>(`/api/v1/plans/${planId}/preview-auto-detect`),
 
@@ -1123,7 +1055,6 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-
 
   fetchPlanRaster: async (planId: number, page = 1): Promise<Blob> => {
     const token = getToken();
@@ -1308,15 +1239,6 @@ export const api = {
       },
     ),
 
-  bulkRemoveAssembly: (planId: number, elementIds: number[], assemblyId: number) =>
-    request<DetectedElement[]>(
-      `/api/v1/plans/${planId}/elements/bulk/assemblies/remove`,
-      {
-        method: "POST",
-        body: JSON.stringify({ element_ids: elementIds, assembly_id: assemblyId }),
-      },
-    ),
-
   // ----- Cómputo agregado -----
   getMaterialsSummary: (planId: number, page?: number) => {
     const qs = page !== undefined ? `?page=${page}` : "";
@@ -1395,15 +1317,6 @@ export const api = {
     if (opts?.overlapPct) q.set("overlap_pct", String(opts.overlapPct));
     const qs = q.toString() ? `?${q.toString()}` : "";
     return request<ScheduleResponse>(`/api/v1/projects/${projectId}/schedule${qs}`);
-  },
-
-  getCashflow: (projectId: number, opts?: { startDate?: string; crews?: number; overlapPct?: number }) => {
-    const q = new URLSearchParams();
-    if (opts?.startDate) q.set("start_date", opts.startDate);
-    if (opts?.crews) q.set("crews", String(opts.crews));
-    if (opts?.overlapPct) q.set("overlap_pct", String(opts.overlapPct));
-    const qs = q.toString() ? `?${q.toString()}` : "";
-    return request<CashflowPoint[]>(`/api/v1/projects/${projectId}/cashflow${qs}`);
   },
 
   detectWalls: (planId: number, page: number) =>
