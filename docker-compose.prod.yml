@@ -25,12 +25,13 @@ services:
       retries: 5
     restart: always
 
+  # Sin GPU ni shm grande: el flujo IFC no usa torch. Si se reactiva la
+  # detección ML (features.ts), volver a pedir la GPU acá y en el worker.
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     env_file: .env
-    shm_size: "2gb"
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
@@ -43,13 +44,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     # Gunicorn para production con Uvicorn workers
     command: bash -c "alembic upgrade head && gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000"
     restart: always
@@ -63,7 +57,6 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file: .env
-    shm_size: "2gb"
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
@@ -75,13 +68,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     command: rq worker scalist-jobs --url redis://redis:6379
     restart: always
 
@@ -89,6 +75,17 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+      # Next inlinea NEXT_PUBLIC_* en el bundle al buildear: tienen que llegar
+      # como build args (el env_file solo existe en runtime). Salen de .env.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN:-}
+        NEXT_PUBLIC_FEATURE_PRICE_INTELLIGENCE: ${NEXT_PUBLIC_FEATURE_PRICE_INTELLIGENCE:-false}
+        NEXT_PUBLIC_FEATURE_ML_MODEL: ${NEXT_PUBLIC_FEATURE_ML_MODEL:-false}
+        NEXT_PUBLIC_FEATURE_COMPUTOS: ${NEXT_PUBLIC_FEATURE_COMPUTOS:-false}
+        NEXT_PUBLIC_FEATURE_WIZARD_BUILDING: ${NEXT_PUBLIC_FEATURE_WIZARD_BUILDING:-false}
+        NEXT_PUBLIC_FEATURE_LEGACY_BUDGET: ${NEXT_PUBLIC_FEATURE_LEGACY_BUDGET:-false}
+        NEXT_PUBLIC_FEATURE_LANDING_PRICING: ${NEXT_PUBLIC_FEATURE_LANDING_PRICING:-false}
     env_file: .env
     depends_on:
       - backend

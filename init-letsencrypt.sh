@@ -6,9 +6,9 @@ if ! [ -x "$(command -v docker)" ]; then
   exit 1
 fi
 
-domains=(tu-dominio.com www.tu-dominio.com)
+domains=(tudominio.com www.tudominio.com)  # mismo dominio que nginx/conf.d/default.conf
 rsa_key_size=4096
-data_path="./nginx/certbot"
+data_path="./certbot"  # mismo path que montan nginx y certbot en docker-compose.prod.yml
 email="tucorreo@gmail.com" # Cambiar esto
 staging=1 # Set a 1 si estás probando para evitar ban limits. Set 0 para prod real.
 
