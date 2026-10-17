@@ -1,0 +1,869 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de Scalist</title>
+<meta name="description" content="Manual de usuario de Scalist: del modelo IFC y el presupuesto del proveedor a la lista de compras de la obra.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* ---------- tokens: TEMA CLARO (paleta completa) ---------- */
+  :root {
+    --ground: #f3f5f8;      /* fondo de página: neutro con tinte hacia el acento */
+    --surface: #ffffff;     /* índice, tablas, tarjetas */
+    --ink: #0f172a;         /* texto principal */
+    --ink-2: #334155;       /* texto secundario */
+    --muted: #64748b;       /* rótulos, metadatos */
+    --rule: #e2e8f0;        /* bordes */
+    --rule-strong: #cbd5e1;
+    --accent: #0284c7;      /* primario tal como se ve en la app */
+    --accent-soft: #e0f2fe;
+    --brand: #075985;       /* secundario de marca: numeración, rótulos de figura */
+    --brand-soft: #f0f9ff;
+    --tip: #0f7a55; --tip-soft: #e8f6ef;
+    --warn: #8a5a00; --warn-soft: #fdf4e1;
+    --shot-frame: #ffffff;
+    --shadow: 0 1px 2px rgb(27 27 38 / .06), 0 8px 24px -12px rgb(27 27 38 / .18);
+    /* estados: copiar los colores de los chips de la app */
+    --st-pend: #475569; --st-pend-bg: #e2e8f0;
+    --st-run: #0369a1;  --st-run-bg: #e0f2fe;
+    --st-done: #b45309; --st-done-bg: #fef3c7;
+    --st-ok: #047857;   --st-ok-bg: #d1fae5;
+    --st-ko: #b91c1c;   --st-ko-bg: #fee2e2;
+    --st-cancel: #5b5b6b; --st-cancel-bg: #ececf1;
+
+    --font: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    --side: 17.5rem;
+    --measure: 44rem;
+  }
+  /* ---------- tokens: TEMA OSCURO (sistema sin marca explícita) ---------- */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0b1120; --surface: #111a2e; --ink: #ececf3; --ink-2: #c6c6d4; --muted: #9a9ab0;
+      --rule: #2c2c3a; --rule-strong: #3d3d4f; --accent: #38bdf8; --accent-soft: #0c2a3f;
+      --brand: #7dd3fc; --brand-soft: #0b2233; --tip: #6fd3a8; --tip-soft: #15302a;
+      --warn: #f0c46a; --warn-soft: #33290f; --shot-frame: #2a2a37;
+      --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 10px 30px -14px rgb(0 0 0 / .7);
+      --st-pend: #b4b4c6; --st-pend-bg: #2a2a37; --st-run: #9db8ff; --st-run-bg: #1e2a4c;
+      --st-done: #fbbf24; --st-done-bg: #3a2a0a; --st-ok: #7fdcb3; --st-ok-bg: #163327;
+      --st-ko: #ff9d94; --st-ko-bg: #3d1d1b; --st-cancel: #a8a8b8; --st-cancel-bg: #2a2a33;
+      color-scheme: dark;
+    }
+  }
+  /* ---------- tokens: TEMA OSCURO (elegido explícitamente) ---------- */
+  :root[data-theme="dark"] {
+    --ground: #0b1120; --surface: #111a2e; --ink: #ececf3; --ink-2: #c6c6d4; --muted: #9a9ab0;
+    --rule: #2c2c3a; --rule-strong: #3d3d4f; --accent: #38bdf8; --accent-soft: #0c2a3f;
+    --brand: #7dd3fc; --brand-soft: #0b2233; --tip: #6fd3a8; --tip-soft: #15302a;
+    --warn: #f0c46a; --warn-soft: #33290f; --shot-frame: #2a2a37;
+    --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 10px 30px -14px rgb(0 0 0 / .7);
+    --st-pend: #b4b4c6; --st-pend-bg: #2a2a37; --st-run: #9db8ff; --st-run-bg: #1e2a4c;
+    --st-done: #fbbf24; --st-done-bg: #3a2a0a; --st-ok: #7fdcb3; --st-ok-bg: #163327;
+    --st-ko: #ff9d94; --st-ko-bg: #3d1d1b; --st-cancel: #a8a8b8; --st-cancel-bg: #2a2a33;
+      color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 400 16px/1.65 var(--font); -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  code, kbd { font-family: var(--mono); font-size: .86em; }
+  code { background: var(--brand-soft); color: var(--brand); padding: .08em .38em; border-radius: 4px; white-space: nowrap; }
+
+  /* layout */
+  .shell { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
+  .side { position: sticky; top: 0; height: 100vh; overflow-y: auto; border-right: 1px solid var(--rule); background: var(--surface); padding: 1.5rem 1.1rem 2rem; display: flex; flex-direction: column; gap: 1.1rem; }
+  .brandmark { display: flex; flex-direction: column; gap: .15rem; padding: 0 .4rem; }
+  .brandmark b { font-weight: 800; letter-spacing: -.02em; font-size: 1.12rem; }
+  .brandmark span { font-size: .78rem; color: var(--muted); }
+  .search { width: 100%; font: inherit; font-size: .88rem; color: var(--ink); background: var(--ground); border: 1px solid var(--rule); border-radius: 8px; padding: .5rem .7rem; }
+  .search::placeholder { color: var(--muted); }
+  .toc { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .1rem; font-size: .88rem; }
+  .toc a { display: grid; grid-template-columns: 1.6rem 1fr; align-items: baseline; padding: .34rem .45rem; border-radius: 6px; color: var(--ink-2); text-decoration: none; }
+  .toc a:hover { background: var(--ground); color: var(--ink); }
+  .toc a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .toc .n { font-family: var(--mono); font-size: .74rem; color: var(--muted); }
+  .toc a.on .n { color: var(--accent); }
+  .toc .sub { list-style: none; padding: 0; margin: 0 0 .25rem; display: none; }
+  .toc .sub a { font-size: .82rem; padding-top: .2rem; padding-bottom: .2rem; color: var(--muted); }
+  .toc li.open > .sub { display: block; }
+  .toc [hidden] { display: none !important; }
+  .side-foot { margin-top: auto; font-size: .75rem; color: var(--muted); padding: 0 .4rem; display: flex; flex-direction: column; gap: .4rem; }
+  .side-foot button { font: inherit; font-size: .8rem; color: var(--ink-2); background: none; border: 1px solid var(--rule); border-radius: 6px; padding: .35rem .6rem; cursor: pointer; text-align: left; }
+  main { padding: 3rem clamp(1.25rem, 4vw, 4rem) 6rem; min-width: 0; }
+  .doc { max-width: 68rem; margin: 0 auto; }
+  .prose { max-width: var(--measure); }
+
+  /* portada */
+  .cover { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 2.5rem; align-items: end; padding-bottom: 2.5rem; border-bottom: 1px solid var(--rule); }
+  .eyebrow { font-size: .74rem; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--brand); }
+  .cover h1 { font-size: clamp(2.3rem, 4.6vw, 3.5rem); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; margin: .5rem 0 1rem; text-wrap: balance; }
+  .cover p.lede { font-size: 1.12rem; color: var(--ink-2); margin: 0; max-width: 36rem; }
+  .meta { display: grid; grid-template-columns: auto 1fr; gap: .45rem 1.2rem; font-size: .86rem; margin: 0; }
+  .meta dt { color: var(--muted); } .meta dd { margin: 0; font-weight: 500; }
+  .flow { margin: 2rem 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .flow a { display: flex; flex-direction: column; gap: .25rem; padding: 1rem 1.1rem; text-decoration: none; color: var(--ink); border-right: 1px solid var(--rule); }
+  .flow a:last-child { border-right: 0; }
+  .flow a:hover { background: var(--accent-soft); }
+  .flow b { font-size: .95rem; } .flow span { font-size: .8rem; color: var(--muted); line-height: 1.45; }
+  .flow .k { font-family: var(--mono); font-size: .72rem; color: var(--brand); }
+
+  /* capítulos */
+  section.ch { padding-top: 3.5rem; }
+  .ch-head { display: flex; align-items: baseline; gap: 1rem; border-bottom: 2px solid var(--ink); padding-bottom: .6rem; margin-bottom: 1.5rem; }
+  .ch-head .num { font-family: var(--mono); font-size: .9rem; color: var(--brand); font-weight: 500; }
+  h2 { font-size: 1.9rem; letter-spacing: -.025em; line-height: 1.15; margin: 0; font-weight: 750; text-wrap: balance; }
+  h3 { font-size: 1.22rem; letter-spacing: -.012em; margin: 2.4rem 0 .6rem; font-weight: 650; text-wrap: balance; }
+  h4 { font-size: .98rem; margin: 1.6rem 0 .4rem; font-weight: 650; }
+  p { margin: 0 0 1rem; }
+  .route { font-family: var(--mono); font-size: .78rem; color: var(--muted); margin: -.3rem 0 1rem; display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+  .route .who { font-family: var(--font); font-size: .74rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); background: var(--ground); border: 1px solid var(--rule); border-radius: 999px; padding: .05rem .55rem; }
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0 0 1.2rem; display: flex; flex-direction: column; gap: .5rem; }
+  ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 1.7rem 1fr; gap: .6rem; }
+  ol.steps > li::before { content: counter(s); font: 600 .76rem/1.7rem var(--mono); text-align: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--accent-soft); color: var(--accent); margin-top: .05rem; }
+  ul { padding-left: 1.2rem; margin: 0 0 1rem; } li { margin: .15rem 0; }
+  .ui { font-weight: 600; color: var(--ink); background: linear-gradient(transparent 62%, var(--accent-soft) 62%); padding: 0 .1em; }
+  .note { border-radius: 8px; padding: .8rem 1rem; margin: 1.2rem 0; font-size: .93rem; display: grid; grid-template-columns: auto 1fr; gap: .7rem; max-width: var(--measure); }
+  .note b.tag { font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; padding-top: .18rem; }
+  .note p:last-child { margin: 0; }
+  .note.tip { background: var(--tip-soft); } .note.tip b.tag { color: var(--tip); }
+  .note.warn { background: var(--warn-soft); } .note.warn b.tag { color: var(--warn); }
+  .tbl { overflow-x: auto; margin: 0 0 1.4rem; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); max-width: 56rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .55rem .85rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--ground); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .st { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; font-weight: 600; padding: .12rem .6rem; border-radius: 999px; white-space: nowrap; }
+  .st::before { content: ''; width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; }
+  .st.warn { color: var(--st-done); background: var(--st-done-bg); }
+  .st.pend { color: var(--st-pend); background: var(--st-pend-bg); } .st.run { color: var(--st-run); background: var(--st-run-bg); }
+  .st.done { color: var(--st-done); background: var(--st-done-bg); } .st.ok { color: var(--st-ok); background: var(--st-ok-bg); }
+  .st.ko { color: var(--st-ko); background: var(--st-ko-bg); } .st.cancel { color: var(--st-cancel); background: var(--st-cancel-bg); }
+  .lifecycle { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; margin: .4rem 0 1.4rem; font-size: .85rem; color: var(--muted); }
+  /* proceso de N pasos: ajustá repeat(N, …) a la cantidad real */
+  .pipe { list-style: none; padding: 0; margin: .6rem 0 1.6rem; display: grid; grid-template-columns: repeat(var(--pasos, 5), minmax(0, 1fr)); border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .pipe li { margin: 0; padding: .9rem .8rem 1rem; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: .35rem; position: relative; }
+  .pipe li:last-child { border-right: 0; }
+  .pipe .p { font-family: var(--mono); font-size: .72rem; color: var(--brand); }
+  .pipe b { font-size: .86rem; line-height: 1.3; } .pipe span { font-size: .77rem; color: var(--muted); line-height: 1.45; }
+  .pipe li::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, var(--accent), var(--brand)); opacity: calc(.25 + var(--i) * .11); }
+  /* figuras */
+  figure.shot, figure.video { margin: 1.4rem 0 2rem; }
+  figure.shot .frame { display: block; width: 100%; padding: 0; cursor: zoom-in; background: var(--shot-frame); border: 1px solid var(--rule-strong); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+  figure.shot .bar { display: flex; align-items: center; gap: .4rem; padding: .45rem .7rem; border-bottom: 1px solid var(--rule); background: var(--ground); font: 400 .72rem var(--mono); color: var(--muted); text-align: left; }
+  figure.shot .bar i { width: .55rem; height: .55rem; border-radius: 50%; background: var(--rule-strong); display: inline-block; }
+  figure.shot .bar em { font-style: normal; margin-left: .5rem; }
+  figure.shot img { display: block; width: 100%; height: auto; }
+  figure.shot.tall .frame { max-height: 44rem; overflow: hidden; position: relative; }
+  figure.shot.tall .frame::after { content: 'Ver completa'; position: absolute; left: 0; right: 0; bottom: 0; padding: 2.2rem 0 .7rem; text-align: center; font-size: .8rem; font-weight: 600; color: var(--accent); background: linear-gradient(transparent, var(--shot-frame) 70%); }
+  figure.video video { display: block; width: 100%; height: auto; border: 1px solid var(--rule-strong); border-radius: 10px; box-shadow: var(--shadow); background: #000; }
+  figure.video .poster-print { display: none; }
+  figcaption { display: flex; gap: .7rem; align-items: baseline; font-size: .85rem; color: var(--ink-2); margin-top: .65rem; max-width: var(--measure); }
+  figcaption .fig { font-family: var(--mono); font-size: .74rem; color: var(--brand); white-space: nowrap; }
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
+  .pair figure.shot { margin-top: .6rem; }
+  .tabs { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .6rem; margin: .8rem 0 1.6rem; }
+  .tabs div { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: .7rem .85rem; font-size: .86rem; color: var(--ink-2); }
+  .tabs b { display: block; color: var(--ink); font-size: .9rem; margin-bottom: .15rem; }
+  details.faq { border-bottom: 1px solid var(--rule); padding: .7rem 0; max-width: var(--measure); }
+  details.faq summary { font-weight: 600; cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 1rem; }
+  details.faq summary::after { content: '+'; font-family: var(--mono); color: var(--muted); }
+  details.faq[open] summary::after { content: '–'; }
+  details.faq > div { padding-top: .6rem; color: var(--ink-2); }
+  details.faq > div p:last-child, details.faq > div ol:last-child { margin-bottom: 0; }
+  dl.gloss { display: grid; grid-template-columns: 11rem 1fr; gap: .55rem 1.4rem; max-width: 52rem; font-size: .93rem; }
+  dl.gloss dt { font-weight: 650; } dl.gloss dd { margin: 0; color: var(--ink-2); }
+  .end { color: var(--muted); font-size: .9rem; margin: 2rem 0; }
+  .lb { position: fixed; inset: 0; background: rgb(12 12 18 / .88); display: grid; place-items: center; padding: 2rem; z-index: 20; cursor: zoom-out; }
+  .lb img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: 0 20px 60px rgb(0 0 0 / .5); background: #fff; }
+  .lb[hidden] { display: none; }
+  .menu-btn { display: none; }
+
+  @media (max-width: 1100px) {
+    .pipe { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pipe li { border-bottom: 1px solid var(--rule); }
+    .cover { grid-template-columns: 1fr; align-items: start; }
+  }
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; }
+    .side { position: fixed; inset: 0 auto 0 0; width: min(20rem, 88vw); z-index: 10; transform: translateX(-102%); transition: transform .2s; box-shadow: var(--shadow); }
+    .side.show { transform: none; }
+    .menu-btn { display: inline-flex; position: sticky; top: .8rem; z-index: 5; font: 600 .85rem var(--font); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: .45rem .8rem; cursor: pointer; margin-bottom: 1rem; }
+    .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .flow a:nth-child(2) { border-right: 0; } .flow a:nth-child(-n+2) { border-bottom: 1px solid var(--rule); }
+    .pair { grid-template-columns: 1fr; }
+    dl.gloss { grid-template-columns: 1fr; } dl.gloss dd { margin-bottom: .6rem; }
+    main { padding-top: 1rem; }
+  }
+
+  /* impresión / PDF */
+  @page { size: A4; margin: 16mm 14mm 18mm; }
+  @media print {
+    :root { --ground: #fff; --surface: #fff; }
+    body { font-size: 10.5pt; line-height: 1.55; }
+    .side, .menu-btn, .lb, .search { display: none !important; }
+    .shell { display: block; } main { padding: 0; }
+    .cover { min-height: 240mm; align-content: end; border-bottom: 0; }
+    section.ch { break-before: page; padding-top: 0; }
+    h3, h4 { break-after: avoid; }
+    figure.shot, figure.video, .tbl, .pipe, .note, .tabs div { break-inside: avoid; }
+    figure.shot .frame { box-shadow: none; }
+    figure.shot.tall .frame { max-height: none; }
+    figure.shot.tall .frame::after { display: none; }
+    figure.shot img { max-height: 200mm; object-fit: contain; object-position: top; }
+    figure.video video { display: none; }
+    figure.video .poster-print { display: block; width: 100%; border: 1px solid var(--rule-strong); border-radius: 10px; }
+    details.faq > div { display: block !important; }
+    details.faq summary::after { content: ''; }
+    a { color: inherit; text-decoration: none; }
+    .pipe { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+</style>
+
+<div class="shell">
+  <aside class="side" id="side" aria-label="Índice">
+    <div class="brandmark"><b>Scalist</b><span>Manual de usuario · v1.0</span></div>
+    <input class="search" id="q" type="search" placeholder="Buscar en el manual…" aria-label="Buscar en el manual">
+    <ul class="toc" id="toc"></ul>
+    <div class="side-foot">
+      <span>También disponible en PDF para imprimir.</span>
+      <span>Capturas tomadas sobre un entorno demo con datos ficticios.</span>
+    </div>
+  </aside>
+
+  <main>
+    <button class="menu-btn" type="button" id="menuBtn" aria-controls="side">☰ Índice</button>
+    <div class="doc">
+
+      <header class="cover" id="inicio">
+        <div>
+          <div class="eyebrow">Presupuesto de obra · Manual de usuario</div>
+          <h1>Cómo usar Scalist: del modelo IFC a la lista de compras</h1>
+          <p class="lede">Para estudios, constructoras y computistas que arman presupuestos de obra con Scalist. Explica cómo preparar el modelo BIM, crear un proyecto, cruzarlo con el presupuesto del corralón, ajustar las reglas de cómputo y administrar el equipo.</p>
+        </div>
+        <dl class="meta">
+          <dt>Versión</dt><dd>1.0 — con capturas de pantalla</dd>
+          <dt>Fecha</dt><dd>Octubre 2026</dd>
+          <dt>Idioma</dt><dd>Español (Argentina)</dd>
+          <dt>Datos</dt><dd>“Constructora Del Valle Demo S.R.L.”, datos ficticios</dd>
+        </dl>
+      </header>
+
+      <nav class="flow" aria-label="Recorrido recomendado">
+        <a href="#ifc"><span class="k">1 · Preparar</span><b>Exportar el IFC</b><span>Qué tildar en Revit, ArchiCAD, Vectorworks o Allplan.</span></a>
+        <a href="#crear"><span class="k">2 · Cargar</span><b>Crear el proyecto</b><span>Modelo, presupuesto del proveedor y ubicación.</span></a>
+        <a href="#presupuesto"><span class="k">3 · Revisar</span><b>Revisar el presupuesto</b><span>Cantidades, renglones elegidos y lista de compras.</span></a>
+        <a href="#reglas"><span class="k">4 · Ajustar</span><b>Ajustar las reglas</b><span>Cuánto material lleva cada m², m³ o kg.</span></a>
+      </nav>
+
+      <!-- ===================================================== 01 -->
+      <section class="ch" id="introduccion" data-title="Introducción">
+        <div class="ch-head"><span class="num">01</span><h2>Introducción</h2></div>
+        <div class="prose">
+          <p>Scalist arma el presupuesto de materiales de una obra a partir del <b>modelo BIM en formato IFC</b>. El modelo trae las medidas exactas: metros cuadrados de muro, metros de viga, superficie de techo, kilos de armadura. Scalist las convierte en productos con las <b>reglas de cómputo</b> (por ejemplo, 3 kg de cemento por m² de muro). Después busca cada producto en el <b>presupuesto del proveedor</b> que subís (el PDF o Excel del corralón).</p>
+          <p>El resultado es una <b>lista de compras</b> en unidades enteras de venta (bolsas, camiones, barras), con precio neto, IVA y total. Se descarga en Excel.</p>
+          <div class="note tip"><b class="tag">Dato</b><p>El presupuesto se recalcula solo. Si cambiás una regla, el juego de reglas del proyecto o el archivo del proveedor, los números se actualizan sin que tengas que volver a cargar nada.</p></div>
+          <h3 id="conceptos">Conceptos básicos</h3>
+        </div>
+        <dl class="gloss">
+          <dt>Proyecto</dt><dd>Una obra. Tiene un modelo IFC, un presupuesto del proveedor, una ubicación y, opcionalmente, un equipo asignado. Empieza como <span class="st warn">Borrador</span> y pasa a activo al terminar el asistente.</dd>
+          <dt>Modelo BIM (IFC)</dt><dd>El archivo <code>.ifc</code> exportado desde tu software de diseño. De él salen todas las medidas. Ver el capítulo <a href="#ifc">Preparar y exportar el IFC</a>.</dd>
+          <dt>Medidas del modelo</dt><dd>Lo que Scalist toma del IFC: muros (m²), columnas (m³), vigas y riostras (m), techo (m²), superficie cubierta, cielorrasos y armadura (kg por diámetro).</dd>
+          <dt>Presupuesto del proveedor</dt><dd>El presupuesto del corralón en PDF, Excel o CSV. Scalist lee cada renglón: descripción, precio y presentación de venta (bolsa de 25 kg, camión de 6 m³, barra de 12 m).</dd>
+          <dt>Juego de reglas de cómputo</dt><dd>La receta: cuánto de cada producto lleva cada unidad de medida, con qué palabras se lo busca en el presupuesto del proveedor y con qué desperdicio. Hay uno estándar (“Estándar Argentina”) y podés crear los tuyos.</dd>
+          <dt>Lista de compras</dt><dd>El resultado: un renglón por producto del proveedor, en unidades enteras y con precio.</dd>
+        </dl>
+        <div class="prose"><h3 id="roles">Quién ve qué</h3>
+          <p>Hay dos niveles de permisos: el de la <b>organización</b> (qué menú ves) y el que tenés <b>en cada proyecto</b> (si ves la plata o no).</p>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Rol</th><th>Menú que ve</th><th>Para qué sirve</th></tr></thead>
+          <tbody>
+            <tr><td>Administrador de plataforma</td><td>Proyectos, Reglas de cómputo, Mi equipo, Organizaciones</td><td>Da de alta organizaciones y su primer administrador. Es el único que edita el juego “Estándar Argentina”.</td></tr>
+            <tr><td>Admin de la organización</td><td>Proyectos, Reglas de cómputo, Mi equipo</td><td>Ve y edita todos los proyectos de la organización, crea usuarios y juegos de reglas propios.</td></tr>
+            <tr><td>Member</td><td>Proyectos, Reglas de cómputo (solo lectura)</td><td>Trabaja en los proyectos que le corresponden, según su rol en cada uno (tabla siguiente).</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose"><p>Dentro de un proyecto, a cada integrante se le asigna uno de estos roles. La regla que ordena todo es <b>quién ve la plata</b>:</p></div>
+        <div class="tbl"><table>
+          <thead><tr><th>Rol en el proyecto</th><th>Ve importes</th><th>Edita el proyecto</th><th>Registra avance</th><th>Gestiona el equipo</th></tr></thead>
+          <tbody>
+            <tr><td>Jefe de obra</td><td>Sí</td><td>Sí</td><td>Sí</td><td>Sí</td></tr>
+            <tr><td>Capataz</td><td>No</td><td>No</td><td>Sí</td><td>No</td></tr>
+            <tr><td>Comitente</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note warn"><b class="tag">Ojo</b><p>Mientras un proyecto no tenga integrantes asignados, <b>cualquier usuario de la organización lo ve completo</b>, importes incluidos. En cuanto asignás a alguien, empieza a regir la tabla de arriba. El administrador de la organización siempre ve todo.</p></div>
+        <div class="prose"><p>Este manual cubre el presupuesto. El <b>Cronograma</b> (plan de obra), el seguimiento de <b>Obra</b>, los <b>Costos</b> y los <b>Cambios</b> se documentan en una próxima versión.</p></div>
+      </section>
+
+      <!-- ===================================================== 02 -->
+      <section class="ch" id="acceso" data-title="Acceso">
+        <div class="ch-head"><span class="num">02</span><h2>Acceso</h2></div>
+        <p class="route"><span>/login</span><span class="who">Todos</span></p>
+        <div class="prose">
+          <p>No hay registro público: las cuentas las crea el administrador de tu organización (desde <a href="#equipo">Mi equipo</a>) o el de la plataforma. Te pasan tu email y una contraseña inicial.</p>
+          <h3 id="ingresar">Ingresar</h3>
+          <ol class="steps">
+            <li><span>Entrá a la dirección de Scalist y agregale <code>/login</code> al final. La página de inicio no tiene botón de ingreso.</span></li>
+            <li><span>Completá <span class="ui">Email</span> y <span class="ui">Contraseña</span>.</span></li>
+            <li><span>Hacé clic en <span class="ui">Ingresar</span>. Vas a la lista de <a href="#proyectos">Proyectos</a>.</span></li>
+          </ol>
+        </div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/</em></div><img src="img/acceso-landing.png" alt="Página de inicio de Scalist" loading="lazy"></button><figcaption><span class="fig">Fig. 2.1</span>Página de inicio pública: presenta el producto y ofrece <span class="ui">Pedí una demo</span>. No tiene acceso al sistema.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/login</em></div><img src="img/acceso-login.png" alt="Pantalla de ingreso" loading="lazy"></button><figcaption><span class="fig">Fig. 2.2</span>Ingreso con email y contraseña.</figcaption></figure>
+        </div>
+        <div class="prose">
+          <div class="note warn"><b class="tag">Ojo</b><p>Si te equivocás varias veces seguidas, el sistema frena los intentos por un rato. Esperá un minuto antes de volver a probar.</p></div>
+          <h3 id="contrasena">Olvidé mi contraseña</h3>
+          <p>No hay recuperación automática. Pedile al administrador de tu organización que te asigne una nueva desde <a href="#equipo">Mi equipo</a>. Después la podés cambiar en <a href="#perfil">Mi perfil</a>.</p>
+          <h3 id="salir">Cerrar sesión</h3>
+          <p>Hacé clic en el botón redondo del perfil, abajo a la izquierda, y elegí <span class="ui">Cerrar sesión</span>.</p>
+        </div>
+      </section>
+
+      <!-- ===================================================== 03 -->
+      <section class="ch" id="navegacion" data-title="Navegación">
+        <div class="ch-head"><span class="num">03</span><h2>Navegación</h2></div>
+        <div class="prose">
+          <p>A la izquierda hay una barra de íconos. Al pasar el mouse sobre cada uno aparece su nombre.</p>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Ícono</th><th>Lleva a</th><th>Quién lo ve</th></tr></thead>
+          <tbody>
+            <tr><td>Logo Scalist</td><td>Proyectos</td><td>Todos</td></tr>
+            <tr><td>Carpeta · <span class="ui">Proyectos</span></td><td><a href="#proyectos">Lista de proyectos</a></td><td>Todos</td></tr>
+            <tr><td>Regla · <span class="ui">Reglas de cómputo</span></td><td><a href="#reglas">Juegos de reglas</a></td><td>Todos</td></tr>
+            <tr><td>Personas · <span class="ui">Mi equipo</span></td><td><a href="#equipo">Usuarios de la organización</a></td><td>Admin de la organización y de plataforma</td></tr>
+            <tr><td>Edificio · <span class="ui">Organizaciones</span></td><td><a href="#plataforma">Administración</a></td><td>Solo administrador de plataforma</td></tr>
+          </tbody>
+        </table></div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Menú del perfil</em></div><img src="img/navegacion-menu-perfil.png" alt="Menú del perfil abierto" loading="lazy"></button><figcaption><span class="fig">Fig. 3.1</span>El botón del perfil (abajo a la izquierda) abre el interruptor <span class="ui">Tema claro</span> / <span class="ui">Tema oscuro</span>, <span class="ui">Editar perfil</span> y <span class="ui">Cerrar sesión</span>.</figcaption></figure>
+      </section>
+
+      <!-- ===================================================== 04 -->
+      <section class="ch" id="proyectos" data-title="Proyectos">
+        <div class="ch-head"><span class="num">04</span><h2>Proyectos</h2></div>
+        <p class="route"><span>/projects</span><span class="who">Todos</span></p>
+        <div class="prose">
+          <p>La lista de proyectos es la pantalla principal. Cada tarjeta muestra el nombre, la descripción, la dirección, el tipo de obra con su superficie cubierta (sale del modelo) y cuántos modelos tiene cargados.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects</em></div><img src="img/proyectos-lista.png" alt="Lista de proyectos" loading="lazy"></button><figcaption><span class="fig">Fig. 4.1</span>Dos borradores (con su paso del asistente, “1/5” y “2/5”) y un proyecto activo con sus enlaces <span class="ui">Abrir editor →</span>, <span class="ui">Cronograma</span> y <span class="ui">Editar datos</span>.</figcaption></figure>
+        <div class="prose"><h3 id="proyectos-estados">Borrador y activo</h3></div>
+        <div class="lifecycle"><span class="st warn">Borrador · n/5</span>→ <span class="ui">Crear proyecto ✓</span> →<span class="st ok">Activo</span></div>
+        <div class="tbl"><table>
+          <thead><tr><th>Estado</th><th>Qué significa</th><th>Qué se puede hacer</th></tr></thead>
+          <tbody>
+            <tr><td><span class="st warn">Borrador · n/5</span></td><td>El asistente quedó a mitad de camino; n es el último paso completado.</td><td><span class="ui">Continuar wizard →</span> retoma en el paso siguiente.</td></tr>
+            <tr><td><span class="st ok">Activo</span> (sin etiqueta)</td><td>Se completó el asistente.</td><td><span class="ui">Abrir editor →</span> lleva al presupuesto; <span class="ui">Editar datos</span> reabre el asistente; <span class="ui">Cronograma</span> abre el plan de obra; se habilita <span class="ui">Descargar Excel</span>.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <p>Para crear uno, hacé clic en la tarjeta <span class="ui">Nuevo proyecto</span> y seguí el <a href="#crear">asistente</a>. <span class="ui">Abrir editor →</span> te lleva al <a href="#presupuesto">Presupuesto</a>, o a la pantalla de Obra si sos capataz o comitente.</p>
+          <h3 id="proyectos-editar">Renombrar o eliminar un proyecto</h3>
+          <p>Al pasar el mouse sobre una tarjeta aparecen dos íconos arriba a la derecha: <span class="ui">Editar proyecto</span> (lápiz) y <span class="ui">Eliminar proyecto</span> (tacho). Solo los ven quienes pueden editar el proyecto.</p>
+        </div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Editar proyecto</em></div><img src="img/proyectos-editar.png" alt="Diálogo Editar proyecto" loading="lazy"></button><figcaption><span class="fig">Fig. 4.2</span>Cambiá <span class="ui">Nombre</span> y <span class="ui">Descripción</span> y confirmá con <span class="ui">Guardar cambios</span>.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Eliminar proyecto</em></div><img src="img/proyectos-eliminar.png" alt="Confirmación para eliminar un proyecto" loading="lazy"></button><figcaption><span class="fig">Fig. 4.3</span>Eliminar borra también los modelos y archivos cargados. No se puede deshacer.</figcaption></figure>
+        </div>
+      </section>
+
+      <!-- ===================================================== 05 -->
+      <section class="ch" id="crear" data-title="Crear un proyecto">
+        <div class="ch-head"><span class="num">05</span><h2>Crear un proyecto</h2></div>
+        <p class="route"><span>/projects/new</span><span class="who">Usuarios de la organización</span></p>
+        <div class="prose">
+          <p>El asistente tiene cinco pasos: <b>Datos</b>, <b>Modelo BIM</b>, <b>Precios</b>, <b>Ubicación</b> y <b>Revisión</b>. Cada paso se guarda al hacer clic en <span class="ui">Siguiente →</span>. Podés dejarlo a mitad de camino y retomarlo desde la tarjeta del proyecto. Los círculos de arriba muestran el avance; los pasos ya hechos tienen un ✓ y se puede volver a ellos con un clic.</p>
+          <h3 id="paso-datos">Paso 1 · Datos</h3>
+          <ol class="steps">
+            <li><span>Completá <span class="ui">Nombre *</span> (obligatorio) y, si querés, <span class="ui">Descripción</span>.</span></li>
+            <li><span>Hacé clic en <span class="ui">Siguiente →</span>. El proyecto queda creado como borrador.</span></li>
+          </ol>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/new · Datos</em></div><img src="img/wizard-datos.png" alt="Paso Datos del asistente" loading="lazy"></button><figcaption><span class="fig">Fig. 5.1</span>Primer paso: nombre y descripción de la obra.</figcaption></figure>
+
+        <div class="prose">
+          <h3 id="paso-modelo">Paso 2 · Modelo BIM</h3>
+          <ol class="steps">
+            <li><span>Hacé clic en <span class="ui">Hacé clic para elegir un archivo .ifc</span> y elegí el modelo (hasta 500 MB). Antes, revisá el capítulo <a href="#ifc">Preparar y exportar el IFC</a>.</span></li>
+            <li><span>Esperá a que termine el procesamiento: una barra celeste muestra la etapa y el porcentaje.</span></li>
+            <li><span>Leé la tarjeta <b>Calidad del modelo</b> (ver <a href="#calidad">cómo interpretarla</a>).</span></li>
+            <li><span>Hacé clic en <span class="ui">Siguiente →</span>. Podés avanzar aunque el modelo siga procesándose; el presupuesto aparece cuando termine.</span></li>
+          </ol>
+        </div>
+        <ol class="pipe" style="--pasos:6" aria-label="Etapas del procesamiento del modelo">
+          <li style="--i:1"><span class="p">5 %</span><b>Iniciando</b><span>El modelo entra a la cola de trabajo.</span></li>
+          <li style="--i:2"><span class="p">8 %</span><b>Abriendo modelo</b><span>Se lee el archivo IFC.</span></li>
+          <li style="--i:3"><span class="p">15–55 %</span><b>Leyendo geometría</b><span>Se calcula la forma de cada elemento.</span></li>
+          <li style="--i:4"><span class="p">60–85 %</span><b>Extrayendo elementos</b><span>Muros, aberturas, losas, vigas, columnas, armaduras.</span></li>
+          <li style="--i:5"><span class="p">90 %</span><b>Guardando cómputo</b><span>Se guardan las medidas.</span></li>
+          <li style="--i:6"><span class="p">100 %</span><b>Listo</b><span>Aparece la tarjeta de calidad.</span></li>
+        </ol>
+        <div class="prose">
+          <div class="note tip"><b class="tag">Dato</b><p>Si la geometría de muros o vigas sale incompleta, el sistema reintenta solo y la etapa pasa a “Reintentando geometría (2)”. Es normal que en ese momento la barra retroceda.</p></div>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/new · Modelo BIM</em></div><img src="img/wizard-modelo.png" alt="Paso Modelo BIM con la tarjeta de calidad" loading="lazy"></button><figcaption><span class="fig">Fig. 5.2</span>Modelo ya procesado: la tarjeta verde “Calidad del modelo: buena” lista lo que el IFC trae (esquema, ambientes, base quantities, niveles y elementos estructurales).</figcaption></figure>
+        <div class="prose">
+          <p>Si el procesamiento falla, aparece una caja roja con el motivo. Corregí el modelo en tu software, exportalo de nuevo y subilo con <span class="ui">Subir otro modelo</span>. El presupuesto usa siempre el último modelo procesado sin errores.</p>
+
+          <h3 id="paso-precios">Paso 3 · Precios</h3>
+          <p>Acá se sube el presupuesto del corralón y se elige con qué reglas cruzarlo con el modelo.</p>
+          <ol class="steps">
+            <li><span>En <span class="ui">Reglas de cómputo</span> elegí el juego (por defecto, “Estándar Argentina”). Lo podés cambiar después.</span></li>
+            <li><span>Hacé clic en <span class="ui">Hacé clic para elegir el presupuesto (PDF, Excel o CSV)</span> y elegí el archivo (hasta 15 MB). Ver <a href="#proveedor">qué tiene que tener el archivo</a>.</span></li>
+            <li><span>Revisá el resultado: los totales arriba y, debajo, una tabla por medida con el producto, la cantidad y el renglón del proveedor elegido (ver <a href="#presupuesto">Presupuesto del proyecto</a>).</span></li>
+            <li><span>Hacé clic en <span class="ui">Siguiente →</span>. Si todavía no tenés el presupuesto del proveedor, usá <span class="ui">Omitir por ahora</span>; lo podés subir después desde la pantalla del presupuesto.</span></li>
+          </ol>
+        </div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/new · Precios</em></div><img src="img/wizard-precios-vacio.png" alt="Paso Precios antes de subir el archivo" loading="lazy"></button><figcaption><span class="fig">Fig. 5.3</span>Antes de subir el archivo: juego de reglas y zona de carga.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/new · Precios</em></div><img src="img/wizard-precios-revision.png" alt="Paso Precios con el presupuesto calculado" loading="lazy"></button><figcaption><span class="fig">Fig. 5.4</span>Con el archivo leído: proveedor, fecha y cantidad de renglones, el IVA detectado y los indicadores <span class="ui">Materiales (neto)</span>, <span class="ui">IVA 21%</span>, <span class="ui">Total con IVA</span> e <span class="ui">Ítems</span>.</figcaption></figure>
+        </div>
+
+        <div class="prose">
+          <h3 id="paso-ubicacion">Paso 4 · Ubicación</h3>
+          <ol class="steps">
+            <li><span>Escribí la dirección de la obra en el buscador.</span></li>
+            <li><span>Elegila del listado de sugerencias. El mapa se centra y marca el punto.</span></li>
+            <li><span>Hacé clic en <span class="ui">Siguiente →</span>. Si no elegiste una sugerencia, el sistema avisa “Buscá y elegí una dirección antes de continuar”.</span></li>
+          </ol>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/new · Ubicación</em></div><img src="img/wizard-ubicacion.png" alt="Paso Ubicación con el mapa" loading="lazy"></button><figcaption><span class="fig">Fig. 5.5</span>Dirección elegida, mapa centrado y coordenadas.</figcaption></figure>
+
+        <div class="prose">
+          <h3 id="paso-revision">Paso 5 · Revisión</h3>
+          <p>Resume todo: calidad del modelo, datos básicos, presupuesto del proveedor con su lista de compras y localización. Cada bloque tiene <span class="ui">Editar</span> para volver a ese paso.</p>
+          <ol class="steps">
+            <li><span>Revisá que el modelo esté listo. Mientras se procesa, el botón dice <span class="ui">Esperando BIM…</span> y no se puede crear el proyecto.</span></li>
+            <li><span>Si aparece <span class="ui">N ítems sin precio · revisar</span>, hacé clic para volver a Precios y resolverlos (no es obligatorio).</span></li>
+            <li><span>Hacé clic en <span class="ui">Crear proyecto ✓</span>. El proyecto pasa a activo y se abre su presupuesto.</span></li>
+          </ol>
+        </div>
+        <figure class="shot tall"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/new · Revisión</em></div><img src="img/wizard-revision.png" alt="Paso Revisión del asistente" loading="lazy"></button><figcaption><span class="fig">Fig. 5.6</span>Revisión final: la lista de compras ya muestra unidades enteras por renglón y el total con IVA.</figcaption></figure>
+        <div class="prose">
+          <div class="note warn"><b class="tag">Ojo</b><p>Para crear el proyecto hacen falta el nombre, un modelo procesado sin errores y la ubicación. El presupuesto del proveedor no es obligatorio: sin él, el proyecto se crea igual, pero no tiene importes ni se puede descargar el Excel.</p></div>
+          <h3 id="editar-datos">Editar un proyecto activo</h3>
+          <p>Desde la tarjeta del proyecto, <span class="ui">Editar datos</span> reabre el asistente en el paso Ubicación. Desde ahí podés saltar a cualquier paso con los círculos de arriba. El asistente muestra el título “Nuevo proyecto” y el botón “Crear proyecto ✓” aunque estés editando uno que ya existe; el botón guarda los cambios.</p>
+        </div>
+      </section>
+
+      <!-- ===================================================== 06 -->
+      <section class="ch" id="ifc" data-title="Preparar y exportar el IFC">
+        <div class="ch-head"><span class="num">06</span><h2>Preparar y exportar el IFC</h2></div>
+        <div class="prose">
+          <p>El cómputo es tan bueno como el modelo. Scalist no adivina: toma las medidas que el IFC trae. Si un muro se modeló como “objeto genérico”, no es un muro; si la armadura no se exportó, no hay kilos de hierro. Este capítulo explica qué tiene que traer el archivo y cómo exportarlo desde los programas más usados.</p>
+          <h3 id="ifc-que-lee">Qué toma Scalist del modelo</h3>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Medida</th><th>De qué elementos sale</th><th>Qué necesita</th></tr></thead>
+          <tbody>
+            <tr><td>Muros (m²)</td><td>Muros (IfcWall), menos el área de puertas (IfcDoor) y ventanas (IfcWindow)</td><td>Largo y alto en las <i>base quantities</i> del muro. Puertas y ventanas con ancho y alto totales.</td></tr>
+            <tr><td>Columnas (m³)</td><td>Columnas (IfcColumn)</td><td>Se mide por su geometría. Las que se llaman zapata, pilote, fundación o cimiento se consideran fundaciones y <b>no</b> entran al presupuesto.</td></tr>
+            <tr><td>Vigas (m)</td><td>Vigas (IfcBeam)</td><td>Largo en las base quantities, o la geometría.</td></tr>
+            <tr><td>Riostras (m)</td><td>Vigas cuyo nombre dice fundación, cimiento o similar</td><td>Igual que las vigas.</td></tr>
+            <tr><td>Techo (m²)</td><td>Losas (IfcSlab) de tipo <b>ROOF</b> (cubierta)</td><td>Superficie en las base quantities. Se toma la losa de cubierta más grande.</td></tr>
+            <tr><td>Superficie cubierta (m²)</td><td>Ambientes (IfcSpace)</td><td>Superficie de piso de cada ambiente. Sin ambientes, se estima con la losa de piso × cantidad de niveles.</td></tr>
+            <tr><td>Cielorrasos (m²)</td><td>Revestimientos (IfcCovering) de tipo <b>CEILING</b></td><td>Solo si traen su superficie en las base quantities.</td></tr>
+            <tr><td>Armadura (kg)</td><td>Barras de armadura (IfcReinforcingBar)</td><td>Largo de barra y sección en cada barra. Se agrupa por diámetro comercial (4,2 a 32 mm).</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <p>Las escaleras, sanitarios, bocas eléctricas y objetos genéricos se cuentan pero no entran al presupuesto de materiales.</p>
+          <h3 id="ifc-modelar">Cómo modelar para que el cómputo salga bien</h3>
+          <ul>
+            <li><b>Cada cosa con su categoría:</b> muros como muros, losas como losas, columnas como columnas. Nada de “modelo genérico” o “masa” para elementos que querés computar.</li>
+            <li><b>Techo como losa de cubierta:</b> el techo tiene que ser una losa con tipo cubierta (ROOF). Si solo existe como “techo” (IfcRoof) sin losa adentro, la medida de techo queda en 0.</li>
+            <li><b>Muros de menos de 30 m de largo y 8 m de alto.</b> Los más grandes se descartan por precaución (suelen ser errores de modelado). Partí los muros largos.</li>
+            <li><b>Niveles definidos</b> (planta baja, planta alta…). Sin niveles no se puede calcular la superficie cubierta estimada ni ordenar el cronograma por piso.</li>
+            <li><b>Ambientes dibujados</b> (habitaciones, zonas o espacios, según el programa) para tener la superficie cubierta exacta.</li>
+            <li><b>Fundaciones con nombre claro:</b> zapatas, pilotes y vigas de fundación con “zapata”, “fundación” o “riostra” en el nombre, para que no se mezclen con la estructura.</li>
+            <li><b>Armadura modelada con barras</b> (no solo como mallas o como dato del hormigón). Las mallas no se computan.</li>
+          </ul>
+
+          <h3 id="ifc-exportar">Opciones de exportación por programa</h3>
+          <p>Los nombres exactos de las opciones cambian según la versión y el idioma del programa. Lo importante es lo que tienen que lograr:</p>
+          <ul>
+            <li><b>Formato IFC 2x3 o IFC 4.</b> Ambos se aceptan.</li>
+            <li><b>Base quantities activadas</b> (en inglés <i>base quantities</i>, a veces “cantidades base” o “cantidades IFC”). Es la opción que más mejora el cómputo.</li>
+            <li><b>Ambientes incluidos</b> (rooms, zones o spaces).</li>
+            <li><b>Todo el modelo</b>, no solo lo visible en una vista recortada.</li>
+          </ul>
+        </div>
+        <div class="tabs">
+          <div><b>Revit</b>Archivo → Exportar → IFC. Elegí IFC 2x3 Coordination View 2.0 o IFC 4 Reference View. En <i>Conjuntos de propiedades</i> (Property Sets) tildá <i>Exportar cantidades base</i> (Export base quantities). En <i>Contenido adicional</i> incluí las habitaciones (rooms). Revisá que la armadura estructural no esté excluida en la tabla de clases IFC.</div>
+          <div><b>ArchiCAD</b>Archivo → Guardar como → IFC, con un traductor de exportación de uso general. En la configuración del traductor activá la exportación de <i>cantidades base IFC</i> (IFC Base Quantities) e incluí las <i>Zonas</i>, que se exportan como ambientes. Si usás un filtro de exportación, que no deje afuera la armadura.</div>
+          <div><b>Vectorworks</b>Archivo → Exportar → Exportar proyecto IFC. Activá la exportación de cantidades base (Qto) y asegurate de que los objetos <i>Espacio</i> estén incluidos. Asigná a cada objeto su entidad IFC correcta (muro, losa, columna).</div>
+          <div><b>Allplan</b>Exportar → Exportar datos IFC (IFC 4 recomendado). En las opciones, activá la exportación de cantidades. Los locales tienen que exportarse como espacios, y la armadura de barras como armadura (no solo como cuerpo de hormigón).</div>
+        </div>
+        <div class="prose">
+          <div class="note tip"><b class="tag">Dato</b><p>Antes de cargar el proyecto completo, hacé una prueba: subí el IFC en un proyecto borrador y mirá la tarjeta de calidad y las <a href="#medidas">Medidas del modelo</a>. Si algo sale en 0 y no debería, corregí la exportación y probá de nuevo.</p></div>
+
+          <h3 id="calidad">Interpretar el chequeo de calidad</h3>
+          <p>Al subir el modelo, Scalist revisa el archivo y muestra la tarjeta <b>Calidad del modelo</b> con un nivel general y una lista de chequeos (✓ si está bien, ○ si falta) y advertencias (⚠).</p>
+        </div>
+        <div class="lifecycle"><span class="st ok">Calidad del modelo: buena</span><span class="st warn">Calidad del modelo: aceptable</span><span class="st ko">Calidad del modelo: baja</span></div>
+        <div class="tbl"><table>
+          <thead><tr><th>Chequeo</th><th>Si falta, ves</th><th>Qué hacer</th></tr></thead>
+          <tbody>
+            <tr><td>Esquema IFC</td><td>“Esquema desconocido”</td><td>Exportá de nuevo en IFC 2x3 o IFC 4.</td></tr>
+            <tr><td>Ambientes / rooms</td><td>“Sin ambientes (IfcSpace)” y “el área cubierta será una estimación”</td><td>Dibujá los ambientes y exportalos.</td></tr>
+            <tr><td>Base quantities</td><td>“Sin base quantities (usa geometría)”</td><td>Activá las base quantities al exportar.</td></tr>
+            <tr><td>Niveles</td><td>“Sin niveles”</td><td>Definí los niveles del edificio.</td></tr>
+            <tr><td>Elementos estructurales</td><td>“Sin muros/vigas/columnas”</td><td>Revisá que muros, vigas y columnas tengan su categoría correcta y no estén excluidos.</td></tr>
+            <tr><td>Muros medidos</td><td>“Solo se midieron X de Y muros”</td><td>Algunos muros no tienen medidas ni geometría legible. Activá base quantities o revisá esos muros.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <ul>
+            <li><b>Buena:</b> tiene ambientes, base quantities y niveles.</li>
+            <li><b>Aceptable:</b> le falta alguna de esas tres cosas. El presupuesto sale, pero algunas medidas son estimadas.</li>
+            <li><b>Baja:</b> no hay muros, vigas ni columnas, o el archivo no es un IFC reconocible. El presupuesto no va a ser confiable.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ===================================================== 07 -->
+      <section class="ch" id="presupuesto" data-title="Presupuesto del proyecto">
+        <div class="ch-head"><span class="num">07</span><h2>Presupuesto del proyecto</h2></div>
+        <p class="route"><span>/projects/“id”/presupuesto</span><span class="who">Admin · Jefe de obra</span></p>
+        <div class="prose">
+          <p>Es la pantalla del proyecto. Arriba, una tarjeta oscura con <span class="ui">MATERIALES (NETO)</span>, el proveedor y el juego de reglas, y <span class="ui">TOTAL CON IVA</span>. Debajo, el archivo del proveedor, las reglas, el IVA y el detalle por medida.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/1/presupuesto</em></div><img src="img/presupuesto-resumen.png" alt="Pantalla de presupuesto del proyecto" loading="lazy"></button><figcaption><span class="fig">Fig. 7.1</span>Resumen del proyecto y comienzo de la tabla de muros: cada producto muestra cómo se calculó (221,4 m² × 3 kg + 5%) y qué renglón del proveedor se eligió.</figcaption></figure>
+        <div class="prose">
+          <h3 id="leer-items">Leer cada ítem</h3>
+          <p>Hay una tabla por medida (Muros, Columnas, Vigas, Riostras, Techo, Armadura…). Cada fila es una regla del juego aplicada a tu modelo:</p>
+          <ul>
+            <li><b>Producto:</b> el nombre de la regla y, debajo, la cuenta: medida × factor + desperdicio. Al pasar el mouse se ve la nota de la regla.</li>
+            <li><b>Cantidad:</b> lo que hace falta, en la unidad de la regla (kg, m³, unidades).</li>
+            <li><b>Renglón del proveedor:</b> el producto del archivo que se eligió, con su precio. Debajo, el estado y la presentación de venta (“x 25 kg”, “por unidad”).</li>
+            <li><b>Unidades</b> y <b>Subtotal:</b> la cantidad convertida a unidades de venta y su precio neto.</li>
+          </ul>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Estado</th><th>Qué significa</th><th>Qué hacer</th></tr></thead>
+          <tbody>
+            <tr><td><span class="st ok">Con precio</span></td><td>Se encontró un renglón del proveedor y se calculó el subtotal.</td><td>Nada, o elegir otro renglón si no es el que querés.</td></tr>
+            <tr><td><span class="st warn">Sin precio</span></td><td>Ningún renglón del archivo coincide con las palabras clave de la regla.</td><td>Elegí un renglón a mano o ajustá las palabras clave de la regla.</td></tr>
+            <tr><td><span class="st pend">El modelo no lo trae</span></td><td>La medida vale 0 en el modelo (por ejemplo, no hay columnas o armadura).</td><td>Si la obra sí lo tiene, revisá el modelo (ver <a href="#ifc">capítulo 6</a>).</td></tr>
+            <tr><td><span class="st ko">Unidad incompatible</span></td><td>La unidad de la regla no se puede pasar a la del renglón (kg contra m³, por ejemplo).</td><td>Elegí otro renglón o corregí la presentación del renglón.</td></tr>
+            <tr><td><span class="st ko">Regla inválida</span></td><td>La regla tiene un dato que no sirve (por ejemplo, una cantidad no numérica).</td><td>Corregila en <a href="#reglas">Reglas de cómputo</a>.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <h3 id="elegir-renglon">Elegir otro renglón del proveedor</h3>
+          <p>Si hay varios renglones que coinciden, el sistema elige el más barato por unidad. Para cambiarlo:</p>
+          <ol class="steps">
+            <li><span>Abrí el desplegable del renglón en la fila del producto.</span></li>
+            <li><span>Elegí uno de <b>Otros candidatos</b>, uno de <b>Otro renglón del archivo</b> o <span class="ui">— Sin precio —</span> para dejarlo afuera.</span></li>
+            <li><span>El ítem queda marcado como “elegido a mano”. Para deshacerlo, elegí <span class="ui">↺ Volver a la elección automática</span>.</span></li>
+          </ol>
+          <h3 id="lista-compras">Lista de compras</h3>
+          <p>Al final de las tablas está la <span class="ui">Lista de compras · unidades enteras por renglón</span>. Agrupa los productos por renglón del proveedor (por ejemplo, todo el cemento de muros, vigas y techo en una sola fila) y redondea hacia arriba, porque no se compran 3,4 bolsas. Cierra con <span class="ui">Neto</span>, <span class="ui">IVA 21%</span> y <span class="ui">Total con IVA</span>.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Lista de compras</em></div><img src="img/presupuesto-renglones.png" alt="Lista de compras y renglones leídos del archivo" loading="lazy"></button><figcaption><span class="fig">Fig. 7.2</span>Lista de compras con unidades enteras y, abajo, el plegable <span class="ui">Renglones leídos del archivo</span> con cada renglón marcado como “usado” o “sin usar”.</figcaption></figure>
+        <div class="prose">
+          <h3 id="corregir-presentacion">Corregir la presentación de un renglón</h3>
+          <p>Si el lector interpretó mal cómo se vende un producto (por ejemplo, leyó “por unidad” y es una bolsa de 30 kg), la cantidad de unidades sale mal. Para corregirlo:</p>
+          <ol class="steps">
+            <li><span>Abrí <span class="ui">Renglones leídos del archivo</span>.</span></li>
+            <li><span>Hacé clic en la presentación del renglón (por ejemplo, “por unidad”).</span></li>
+            <li><span>Escribí la cantidad, elegí la unidad (kg, m³, m², m, l, u) y confirmá con <span class="ui">OK</span>. El renglón queda “(corregido)”; con <span class="ui">deshacer</span> volvés a lo leído.</span></li>
+          </ol>
+          <h3 id="medidas">Medidas del modelo</h3>
+          <p>El plegable <span class="ui">Medidas del modelo · lo que el presupuesto toma del IFC</span> muestra cada medida con su valor y los avisos del cálculo (por ejemplo, cuántos m² de puertas y ventanas se descontaron de los muros). Es el primer lugar donde mirar si un número no te cierra.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Medidas del modelo</em></div><img src="img/presupuesto-medidas.png" alt="Medidas del modelo" loading="lazy"></button><figcaption><span class="fig">Fig. 7.3</span>Medidas tomadas del IFC de la casa demo: 221,4 m² de muro neto (257,2 m² brutos menos 35,7 m² de aberturas), 43,1 m de vigas y 82,6 m² de techo. Columnas y armadura en 0: el modelo no las trae.</figcaption></figure>
+        <div class="prose">
+          <h3 id="cambiar-reglas-iva">Cambiar las reglas, el IVA o el archivo</h3>
+          <ul>
+            <li><span class="ui">Reglas de cómputo</span>: elegí otro juego y el presupuesto se recalcula. <span class="ui">Ver las reglas ↗</span> abre el juego en otra pestaña.</li>
+            <li><span class="ui">IVA de los precios</span>: <span class="ui">Detectar automáticamente</span> (debajo se ve qué detectó y por qué), <span class="ui">Incluyen IVA</span> (se descuenta el 21% para guardar precios netos) o <span class="ui">No incluyen IVA</span>.</li>
+            <li><span class="ui">Reemplazar archivo</span>: sube un presupuesto nuevo del proveedor.</li>
+          </ul>
+          <div class="note warn"><b class="tag">Ojo</b><p>Al reemplazar el archivo se pierden los renglones elegidos a mano y las presentaciones corregidas.</p></div>
+
+          <h3 id="proveedor">Qué tiene que tener el presupuesto del proveedor</h3>
+          <ul>
+            <li><b>PDF con texto</b>, no escaneado (si podés seleccionar el texto con el mouse, sirve). Tiene que tener una fila de encabezado con “Cantidad” y “Total”, “Importe”, “Unitario” o “Precio”.</li>
+            <li><b>Excel o CSV</b> con una columna de descripción (descripción, artículo, producto, detalle, insumo, material…) y una de precio (precio, costo, unitario, importe, valor…), en las primeras 30 filas.</li>
+            <li>La <b>presentación</b> se lee de la descripción: “X 25 KG”, “CAMION 6 M3”, “12 MTS”, “8 MM”, “12X19X33”. Cuanto más clara la descripción, mejor el cruce.</li>
+          </ul>
+          <p>Si el lector encuentra algo raro, lo avisa en una caja ámbar. Los avisos más comunes:</p>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Aviso</th><th>Qué hacer</th></tr></thead>
+          <tbody>
+            <tr><td>“El PDF no tiene texto (¿es un escaneo?)…”</td><td>Pedile al proveedor el PDF original o un Excel.</td></tr>
+            <tr><td>“No se encontró la tabla de artículos…”</td><td>El PDF no tiene encabezado reconocible. Probá con el Excel del proveedor.</td></tr>
+            <tr><td>“No se pudo determinar si los precios incluyen IVA: se asumen SIN IVA.”</td><td>Elegí a mano <span class="ui">Incluyen IVA</span> o <span class="ui">No incluyen IVA</span>.</td></tr>
+            <tr><td>“La suma de renglones (X) no cierra con el total del documento (Y)…”</td><td>Puede faltar algún renglón (por ejemplo, uno partido en dos líneas). Revisá <span class="ui">Renglones leídos del archivo</span>.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <h3 id="excel">Descargar el Excel</h3>
+          <p><span class="ui">Descargar Excel</span> (arriba a la derecha) baja <code>presupuesto_“proyecto”.xlsx</code> con cuatro hojas: <b>Resumen</b>, <b>Lista de compras</b>, <b>Detalle</b> (cada regla con su cuenta) y <b>Medidas del modelo</b>. El botón se habilita cuando el proyecto está creado y tiene presupuesto del proveedor.</p>
+        </div>
+        <figure class="shot tall"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/1/presupuesto</em></div><img src="img/presupuesto-completo.png" alt="Presupuesto completo" loading="lazy"></button><figcaption><span class="fig">Fig. 7.4</span>La pantalla completa, de la tarjeta de resumen a las medidas del modelo. Hacé clic para ampliarla.</figcaption></figure>
+        <div class="prose">
+          <div class="note warn"><b class="tag">Ojo</b><p>El capataz y el comitente no ven importes. Si abren esta pantalla, ven el aviso “Tu rol en este proyecto no tiene acceso a la información económica.” y la tarjeta superior sin números.</p></div>
+        </div>
+      </section>
+
+      <!-- ===================================================== 08 -->
+      <section class="ch" id="reglas" data-title="Reglas de cómputo">
+        <div class="ch-head"><span class="num">08</span><h2>Reglas de cómputo</h2></div>
+        <p class="route"><span>/reglas</span><span class="who">Todos ven · Admin edita</span></p>
+        <div class="prose">
+          <p>Un <b>juego de reglas</b> dice cuánto material lleva cada unidad de medida del modelo: cuánto cemento, cal y arena por m² de muro; cuánto hormigón por metro de viga; cuántos ladrillos de losa por m² de techo. Cada proyecto usa un juego, que se elige en el paso Precios o en el presupuesto.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/reglas</em></div><img src="img/reglas-lista.png" alt="Lista de juegos de reglas" loading="lazy"></button><figcaption><span class="fig">Fig. 8.1</span>El juego del sistema “Estándar Argentina” (etiquetas <span class="ui">Estándar</span> y <span class="ui">Por defecto</span>) y un juego propio de la organización con <span class="ui">Editar</span>, <span class="ui">Duplicar</span> y <span class="ui">Borrar</span>.</figcaption></figure>
+        <div class="prose">
+          <h3 id="estandar">El juego “Estándar Argentina”</h3>
+          <p>Trae 22 reglas de referencia para obra húmeda tradicional (ladrillo cerámico y hormigón armado H21): mortero de asiento y revoque para muros, hormigón para columnas, vigas y riostras, losa cerámica con capa de compresión para el techo, y hierro con alambre de atar para la armadura. Es el que se usa por defecto. Lo ve todo el mundo, pero solo lo edita el administrador de la plataforma. Para adaptarlo a tu forma de construir, <b>duplicalo</b>.</p>
+          <h3 id="nuevo-juego">Crear un juego propio</h3>
+          <ol class="steps">
+            <li><span>Hacé clic en <span class="ui">+ Nuevo juego</span>, o en <span class="ui">Duplicar</span> sobre un juego existente.</span></li>
+            <li><span>Poné un <span class="ui">Nombre</span> y elegí <span class="ui">Partir de</span>: una copia de otro juego o <span class="ui">Vacío (sin reglas)</span>.</span></li>
+            <li><span>Hacé clic en <span class="ui">Crear</span>. Se abre el editor.</span></li>
+          </ol>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Nuevo juego de reglas</em></div><img src="img/reglas-nuevo.png" alt="Diálogo Nuevo juego de reglas" loading="lazy"></button><figcaption><span class="fig">Fig. 8.2</span>Lo más práctico es partir de una copia del estándar y cambiar solo lo que hace falta.</figcaption></figure>
+        <div class="prose">
+          <h3 id="editor">Editar las reglas</h3>
+          <p>El editor tiene pestañas por medida (<span class="ui">Todas</span>, <span class="ui">Muros</span>, <span class="ui">Columnas</span>, <span class="ui">Vigas</span>, <span class="ui">Riostras</span>, <span class="ui">Techo</span>, <span class="ui">Pisos</span>, <span class="ui">Cielorrasos</span>, <span class="ui">Armadura</span>) con la cantidad de reglas de cada una, y un buscador <span class="ui">Filtrar...</span>.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/reglas/“id”</em></div><img src="img/reglas-editor.png" alt="Editor de reglas de cómputo" loading="lazy"></button><figcaption><span class="fig">Fig. 8.3</span>Editor de un juego propio: cada regla tiene producto, palabras para buscar, exclusiones, cantidad por unidad, desperdicio y modo de cálculo. Abajo, la barra para guardar.</figcaption></figure>
+        <div class="tabs">
+          <div><b>Producto</b>Nombre que vas a ver en el presupuesto (por ejemplo, “Cemento (mortero de asiento)”).</div>
+          <div><b>Buscar en el PDF</b>Palabras para encontrar el producto en el presupuesto del proveedor, separadas por coma. Tienen que aparecer todas las palabras de una frase; se acepta el plural. Sirve también para Excel y CSV.</div>
+          <div><b>Excluir</b>Palabras que descartan un renglón. Por ejemplo, el cemento excluye “pegamento” para no tomar pegamento cementicio.</div>
+          <div><b>Cantidad</b>Cuánto producto por unidad de la medida (por m², m³, m o kg), con su unidad: kg, m³, m², m, litros o unidades.</div>
+          <div><b>Desperdicio</b>Porcentaje que se suma a la cantidad (roturas, sobrantes).</div>
+          <div><b>Cálculo</b>El modo de cálculo (ver abajo). Con <span class="ui">+ nota</span> podés anotar de dónde sale el valor.</div>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Cálculo</th><th>Cómo cuenta</th><th>Para qué</th></tr></thead>
+          <tbody>
+            <tr><td>Medida × factor</td><td>Medida × cantidad × (1 + desperdicio)</td><td>La mayoría de los materiales: cemento, cal, arena, piedra.</td></tr>
+            <tr><td>Ladrillos por m² según medidas del proveedor</td><td>Calcula cuántos ladrillos entran en un m² con las medidas del renglón (por ejemplo, 12×19×33) más 1,5 cm de junta. Si el renglón no trae medidas, usa la cantidad.</td><td>Ladrillos de muro.</td></tr>
+            <tr><td>Hierro por diámetro (kg → barras)</td><td>Toma los kg exactos de armadura de cada diámetro y los pasa a barras de 12 m del mismo diámetro.</td><td>Hierro de construcción.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Pestaña Armadura</em></div><img src="img/reglas-editor-armadura.png" alt="Reglas de armadura" loading="lazy"></button><figcaption><span class="fig">Fig. 8.4</span>Pestaña <span class="ui">Armadura</span>: el hierro usa el modo por diámetro; el alambre de atar es el 2% del peso del hierro.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Juego estándar</em></div><img src="img/reglas-estandar-lectura.png" alt="Juego estándar en solo lectura" loading="lazy"></button><figcaption><span class="fig">Fig. 8.5</span>El juego estándar visto por un administrador de organización: los campos están en solo lectura. Para cambiarlo, duplicalo.</figcaption></figure>
+        </div>
+        <div class="prose">
+          <ol class="steps">
+            <li><span>Cambiá lo que necesites. Con <span class="ui">+ Agregar regla</span> sumás una regla a esa medida; con el tacho la borrás.</span></li>
+            <li><span>Abajo aparece “Hay cambios sin guardar.” Hacé clic en <span class="ui">Guardar cambios</span>, o en <span class="ui">Descartar</span> para volver atrás.</span></li>
+            <li><span>Todos los proyectos que usan ese juego se recalculan solos.</span></li>
+          </ol>
+          <div class="note tip"><b class="tag">Dato</b><p>Si un producto sale “Sin precio” en muchos proyectos, casi siempre es una palabra clave que no coincide con cómo lo escribe tu corralón. Abrí <span class="ui">Renglones leídos del archivo</span> en un presupuesto, copiá cómo aparece el producto y agregá esa palabra a la regla.</p></div>
+          <p>Al borrar un juego, los proyectos que lo usaban pasan a usar el estándar.</p>
+        </div>
+      </section>
+
+      <!-- ===================================================== 09 -->
+      <section class="ch" id="equipo" data-title="Mi equipo">
+        <div class="ch-head"><span class="num">09</span><h2>Mi equipo</h2></div>
+        <p class="route"><span>/team</span><span class="who">Admin de la organización</span></p>
+        <div class="prose">
+          <p>Lista los usuarios de tu organización con su permiso (ADMIN o MEMBER) y sus roles de obra (oficios). Desde acá se crean, editan y eliminan usuarios.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/team</em></div><img src="img/equipo-lista.png" alt="Mi equipo" loading="lazy"></button><figcaption><span class="fig">Fig. 9.1</span>Usuarios de la organización con su permiso y sus oficios. Al pasar el mouse sobre una tarjeta aparecen <span class="ui">Editar</span> y <span class="ui">Eliminar</span>.</figcaption></figure>
+        <div class="prose">
+          <h3 id="nuevo-usuario">Dar de alta un usuario</h3>
+          <ol class="steps">
+            <li><span>Hacé clic en la tarjeta <span class="ui">Nuevo usuario</span>.</span></li>
+            <li><span>Completá <span class="ui">Email</span> y <span class="ui">Password</span>. Copiá la contraseña antes de guardar: no se vuelve a mostrar y se la tenés que pasar a la persona.</span></li>
+            <li><span>Elegí el <span class="ui">Permiso</span>: <span class="ui">Member</span> (usuario normal) o <span class="ui">Admin</span> (gestiona el equipo y ve todos los proyectos).</span></li>
+            <li><span>Marcá sus <span class="ui">Roles de obra</span> (oficios). Son informativos y no cambian los permisos.</span></li>
+            <li><span>Hacé clic en <span class="ui">Guardar</span>.</span></li>
+          </ol>
+        </div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Nuevo usuario</em></div><img src="img/equipo-nuevo-usuario.png" alt="Diálogo Nuevo usuario" loading="lazy"></button><figcaption><span class="fig">Fig. 9.2</span>Alta de usuario con permiso y roles de obra.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Roles de obra</em></div><img src="img/equipo-roles-obra.png" alt="Catálogo de roles de obra" loading="lazy"></button><figcaption><span class="fig">Fig. 9.3</span><span class="ui">Roles de obra</span>: el catálogo de oficios de la organización. Con <span class="ui">+ Agregar rol</span> sumás los que falten.</figcaption></figure>
+        </div>
+        <div class="prose">
+          <div class="note warn"><b class="tag">Ojo</b><p>Eliminar un usuario borra también <b>los proyectos que creó</b>, aunque el aviso de confirmación no lo diga. Si alguien deja la organización, antes de eliminarlo pasale sus proyectos a otra persona o cambiale la contraseña en lugar de borrarlo.</p></div>
+          <h3 id="permiso-vs-rol">Permiso, rol de obra y rol en el proyecto</h3>
+          <ul>
+            <li>El <b>permiso</b> (Admin / Member) define qué menú ves y si administrás la organización.</li>
+            <li>El <b>rol de obra</b> (Albañil, Capataz, Arquitecto…) es un dato del oficio de la persona. No da ni quita accesos.</li>
+            <li>El <b>rol en el proyecto</b> (Jefe de obra, Capataz, Comitente) define si ves la plata en ese proyecto. Se asigna en el equipo del proyecto, desde la pantalla del Cronograma (se documenta en la próxima versión).</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ===================================================== 10 -->
+      <section class="ch" id="perfil" data-title="Mi perfil">
+        <div class="ch-head"><span class="num">10</span><h2>Mi perfil</h2></div>
+        <p class="route"><span>/profile</span><span class="who">Todos</span></p>
+        <div class="prose">
+          <p>Se abre desde el botón del perfil → <span class="ui">Editar perfil</span>. Muestra tu rol y tu email, y te deja cambiar la contraseña.</p>
+          <ol class="steps">
+            <li><span>Escribí la <span class="ui">Nueva Contraseña</span> (mínimo 8 caracteres). Si la dejás en blanco, no se cambia.</span></li>
+            <li><span>Hacé clic en <span class="ui">Guardar Cambios</span>. Vas a ver “¡Perfil actualizado correctamente!”.</span></li>
+          </ol>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/profile</em></div><img src="img/perfil.png" alt="Mi perfil" loading="lazy"></button><figcaption><span class="fig">Fig. 10.1</span>Datos personales y cambio de contraseña.</figcaption></figure>
+      </section>
+
+      <!-- ===================================================== 11 -->
+      <section class="ch" id="plataforma" data-title="Administración de la plataforma">
+        <div class="ch-head"><span class="num">11</span><h2>Administración de la plataforma</h2></div>
+        <p class="route"><span>/admin/organizations</span><span class="who">Solo administrador de plataforma</span></p>
+        <div class="prose">
+          <p>Este capítulo es solo para quien administra Scalist. Desde <span class="ui">Organizaciones</span> se dan de alta los clientes (estudios, constructoras) y su primer administrador.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/admin/organizations</em></div><img src="img/admin-organizaciones.png" alt="Lista de organizaciones" loading="lazy"></button><figcaption><span class="fig">Fig. 11.1</span>Organizaciones con su estado de suscripción, cantidad de usuarios y de proyectos.</figcaption></figure>
+        <div class="tbl"><table>
+          <thead><tr><th>Estado</th><th>Qué significa para sus usuarios</th></tr></thead>
+          <tbody>
+            <tr><td><span class="st ok">Activa</span></td><td>Usan el sistema con normalidad.</td></tr>
+            <tr><td><span class="st run">Trial</span></td><td>Período de prueba: usan el sistema con normalidad.</td></tr>
+            <tr><td><span class="st warn">Vencida</span></td><td>No pueden usar el sistema: cada pantalla muestra un aviso de suscripción.</td></tr>
+            <tr><td><span class="st ko">Cancelada</span></td><td>Igual que vencida.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <h3 id="nueva-org">Dar de alta una organización</h3>
+          <ol class="steps">
+            <li><span>Hacé clic en <span class="ui">Nueva organización</span>.</span></li>
+            <li><span>Completá el <span class="ui">Nombre</span> y el <span class="ui">Estado de suscripción</span>.</span></li>
+            <li><span>Dejá tildado <span class="ui">Crear admin inicial</span> y completá su email y contraseña (copiala antes de guardar).</span></li>
+            <li><span>Hacé clic en <span class="ui">Crear</span>. La organización arranca con el catálogo de roles de obra por defecto.</span></li>
+          </ol>
+        </div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Nueva organización</em></div><img src="img/admin-nueva-organizacion.png" alt="Diálogo Nueva organización" loading="lazy"></button><figcaption><span class="fig">Fig. 11.2</span>Alta de organización con su primer administrador.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/admin/organizations/“id”</em></div><img src="img/admin-organizacion-detalle.png" alt="Detalle de una organización" loading="lazy"></button><figcaption><span class="fig">Fig. 11.3</span>Detalle: <span class="ui">Editar</span> (nombre y suscripción), <span class="ui">Eliminar</span> y la gestión de sus usuarios.</figcaption></figure>
+        </div>
+        <div class="prose">
+          <div class="note warn"><b class="tag">Ojo</b><p>Eliminar una organización borra todos sus usuarios y proyectos. No se puede deshacer.</p></div>
+        </div>
+      </section>
+
+      <!-- ===================================================== 12 -->
+      <section class="ch" id="faq" data-title="Preguntas frecuentes">
+        <div class="ch-head"><span class="num">12</span><h2>Preguntas frecuentes</h2></div>
+        <details class="faq"><summary>¿Por qué la armadura o las columnas aparecen como “El modelo no lo trae”?</summary><div><p>Porque esa medida vale 0 en el IFC. Abrí <a href="#medidas">Medidas del modelo</a> para confirmarlo. Las causas habituales: la armadura no se modeló con barras o no se exportó; las columnas se llaman “zapata” o “fundación” y se tomaron como fundaciones. Corregilo en el modelo y volvé a subir el IFC.</p></div></details>
+        <details class="faq"><summary>¿Por qué el techo da 0 m²?</summary><div><p>Scalist toma el techo de las losas de tipo cubierta (ROOF). Si en tu programa el techo es un objeto “techo” sin losa, o la losa no tiene el tipo cubierta, no se mide. Cambiá el tipo de la losa y exportá de nuevo.</p></div></details>
+        <details class="faq"><summary>Un producto sale “Sin precio” aunque el corralón lo tiene. ¿Qué hago?</summary><div><ol class="steps"><li><span>En el presupuesto, abrí <span class="ui">Renglones leídos del archivo</span> y fijate cómo está escrito el producto.</span></li><li><span>Para este proyecto, elegí ese renglón a mano en el desplegable del ítem.</span></li><li><span>Para que no vuelva a pasar, agregá esa palabra en <span class="ui">Buscar en el PDF</span> de la regla, en tu juego de reglas.</span></li></ol></div></details>
+        <details class="faq"><summary>La cantidad de bolsas (o camiones) es absurda. ¿Por qué?</summary><div><p>Casi siempre la presentación del renglón se leyó mal (por ejemplo, “por unidad” en lugar de “x 25 kg”). Corregila como se explica en <a href="#corregir-presentacion">Corregir la presentación de un renglón</a>.</p></div></details>
+        <details class="faq"><summary>El total no coincide con el del corralón.</summary><div><p>Es esperable: el corralón cotizó las cantidades que vos le pediste y Scalist calcula las que necesita tu obra. Para comparar precios unitarios, mirá la columna <span class="ui">Precio neto</span>. Revisá también el <span class="ui">IVA de los precios</span>: si el documento tenía IVA y se tomó como sin IVA, los netos quedan inflados un 21%.</p></div></details>
+        <details class="faq"><summary>El modelo quedó “procesando” y no avanza.</summary><div><p>Los modelos grandes pueden tardar varios minutos. Si pasaron más de 15 minutos sin cambios, volvé al paso <span class="ui">Modelo BIM</span> y subí el archivo de nuevo. Si vuelve a pasar, avisale a soporte.</p></div></details>
+        <details class="faq"><summary>Un compañero no ve un proyecto.</summary><div><p>Si el proyecto tiene equipo asignado, solo lo ven sus integrantes y los administradores. Pedile al jefe de obra o a un administrador que lo sume al equipo del proyecto.</p></div></details>
+        <details class="faq"><summary>No puedo pasar del paso Ubicación.</summary><div><p>Tenés que elegir la dirección <b>del listado de sugerencias</b>, no alcanza con escribirla. Si el paso solo muestra un aviso técnico y no hay buscador, la instalación no tiene configurado el servicio de mapas: avisale a soporte.</p></div></details>
+        <details class="faq"><summary>¿Puedo subir un PDF, DWG o DXF del plano?</summary><div><p>No. Scalist trabaja solo con modelos IFC porque son los únicos que traen medidas exactas. Si tu proyecto está en Revit, ArchiCAD, Vectorworks o Allplan, exportalo a IFC (ver <a href="#ifc">capítulo 6</a>).</p></div></details>
+      </section>
+
+      <!-- ===================================================== 13 -->
+      <section class="ch" id="referencia" data-title="Glosario y permisos">
+        <div class="ch-head"><span class="num">13</span><h2>Glosario y permisos</h2></div>
+        <h3 id="glosario">Glosario</h3>
+        <dl class="gloss">
+          <dt>Base quantities</dt><dd>Cantidades que el programa de diseño calcula y guarda dentro del IFC (largo, alto y superficie de cada elemento). Mejoran la exactitud del cómputo.</dd>
+          <dt>BIM</dt><dd>Modelo de información del edificio: un modelo 3D donde cada elemento sabe qué es (muro, losa, viga) y cuánto mide.</dd>
+          <dt>Desperdicio</dt><dd>Porcentaje que se suma a la cantidad de una regla para cubrir roturas y sobrantes.</dd>
+          <dt>IFC</dt><dd>Formato abierto para intercambiar modelos BIM entre programas. Archivo <code>.ifc</code>.</dd>
+          <dt>Juego de reglas</dt><dd>Conjunto de reglas de cómputo que usa un proyecto.</dd>
+          <dt>Neto</dt><dd>Precio sin IVA.</dd>
+          <dt>Presentación</dt><dd>Cómo vende el proveedor un producto: bolsa de 25 kg, camión de 6 m³, barra de 12 m, por unidad.</dd>
+          <dt>Renglón</dt><dd>Una línea del presupuesto del proveedor: código, descripción, cantidad y precio.</dd>
+          <dt>Riostra</dt><dd>Viga de fundación que vincula zapatas o bases.</dd>
+        </dl>
+        <h3 id="permisos">Permisos</h3>
+        <div class="tbl"><table>
+          <thead><tr><th>Acción</th><th>Plataforma</th><th>Admin org.</th><th>Jefe de obra</th><th>Capataz</th><th>Comitente</th></tr></thead>
+          <tbody>
+            <tr><td>Ver proyectos</td><td>Todos</td><td>Todos los de su org.</td><td>Los suyos</td><td>Los suyos</td><td>Los suyos</td></tr>
+            <tr><td>Crear proyectos nuevos</td><td>Sí</td><td>Sí</td><td colspan="3">Cualquier usuario de la organización</td></tr>
+            <tr><td>Editar o borrar un proyecto</td><td>Sí</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td></tr>
+            <tr><td>Ver presupuesto e importes</td><td>Sí</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td></tr>
+            <tr><td>Crear y editar juegos de reglas</td><td>Sí (también el estándar)</td><td>Sí (los de su org.)</td><td>No</td><td>No</td><td>No</td></tr>
+            <tr><td>Gestionar usuarios de la organización</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td><td>No</td></tr>
+            <tr><td>Gestionar organizaciones</td><td>Sí</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          </tbody>
+        </table></div>
+        <p class="end">Fin del manual · Scalist v1.0 · Las capturas usan datos ficticios.</p>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<div class="lb" id="lb" hidden><img alt=""></div>
+
+<script>
+(() => {
+  const sections = [...document.querySelectorAll('section.ch')];
+  const toc = document.getElementById('toc');
+  sections.forEach((s, i) => {
+    const li = document.createElement('li');
+    const subs = [...s.querySelectorAll('h3[id]')];
+    li.innerHTML = `<a href="#${s.id}"><span class="n">${String(i + 1).padStart(2, '0')}</span><span>${s.dataset.title}</span></a>` +
+      (subs.length ? `<ul class="sub">${subs.map(h => `<li><a href="#${h.id}"><span></span><span>${h.textContent}</span></a></li>`).join('')}</ul>` : '');
+    li.dataset.id = s.id;
+    toc.appendChild(li);
+  });
+
+  const links = new Map([...toc.querySelectorAll(':scope > li')].map(li => [li.dataset.id, li]));
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      links.forEach((li, id) => {
+        const on = id === e.target.id;
+        li.firstElementChild.classList.toggle('on', on);
+        li.classList.toggle('open', on);
+      });
+    });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  sections.forEach(s => io.observe(s));
+
+  // Buscador: filtra capítulos y subtítulos por el texto del contenido (sin distinguir tildes).
+  const q = document.getElementById('q');
+  const norm = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const text = new Map(sections.map(s => [s.id, norm(s.textContent)]));
+  q.addEventListener('input', () => {
+    const v = norm(q.value.trim());
+    links.forEach((li, id) => {
+      const hit = !v || text.get(id).includes(v);
+      li.hidden = !hit;
+      li.classList.toggle('open', !!v && hit);
+      li.querySelectorAll('.sub li').forEach(sub => {
+        const h = document.getElementById(sub.querySelector('a').hash.slice(1));
+        let block = norm(h.textContent), n = h.nextElementSibling;
+        while (n && n.tagName !== 'H3') { block += norm(n.textContent); n = n.nextElementSibling; }
+        sub.hidden = !!v && !block.includes(v);
+      });
+    });
+  });
+
+  // Visor de capturas
+  const lb = document.getElementById('lb');
+  const lbImg = lb.querySelector('img');
+  document.querySelectorAll('figure.shot .frame').forEach(btn => btn.addEventListener('click', () => {
+    const img = btn.querySelector('img');
+    lbImg.src = img.src; lbImg.alt = img.alt; lb.hidden = false;
+  }));
+  const close = () => { lb.hidden = true; };
+  lb.addEventListener('click', close);
+  addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+  // Figuras cuya imagen todavía no se generó: se quitan en vez de mostrarse rotas.
+  document.querySelectorAll('figure.shot img').forEach(img => img.addEventListener('error', () => img.closest('figure').remove()));
+
+  const side = document.getElementById('side');
+  document.getElementById('menuBtn').addEventListener('click', () => side.classList.toggle('show'));
+  toc.addEventListener('click', e => { if (e.target.closest('a')) side.classList.remove('show'); });
+})();
+</script>

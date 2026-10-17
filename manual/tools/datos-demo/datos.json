@@ -1,0 +1,46 @@
+{
+  "_nota": "Datos FICTICIOS del manual. Emails en dominios .demo, CUIT y direcciones inventados.",
+  "organizaciones": [
+    { "nombre": "Constructora Del Valle Demo S.R.L.", "estado": "active", "admin": "lucia.ferreyra@delvalle.demo", "principal": true },
+    { "nombre": "Estudio Pampa Arquitectura (demo)", "estado": "trialing", "admin": "contacto@pampa.demo" },
+    { "nombre": "Obras del Sur Demo S.A.", "estado": "past_due" }
+  ],
+  "usuarios": [
+    { "clave": "jefe", "email": "martin.acosta@delvalle.demo", "permiso": "member", "oficios": ["Jefe de obra", "Ingeniero civil"] },
+    { "clave": "capataz", "email": "ramon.sosa@delvalle.demo", "permiso": "member", "oficios": ["Capataz", "Oficial albañil"] },
+    { "clave": "comitente", "email": "familia.rios@cliente.demo", "permiso": "member", "oficios": [] },
+    { "clave": "computista", "email": "ana.benitez@delvalle.demo", "permiso": "member", "oficios": ["Arquitecto"] }
+  ],
+  "juegosDeReglas": [
+    { "nombre": "Obra económica", "descripcion": "Copia del estándar con desperdicios ajustados para obras chicas." }
+  ],
+  "proyectos": [
+    {
+      "clave": "activo",
+      "nombre": "Casa Los Aromos",
+      "descripcion": "Vivienda unifamiliar de dos plantas con techo a dos aguas.",
+      "ifc": "casa-los-aromos.ifc",
+      "juegoDeReglas": "Estándar Argentina",
+      "hasta": "activo",
+      "ubicacion": { "address": "Los Aromos 450, Villa Allende, Córdoba", "latitude": -31.2946, "longitude": -64.2953, "city": "Villa Allende", "country": "Argentina" },
+      "equipo": [
+        { "email": "martin.acosta@delvalle.demo", "rol": "jefe_obra" },
+        { "email": "ramon.sosa@delvalle.demo", "rol": "capataz" },
+        { "email": "familia.rios@cliente.demo", "rol": "comitente" }
+      ]
+    },
+    {
+      "clave": "borradorPrecios",
+      "nombre": "Dúplex Barrio Jardín",
+      "descripcion": "Dos unidades en espejo, estructura de hormigón armado.",
+      "ifc": "duplex-barrio-jardin.ifc",
+      "hasta": "modelo"
+    },
+    {
+      "clave": "borradorDatos",
+      "nombre": "Local comercial Av. Colón",
+      "descripcion": "Local en planta baja con entrepiso.",
+      "hasta": "datos"
+    }
+  ]
+}

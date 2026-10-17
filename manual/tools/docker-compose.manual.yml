@@ -1,0 +1,81 @@
+# Entorno AISLADO para generar el manual: base, cola, backend y worker propios,
+# en puertos que no chocan con el desarrollo (5432/6379/8000/3000).
+# Usa la misma imagen del backend que `docker compose build backend` (scalistai-backend)
+# y NO lee el .env del desarrollador: todas las variables están acá.
+# Se maneja con entorno-demo.ps1 (up | web | down | destroy).
+name: scalist-manual
+
+x-backend-env: &backend-env
+  ENVIRONMENT: development
+  POSTGRES_USER: manual
+  POSTGRES_PASSWORD: manual
+  POSTGRES_DB: scalist_manual
+  POSTGRES_HOST: pg
+  POSTGRES_PORT: "5432"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  # Secreto propio del demo: con él se firman las sesiones de las capturas (sin contraseñas).
+  JWT_SECRET: manual-demo-jwt-secret-solo-local-0123456789abcdef
+  JWT_ALGORITHM: HS256
+  JWT_EXPIRE_MINUTES: "480"
+  CORS_ORIGINS: http://localhost:3100
+  STORAGE_DIR: ./storage
+  WATCHFILES_FORCE_POLLING: "true"
+
+services:
+  pg:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: manual
+      POSTGRES_PASSWORD: manual
+      POSTGRES_DB: scalist_manual
+    ports:
+      - "5450:5432"
+    volumes:
+      - pg_manual:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U manual -d scalist_manual"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6390:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    image: scalistai-backend:latest
+    environment: *backend-env
+    ports:
+      - "8100:8000"
+    volumes:
+      - ../../backend:/app
+      - ./datos-demo/storage:/app/storage
+    depends_on:
+      pg:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    image: scalistai-backend:latest
+    environment: *backend-env
+    volumes:
+      - ../../backend:/app
+      - ./datos-demo/storage:/app/storage
+    depends_on:
+      pg:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: rq worker scalist-jobs --url redis://redis:6379
+
+volumes:
+  pg_manual:

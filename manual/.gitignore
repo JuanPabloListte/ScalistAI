@@ -1,0 +1,7 @@
+# Artefactos del entorno demo del manual
+tools/node_modules/
+tools/datos-demo/storage/
+tools/datos-demo/ifc/
+tools/datos-demo/ids.json
+tools/sesion-*.json
+videos/*.webm

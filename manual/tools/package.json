@@ -1,0 +1,15 @@
+{
+  "name": "manual-tools",
+  "private": true,
+  "type": "module",
+  "description": "Herramientas para regenerar el manual de usuario: datos demo, capturas, videos, verificación y PDF.",
+  "scripts": {
+    "capturas": "node capturar.mjs",
+    "videos": "node grabar-videos.mjs",
+    "verificar": "node verificar-manual.mjs ../index.html",
+    "pdf": "node exportar-pdf.mjs ../index.html"
+  },
+  "devDependencies": {
+    "playwright": "1.55.0"
+  }
+}
