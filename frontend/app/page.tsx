@@ -58,7 +58,7 @@ const FAQS: { q: string; a: string; show?: boolean }[] = [
   },
   {
     q: "¿Reemplaza al profesional que computa?",
-    a: "No, lo potencia. ScalistAI elimina el trabajo manual y repetitivo de medir, para que tu equipo se enfoque en revisar, decidir y presupuestar más rápido.",
+    a: "No, lo potencia. Scalist elimina el trabajo manual y repetitivo de medir, para que tu equipo se enfoque en revisar, decidir y presupuestar más rápido.",
   },
   {
     q: "¿Cómo empiezo?",
@@ -103,9 +103,9 @@ export default function LandingPage() {
         <div className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="ScalistAI Logo" className="h-full w-full object-contain" />
+            <img src="/logo.png" alt="Scalist Logo" className="h-full w-full object-contain" />
           </div>
-          ScalistAI
+          Scalist
         </div>
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
           <a href="#how" className="transition hover:text-white">Cómo funciona</a>
@@ -142,8 +142,8 @@ export default function LandingPage() {
         <p className="mt-8 max-w-2xl text-lg text-slate-400 sm:text-xl animate-slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
           {/* PIVOTE IFC */}
           {FEATURES.priceIntelligence
-            ? "ScalistAI computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto llave en mano con precios reales, cronograma y curva de inversión."
-            : "ScalistAI computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto, el cronograma y la curva de inversión."}
+            ? "Scalist computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto llave en mano con precios reales, cronograma y curva de inversión."
+            : "Scalist computa tu proyecto desde el modelo BIM (IFC) —muros, aberturas, estructura, fundaciones, hasta el acero en kilos— y genera el presupuesto, el cronograma y la curva de inversión."}
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center animate-slide-up" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
@@ -160,192 +160,6 @@ export default function LandingPage() {
           </a>
         </div>
 
-        {/* Product Mockup — réplica del layout de la app (Comentado temporalmente por migración directa a IFC) */}
-        {/* 
-        <div className="mt-20 w-full max-w-6xl animate-slide-up" style={{ animationDelay: '0.45s', animationFillMode: 'both' }}>
-          <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 text-left shadow-2xl shadow-brand-500/10">
-            <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-900/90 px-4 py-3">
-              <span className="h-3 w-3 rounded-full bg-red-400/70"></span>
-              <span className="h-3 w-3 rounded-full bg-yellow-400/70"></span>
-              <span className="h-3 w-3 rounded-full bg-green-400/70"></span>
-              <span className="ml-4 text-xs text-slate-500">app.scalistai.com</span>
-            </div>
-
-            <div className="flex">
-              <div className="hidden w-12 shrink-0 flex-col items-center gap-5 border-r border-slate-800 bg-slate-900/60 py-4 sm:flex">
-                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg">
-                  <img src="/logo.png" alt="Logo" className="h-full w-full object-contain brightness-0 invert opacity-90" />
-                </div>
-                <Folder className="h-5 w-5 text-brand-400" />
-                <Package className="h-5 w-5 text-slate-500" />
-                <Users className="h-5 w-5 text-slate-500" />
-                <Building2 className="h-5 w-5 text-slate-500" />
-                <Globe className="h-5 w-5 text-slate-500" />
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="border-b border-slate-800 px-5 py-4">
-                  <div className="flex items-center gap-1 text-xs text-slate-500">
-                    <ChevronLeft className="h-3.5 w-3.5" /> Volver a proyectos
-                  </div>
-                  <div className="mt-2 flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="text-lg font-bold text-white">Vivienda Dúplex Norte</h3>
-                        <p className="truncate text-xs text-slate-500">Duplex_Norte.ifc · IFC4 · 3 niveles</p>
-                    </div>
-                    <div className="hidden shrink-0 gap-2 md:flex">
-                      <span className="rounded-md border border-slate-700 px-2.5 py-1.5 text-[11px] font-medium text-slate-300">Tabla de escalas · 22</span>
-                      <span className="rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1.5 text-[11px] font-medium text-brand-300">Ver Cronograma (Gantt)</span>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex gap-5 overflow-x-auto text-xs">
-                    {[
-                      { label: "Muros", count: 1, active: true },
-                      { label: "Recinto", count: 1 },
-                      { label: "Abertura", count: 1 },
-                      { label: "Viga", count: 2 },
-                      { label: "Techo / Losa", count: 1 },
-                      { label: "Columna", count: 1 },
-                    ].map((t) => (
-                      <span key={t.label} className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-2 font-medium ${t.active ? "border-brand-500 text-white" : "border-transparent text-slate-500"}`}>
-                        {t.label}
-                        <span className={`rounded px-1 text-[10px] ${t.active ? "bg-brand-500/20 text-brand-300" : "bg-slate-800 text-slate-400"}`}>{t.count}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex">
-                  <div className="hidden w-60 shrink-0 border-r border-slate-800 p-4 lg:block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-sm font-semibold text-white">Elementos</span>
-                      <span className="text-[10px] text-slate-500">Todos</span>
-                    </div>
-                    <p className="mb-3 text-[10px] text-slate-500">Página 2 · 28 dibujados</p>
-
-                    <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-center">
-                      {[
-                        { v: "142.0 m", l: "Muros" },
-                        { v: "312.5 m²", l: "Recintos" },
-                        { v: "14", l: "Abert." },
-                        { v: "0.0 m", l: "Vigas" },
-                        { v: "0.0 m²", l: "Techos" },
-                        { v: "0", l: "Cols." },
-                      ].map((s) => (
-                        <div key={s.l}>
-                          <div className="text-[11px] font-bold text-brand-300">{s.v}</div>
-                          <div className="text-[9px] text-slate-500">{s.l}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mb-3 rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
-                      <div className="mb-2 text-[11px] font-semibold text-slate-300">Detección con IA</div>
-                      <div className="mb-2 grid grid-cols-3 gap-1.5">
-                        {["Muros", "Recintos", "Abert."].map((b) => (
-                          <span key={b} className="rounded border border-brand-500/30 bg-brand-500/10 py-1 text-center text-[9px] font-medium text-brand-300">{b}</span>
-                        ))}
-                      </div>
-                      <div className="rounded border border-slate-700 py-1 text-center text-[9px] text-slate-400">Ocultar dibujos IA</div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      {[
-                        { n: "Muro 1", d: "4.64 m · alt 2.80 m" },
-                        { n: "Muro 2", d: "5.40 m · alt 2.80 m" },
-                        { n: "Muro 3", d: "4.59 m · alt 2.80 m" },
-                        { n: "Muro 4", d: "3.27 m · alt 2.80 m" },
-                        { n: "Muro 5", d: "1.95 m · alt 2.80 m" },
-                      ].map((m) => (
-                        <div key={m.n} className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/40 px-2 py-1.5">
-                          <span className="h-3 w-3 shrink-0 rounded-sm border border-slate-600"></span>
-                          <span className="h-2 w-2 shrink-0 rounded-full bg-green-500"></span>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[11px] font-medium text-slate-200">{m.n}</div>
-                            <div className="text-[9px] text-slate-500">{m.d}</div>
-                          </div>
-                          <Trash2 className="h-3 w-3 shrink-0 text-slate-600" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="relative min-w-0 flex-1 bg-slate-950 p-5">
-                    <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:24px_24px] opacity-40"></div>
-                    <svg viewBox="0 0 400 300" className="relative w-full" role="img" aria-label="Plano analizado con detecciones de IA">
-                      <rect x="40" y="40" width="150" height="110" fill="rgba(14,165,233,0.10)" />
-                      <rect x="40" y="150" width="150" height="110" fill="rgba(99,102,241,0.10)" />
-                      <rect x="190" y="40" width="170" height="100" fill="rgba(56,189,248,0.10)" />
-                      <rect x="190" y="140" width="170" height="120" fill="rgba(14,165,233,0.08)" />
-                      <g stroke="#38bdf8" strokeWidth="3" fill="none" strokeLinecap="round">
-                        <rect x="40" y="40" width="320" height="220" />
-                        <line x1="190" y1="40" x2="190" y2="260" />
-                        <line x1="40" y1="150" x2="190" y2="150" />
-                        <line x1="190" y1="140" x2="360" y2="140" />
-                      </g>
-                      <g stroke="#fbbf24" strokeWidth="3" strokeLinecap="round">
-                        <line x1="95" y1="40" x2="135" y2="40" />
-                        <line x1="190" y1="80" x2="190" y2="115" />
-                        <line x1="115" y1="150" x2="150" y2="150" />
-                        <line x1="260" y1="260" x2="300" y2="260" />
-                      </g>
-                      <g stroke="#64748b" strokeWidth="1" strokeDasharray="3 3">
-                        <line x1="40" y1="278" x2="190" y2="278" />
-                      </g>
-                      <text x="95" y="292" fill="#94a3b8" fontSize="10">6.40 m</text>
-                    </svg>
-
-                    <div className="absolute left-9 top-9 flex items-center gap-1.5 rounded-md border border-brand-500/40 bg-brand-500/20 px-2 py-1 text-[10px] font-semibold text-brand-200 backdrop-blur-sm animate-float">
-                      <span className="h-1.5 w-1.5 rounded-full bg-brand-400"></span> Muro · 4.64 m
-                    </div>
-                    <div className="absolute right-7 top-20 flex items-center gap-1.5 rounded-md border border-yellow-500/40 bg-yellow-500/20 px-2 py-1 text-[10px] font-semibold text-yellow-200 backdrop-blur-sm animate-float" style={{ animationDelay: '1.5s' }}>
-                      <DoorOpen className="h-3 w-3" /> Abertura
-                    </div>
-
-                    <div className="absolute bottom-3 left-1/2 hidden -translate-x-1/2 items-center gap-3 rounded-full border border-slate-700 bg-slate-900/90 px-3 py-1.5 backdrop-blur-sm md:flex">
-                      <Ruler className="h-3.5 w-3.5 text-slate-400" />
-                      <PencilRuler className="h-3.5 w-3.5 text-brand-400" />
-                      <DoorOpen className="h-3.5 w-3.5 text-slate-400" />
-                      <span className="h-3 w-px bg-slate-700"></span>
-                      <span className="text-[10px] text-slate-400">23%</span>
-                    </div>
-                  </div>
-
-                  <div className="hidden w-56 shrink-0 border-l border-slate-800 p-4 xl:block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-sm font-semibold text-white">Cómputo</span>
-                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[9px] font-bold text-green-400">XLSX</span>
-                    </div>
-                    <p className="mb-3 text-[10px] text-slate-500">Página 2 · cantidades por material</p>
-
-                    <div className="space-y-2">
-                      {[
-                        { icon: Layers, l: "Superficie", v: "312,5 m²" },
-                        { icon: Ruler, l: "Mampostería", v: "142,0 ml" },
-                        { icon: DoorOpen, l: "Aberturas", v: "14 u" },
-                      ].map((row) => (
-                        <div key={row.l} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-                          <span className="flex items-center gap-2 text-[11px] text-slate-400">
-                            <row.icon className="h-3.5 w-3.5 text-slate-500" /> {row.l}
-                          </span>
-                          <span className="text-xs font-semibold text-white">{row.v}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-[11px] font-semibold text-green-300">
-                      <Check className="h-3.5 w-3.5" /> Listo para exportar
-                    </div>
-                    <button className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white">
-                      <Download className="h-3.5 w-3.5" /> Exportar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        */}
       </section>
 
       {/* How it works */}
@@ -379,7 +193,7 @@ export default function LandingPage() {
       <section id="features" className="relative z-10 border-t border-slate-800/50 bg-slate-900/50 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-6 py-24 md:px-12 lg:px-24">
           <div className="text-center mb-16">
-            <span className="text-sm font-semibold uppercase tracking-wider text-brand-400">Por qué ScalistAI</span>
+            <span className="text-sm font-semibold uppercase tracking-wider text-brand-400">Por qué Scalist</span>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">No solo medís más rápido. Decidís mejor.</h2>
             <p className="mt-4 text-slate-400">El impacto real en tu estudio va más allá de automatizar tareas.</p>
           </div>
@@ -514,9 +328,9 @@ export default function LandingPage() {
               <div className="flex items-center gap-2 text-white font-bold text-xl mb-4">
                 <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.png" alt="ScalistAI Logo" className="h-full w-full object-contain" />
+                  <img src="/logo.png" alt="Scalist Logo" className="h-full w-full object-contain" />
                 </div>
-                ScalistAI
+                Scalist
               </div>
               <p className="text-slate-400 max-w-sm">
                 {/* PIVOTE IFC */}
@@ -546,7 +360,7 @@ export default function LandingPage() {
 
           <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-sm text-slate-500">
-              © {new Date().getFullYear()} ScalistAI. Todos los derechos reservados.
+              © {new Date().getFullYear()} Scalist. Todos los derechos reservados.
             </p>
             <div className="flex gap-6 text-sm text-slate-500">
               <Link href="#" className="hover:text-slate-300">Términos</Link>

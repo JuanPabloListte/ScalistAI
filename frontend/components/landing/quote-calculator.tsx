@@ -75,7 +75,7 @@ export function QuoteCalculator() {
   }, [users, projects, modules, annual, P]);
 
   const waText = encodeURIComponent(
-    `Hola! Cotizé ScalistAI online:\n` +
+    `Hola! Cotizé Scalist online:\n` +
     `• Plan ${quote.plan}\n` +
     `• ${users} usuario${users !== 1 ? "s" : ""}\n` +
     `• Proyectos: ${P.projects[projects].label.toLowerCase()}\n` +

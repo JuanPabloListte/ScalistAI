@@ -367,7 +367,7 @@ def build_work_report_pdf(project_name: str, plan: dict, progress: dict,
 
     story.append(Spacer(1, 16))
     story.append(Paragraph(
-        "Generado por ScalistAI · Métricas derivadas del baseline persistido y de "
+        "Generado por Scalist · Métricas derivadas del baseline persistido y de "
         "registros reales de avance y costo (EVM ajustado por IPC INDEC).",
         styles["kpi_hint"]))
 

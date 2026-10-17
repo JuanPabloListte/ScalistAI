@@ -31,7 +31,7 @@ async def _lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ScalistAI API", version="0.1.0", lifespan=_lifespan)
+app = FastAPI(title="Scalist API", version="0.1.0", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,

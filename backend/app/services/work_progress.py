@@ -1,4 +1,4 @@
-"""Avance FÍSICO de obra: el diferencial de ScalistAI vs Project/Primavera.
+"""Avance FÍSICO de obra: el diferencial de Scalist vs Project/Primavera.
 
 El capataz NO estima un % a ojo: registra CANTIDADES reales ("hoy 45 m² de
 mampostería"). Como el plan nació del cómputo exacto del plano, el % se

@@ -82,11 +82,11 @@ export function AppSidebar() {
       <div className="flex flex-col items-center gap-6">
         <Link
           href="/projects"
-          aria-label="ScalistAI · Inicio"
+          aria-label="Scalist · Inicio"
           className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg transition hover:opacity-80"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="ScalistAI" className="h-full w-full object-contain dark:brightness-0 dark:invert dark:opacity-80" />
+          <img src="/logo.png" alt="Scalist" className="h-full w-full object-contain dark:brightness-0 dark:invert dark:opacity-80" />
         </Link>
 
         <nav className="flex flex-col items-center gap-1">

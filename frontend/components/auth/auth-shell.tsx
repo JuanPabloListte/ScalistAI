@@ -34,9 +34,9 @@ export function AuthShell({
         <Link href="/" className="mb-8 flex items-center justify-center gap-2 text-xl font-bold tracking-tight text-white">
           <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="ScalistAI" className="h-full w-full object-contain" />
+            <img src="/logo.png" alt="Scalist" className="h-full w-full object-contain" />
           </span>
-          ScalistAI
+          Scalist
         </Link>
 
         <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-8 shadow-2xl shadow-brand-500/10 backdrop-blur-sm">
