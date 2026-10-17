@@ -27,7 +27,7 @@ export function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`surface max-h-[90vh] w-full overflow-y-auto p-6 ${SIZES[size]}`}
+        className={`max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${SIZES[size]}`}
       >
         {children}
       </div>
