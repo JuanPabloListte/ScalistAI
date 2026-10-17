@@ -426,22 +426,24 @@ def _default_rules():
     ]
 
 
-def ensure_default_rule_set(organization_id: int, db: Session):
-    """Siembra el juego por defecto si la org no tiene ninguno. Idempotente,
-    también entre requests concurrentes (la UI pide lista + presupuesto a la
-    vez): un lock de transacción por org serializa el chequeo y el insert."""
+def ensure_system_rule_set(db: Session):
+    """Devuelve el juego global del sistema ("Estándar Argentina"), sembrándolo
+    si no existe. Idempotente también entre requests concurrentes (la UI pide
+    lista + presupuesto a la vez): un lock de transacción serializa el
+    chequeo y el insert."""
     from sqlalchemy import func
 
     from app.models.rule_set import RuleSet
 
     if db.bind is not None and db.bind.dialect.name == "postgresql":
-        db.execute(select(func.pg_advisory_xact_lock(func.hashtext("rule_sets_seed"), organization_id)))
-    existing = db.scalar(select(RuleSet).where(RuleSet.organization_id == organization_id))
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext("rule_sets_seed"), 0)))
+    existing = db.scalar(select(RuleSet).where(RuleSet.is_system.is_(True))
+                         .order_by(RuleSet.id))
     if existing is not None:
-        return None
-    rs = RuleSet(organization_id=organization_id, name=DEFAULT_RULE_SET_NAME,
+        return existing
+    rs = RuleSet(organization_id=None, name=DEFAULT_RULE_SET_NAME,
                  description=DEFAULT_RULE_SET_DESCRIPTION, is_default=True,
-                 rules=_default_rules())
+                 is_system=True, rules=_default_rules())
     db.add(rs)
     db.flush()
     return rs
@@ -450,19 +452,22 @@ def ensure_default_rule_set(organization_id: int, db: Session):
 def list_rule_sets(organization_id: int, db: Session) -> list:
     from app.models.rule_set import RuleSet
 
-    ensure_default_rule_set(organization_id, db)
+    from sqlalchemy import or_
+
+    ensure_system_rule_set(db)
     return list(db.scalars(
         select(RuleSet)
-        .where(RuleSet.organization_id == organization_id)
+        .where(or_(RuleSet.organization_id == organization_id, RuleSet.is_system.is_(True)))
         .options(selectinload(RuleSet.rules))
-        .order_by(RuleSet.is_default.desc(), RuleSet.name.asc())
+        .order_by(RuleSet.is_system.desc(), RuleSet.name.asc())
     ).all())
 
 
-def duplicate_rule_set(src, name: str, db: Session):
+def duplicate_rule_set(src, name: str, organization_id: int, db: Session):
+    """Copia `src` (de la org o el del sistema) a la org dada, editable."""
     from app.models.rule_set import Rule, RuleSet
 
-    rs = RuleSet(organization_id=src.organization_id, name=name,
+    rs = RuleSet(organization_id=organization_id, name=name,
                  description=src.description, is_default=False,
                  rules=[Rule(position=r.position, measure=r.measure, label=r.label,
                              keywords=list(r.keywords), exclude_keywords=list(r.exclude_keywords),

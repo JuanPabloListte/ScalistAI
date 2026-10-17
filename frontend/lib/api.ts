@@ -699,6 +699,9 @@ export type RuleSet = {
   name: string;
   description: string | null;
   is_default: boolean;
+  /** Juego global "Estándar Argentina": solo lo edita el superadmin. */
+  is_system: boolean;
+  organization_id: number | null;
   created_at: string;
   updated_at: string;
   rules: Rule[];

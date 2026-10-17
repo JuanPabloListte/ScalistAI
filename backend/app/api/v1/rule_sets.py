@@ -11,6 +11,11 @@ from app.services import budget_rules as br
 
 router = APIRouter(prefix="/rule-sets", tags=["rule-sets"])
 
+# Permisos:
+# - Juego del sistema ("Estándar Argentina", global): lo ven y duplican todos;
+#   solo el superadmin lo edita; nadie lo borra; siempre es el predeterminado.
+# - Juegos de la org: los edita/borra un admin de la org (o el superadmin).
+
 
 def _org_id(user: User) -> int:
     if user.organization_id is None:
@@ -24,9 +29,16 @@ def _get(rule_set_id: int, user: User, db: Session) -> RuleSet:
         .where(RuleSet.id == rule_set_id)
         .options(selectinload(RuleSet.rules))
     )
-    if rs is None or rs.organization_id != _org_id(user):
+    if rs is None or not (rs.is_system or rs.organization_id == _org_id(user)):
         raise HTTPException(status_code=404, detail="Juego de reglas no encontrado")
     return rs
+
+
+def _require_can_edit(rs: RuleSet, user: User) -> None:
+    if rs.is_system and not user.is_superadmin:
+        raise HTTPException(
+            status_code=403,
+            detail="El juego estándar no se puede modificar. Duplicalo para ajustar tu propia versión.")
 
 
 @router.get("/meta")
@@ -48,8 +60,9 @@ def list_rule_sets(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[RuleSet]:
+    """El juego del sistema primero, después los de la organización."""
     rows = br.list_rule_sets(_org_id(user), db)
-    db.commit()  # persiste el seed la primera vez
+    db.commit()  # persiste el seed del estándar la primera vez
     return rows
 
 
@@ -68,10 +81,11 @@ def create_rule_set(
     db: Session = Depends(get_db),
     user: User = Depends(require_org_admin),
 ) -> RuleSet:
+    """Crea un juego de la org, vacío o copiando otro (incluido el estándar)."""
     org_id = _org_id(user)
-    br.ensure_default_rule_set(org_id, db)
+    br.ensure_system_rule_set(db)
     if payload.copy_from_id is not None:
-        rs = br.duplicate_rule_set(_get(payload.copy_from_id, user, db), payload.name, db)
+        rs = br.duplicate_rule_set(_get(payload.copy_from_id, user, db), payload.name, org_id, db)
         if payload.description is not None:
             rs.description = payload.description
     else:
@@ -89,14 +103,12 @@ def update_rule_set(
     db: Session = Depends(get_db),
     user: User = Depends(require_org_admin),
 ) -> RuleSet:
+    """Reemplaza nombre, descripción y reglas. `is_default` se ignora: el
+    predeterminado es siempre el juego del sistema."""
     rs = _get(rule_set_id, user, db)
+    _require_can_edit(rs, user)
     rs.name = payload.name
     rs.description = payload.description
-    if payload.is_default and not rs.is_default:
-        for other in db.scalars(select(RuleSet).where(
-                RuleSet.organization_id == rs.organization_id, RuleSet.id != rs.id)):
-            other.is_default = False
-        rs.is_default = True
     rs.rules = [Rule(position=i, **r.model_dump()) for i, r in enumerate(payload.rules)]
     db.commit()
     db.expire_all()
@@ -110,12 +122,7 @@ def delete_rule_set(
     user: User = Depends(require_org_admin),
 ) -> None:
     rs = _get(rule_set_id, user, db)
-    others = list(db.scalars(select(RuleSet).where(
-        RuleSet.organization_id == rs.organization_id, RuleSet.id != rs.id)
-        .order_by(RuleSet.id)))
-    if not others:
-        raise HTTPException(status_code=400, detail="No se puede borrar el único juego de reglas.")
-    if rs.is_default:
-        others[0].is_default = True
-    db.delete(rs)
+    if rs.is_system:
+        raise HTTPException(status_code=400, detail="El juego estándar no se puede borrar.")
+    db.delete(rs)  # sus proyectos quedan con rule_set_id NULL → usan el estándar
     db.commit()

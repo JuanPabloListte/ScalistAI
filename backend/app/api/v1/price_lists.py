@@ -3,12 +3,10 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.rule_set import RuleSet
 from app.models.user import User
 from app.services import budget_rules as br
 from app.services import project_budget as pb
@@ -62,15 +60,10 @@ async def preview_project_budget(
             status_code=400,
             detail="El proyecto no tiene un modelo IFC procesado. Subí el modelo primero.")
 
-    br.ensure_default_rule_set(project.organization_id, db)
-    q = select(RuleSet).where(RuleSet.organization_id == project.organization_id)
-    if rule_set_id is not None:
-        q = q.where(RuleSet.id == rule_set_id)
-    else:
-        q = q.order_by(RuleSet.is_default.desc(), RuleSet.id)
-    rule_set = db.scalar(q.options(selectinload(RuleSet.rules)))
-    if rule_set is None:
-        raise HTTPException(status_code=404, detail="Juego de reglas no encontrado")
+    try:
+        rule_set = pb.resolve_rule_set(project, db, rule_set_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     db.commit()  # persiste el seed del juego por defecto si hizo falta
 
     price_list = await _read_and_parse(file, iva_included)

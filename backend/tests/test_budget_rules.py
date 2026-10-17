@@ -191,22 +191,30 @@ def _org_admin(db):
 
 def test_api_juegos_de_reglas():
     from app.core.database import SessionLocal
-    from app.models import Organization
-    from app.services.budget_rules import DEFAULT_RULES
+    from app.models import Organization, User
+    from app.services.budget_rules import DEFAULT_RULE_SET_NAME
 
     db = SessionLocal()
     org, admin, member = _org_admin(db)
     client, reset = _client_as(admin)
     try:
         rs = client.get("/api/v1/rule-sets").json()
-        assert len(rs) == 1 and rs[0]["is_default"] and len(rs[0]["rules"]) == len(DEFAULT_RULES)
-        default_id = rs[0]["id"]
-        assert len(client.get("/api/v1/rule-sets").json()) == 1, "el seed no se duplica"
+        estandar = [r for r in rs if r["is_system"]]
+        assert len(estandar) == 1, "siempre hay UN juego estándar global"
+        std = estandar[0]
+        assert std["name"] == DEFAULT_RULE_SET_NAME and std["is_default"]
+        assert std["organization_id"] is None and rs[0]["id"] == std["id"], "el estándar va primero"
+        std_id = std["id"]
 
+        # Un admin de org NO puede editar ni borrar el estándar...
+        r = client.put(f"/api/v1/rule-sets/{std_id}", json={"name": "x", "rules": []})
+        assert r.status_code == 403, r.text
+        assert client.delete(f"/api/v1/rule-sets/{std_id}").status_code == 400
+        # ...pero sí duplicarlo a su org y editar la copia.
         copia = client.post("/api/v1/rule-sets",
-                            json={"name": "Económica", "copy_from_id": default_id}).json()
-        assert copia["name"] == "Económica" and not copia["is_default"]
-        assert len(copia["rules"]) == len(DEFAULT_RULES)
+                            json={"name": "Económica", "copy_from_id": std_id}).json()
+        assert copia["organization_id"] == org.id and not copia["is_system"]
+        assert not copia["is_default"] and len(copia["rules"]) == len(std["rules"])
 
         upd = client.put(f"/api/v1/rule-sets/{copia['id']}", json={
             "name": "Económica", "description": "solo cemento", "is_default": True,
@@ -215,17 +223,30 @@ def test_api_juegos_de_reglas():
         })
         assert upd.status_code == 200, upd.text
         body = upd.json()
-        assert body["is_default"] and [r["keywords"] for r in body["rules"]] == [["cemento"]]
-        assert not client.get(f"/api/v1/rule-sets/{default_id}").json()["is_default"]
+        assert [r["keywords"] for r in body["rules"]] == [["cemento"]]
+        assert not body["is_default"], "el predeterminado es siempre el estándar"
 
         bad = client.put(f"/api/v1/rule-sets/{copia['id']}", json={
             "name": "x", "rules": [{"measure": "inventada", "label": "x", "keywords": ["x"],
                                     "unit": "kg", "factor": 1}]})
         assert bad.status_code == 422
 
+        # Otra org no ve la copia (sí el estándar).
+        otra = Organization(name=f"__test_org__{uuid.uuid4().hex[:8]}")
+        db.add(otra); db.flush()
+        ajeno = User(email=f"test-{uuid.uuid4().hex[:8]}@example.com", password_hash="x",
+                     organization_id=otra.id, org_role="admin")
+        db.add(ajeno); db.commit()
+        reset()
+        client, reset = _client_as(ajeno)
+        ids = [r["id"] for r in client.get("/api/v1/rule-sets").json()]
+        assert std_id in ids and copia["id"] not in ids
+        assert client.get(f"/api/v1/rule-sets/{copia['id']}").status_code == 404
+        db.delete(otra); db.commit()
+
+        reset()
+        client, reset = _client_as(admin)
         assert client.delete(f"/api/v1/rule-sets/{copia['id']}").status_code == 204
-        assert client.get(f"/api/v1/rule-sets/{default_id}").json()["is_default"]
-        assert client.delete(f"/api/v1/rule-sets/{default_id}").status_code == 400
 
         reset()
         client, reset = _client_as(member)
@@ -238,20 +259,55 @@ def test_api_juegos_de_reglas():
         db.close()
 
 
+def test_superadmin_edita_el_estandar():
+    from app.core.database import SessionLocal
+    from app.models import Organization, RuleSet, User
+
+    db = SessionLocal()
+    org, _, _ = _org_admin(db)
+    sa = User(email=f"test-{uuid.uuid4().hex[:8]}@example.com", password_hash="x",
+              organization_id=org.id, org_role="member", is_superadmin=True)
+    db.add(sa); db.commit()
+    client, reset = _client_as(sa)
+    std = next(r for r in client.get("/api/v1/rule-sets").json() if r["is_system"])
+    original = db.get(RuleSet, std["id"])
+    backup = {"name": original.name, "description": original.description,
+              "rules": [{k: getattr(r, k) for k in ("measure", "label", "keywords",
+                         "exclude_keywords", "unit", "factor", "mode", "waste_pct", "notes")}
+                        for r in original.rules]}
+    try:
+        payload = {**backup, "rules": backup["rules"][:1]}
+        r = client.put(f"/api/v1/rule-sets/{std['id']}", json=payload)
+        assert r.status_code == 200, r.text
+        assert len(r.json()["rules"]) == 1 and r.json()["is_system"]
+    finally:
+        # Restaurar el estándar tal cual estaba.
+        r = client.put(f"/api/v1/rule-sets/{std['id']}", json=backup)
+        assert r.status_code == 200 and len(r.json()["rules"]) == len(backup["rules"])
+        reset()
+        db.delete(db.get(Organization, org.id))
+        db.commit()
+        db.close()
+
+
 def test_seed_concurrente_no_duplica():
     """La UI pide la lista de juegos y el presupuesto a la vez: los dos
-    requests siembran en paralelo y antes se creaban dos predeterminados."""
+    requests siembran en paralelo y antes se creaban dos estándar.
+
+    Para reproducirlo sin tocar el estándar real, se lo "esconde" (is_system
+    = false) mientras corre el test y se lo restaura al final."""
     import threading
     import time
 
     from app.core.database import SessionLocal
-    from app.models import Organization, RuleSet
-    from app.services.budget_rules import ensure_default_rule_set
+    from app.models import RuleSet
+    from app.services.budget_rules import ensure_system_rule_set
 
     db = SessionLocal()
-    org = Organization(name=f"__test_org__{uuid.uuid4().hex[:8]}")
-    db.add(org); db.commit()
-    org_id = org.id  # no tocar `org` desde los threads (es de otra sesión)
+    hidden = [r.id for r in db.query(RuleSet).filter_by(is_system=True)]
+    for rid in hidden:
+        db.get(RuleSet, rid).is_system = False
+    db.commit()
     barrier = threading.Barrier(4)
     errors = []
 
@@ -259,7 +315,7 @@ def test_seed_concurrente_no_duplica():
         s = SessionLocal()
         try:
             barrier.wait()
-            ensure_default_rule_set(org_id, s)
+            ensure_system_rule_set(s)
             # Transacción abierta un rato: sin el lock, los demás threads no
             # ven el seed sin confirmar y siembran otro.
             time.sleep(0.5)
@@ -276,10 +332,15 @@ def test_seed_concurrente_no_duplica():
         for t in threads:
             t.join()
         assert not errors, errors
-        n = db.query(RuleSet).filter_by(organization_id=org_id).count()
-        assert n == 1, f"se crearon {n} juegos por defecto"
+        nuevos = db.query(RuleSet).filter_by(is_system=True).all()
+        assert len(nuevos) == 1, f"se crearon {len(nuevos)} juegos estándar"
     finally:
-        db.delete(db.get(Organization, org_id))
+        db.rollback()
+        for r in db.query(RuleSet).filter_by(is_system=True).all():
+            if r.id not in hidden:
+                db.delete(r)
+        for rid in hidden:
+            db.get(RuleSet, rid).is_system = True
         db.commit()
         db.close()
 

@@ -23,13 +23,16 @@ class RuleSet(Base):
     __tablename__ = "rule_sets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    organization_id: Mapped[int] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    # NULL = juego global del sistema ("Estándar Argentina"): lo ven todas
+    # las orgs y solo lo edita el superadmin.
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True,
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # El que se preselecciona al crear un proyecto (uno por org).
+    # El que se preselecciona al crear un proyecto: el juego del sistema.
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
@@ -37,7 +40,7 @@ class RuleSet(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
 
-    organization: Mapped["Organization"] = relationship()
+    organization: Mapped["Organization | None"] = relationship()
     rules: Mapped[list["Rule"]] = relationship(
         back_populates="rule_set", cascade="all, delete-orphan",
         order_by="Rule.position",

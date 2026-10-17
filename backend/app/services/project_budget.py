@@ -39,22 +39,23 @@ def model_status(project_id: int, db: Session) -> str:
 
 
 def resolve_rule_set(project: Project, db: Session, rule_set_id: int | None = None) -> RuleSet:
-    """El juego pedido, el del proyecto, o el predeterminado de la org."""
-    br.ensure_default_rule_set(project.organization_id, db)
+    """El juego pedido, el del proyecto, o el estándar del sistema. Sirven los
+    de la org del proyecto y el del sistema."""
+    from sqlalchemy import or_
+
+    system = br.ensure_system_rule_set(db)
     for rid in (rule_set_id, project.rule_set_id):
         if rid is None:
             continue
         rs = db.scalar(select(RuleSet).where(
-            RuleSet.id == rid, RuleSet.organization_id == project.organization_id)
+            RuleSet.id == rid,
+            or_(RuleSet.organization_id == project.organization_id, RuleSet.is_system.is_(True)))
             .options(selectinload(RuleSet.rules)))
         if rs is not None:
             return rs
         if rid == rule_set_id:
             raise LookupError("Juego de reglas no encontrado")
-    return db.scalar(
-        select(RuleSet).where(RuleSet.organization_id == project.organization_id)
-        .order_by(RuleSet.is_default.desc(), RuleSet.id)
-        .options(selectinload(RuleSet.rules)))
+    return system
 
 
 def get_price_list(project_id: int, db: Session) -> ProjectPriceList | None:

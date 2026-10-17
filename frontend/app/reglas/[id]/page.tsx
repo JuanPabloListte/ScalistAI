@@ -132,14 +132,35 @@ export default function RuleSetEditorPage() {
   }, [id, router]);
 
   const isAdmin = !!(me?.is_superadmin || me?.role === "admin");
+  // El estándar del sistema solo lo edita el superadmin; los de la org, un admin.
+  const canEdit = original?.is_system ? !!me?.is_superadmin : isAdmin;
+  const [query, setQuery] = useState("");
+  const [measureFilter, setMeasureFilter] = useState("");
+  const [duplicating, setDuplicating] = useState(false);
+  const q = query.trim().toLowerCase();
+  const filtering = !!q || !!measureFilter;
+  const matches = (r: DraftRule) =>
+    (!measureFilter || r.measure === measureFilter) &&
+    (!q || [r.label, r.keywords, r.exclude, r.notes].some((t) => t.toLowerCase().includes(q)));
   const measureOrder = useMemo(() => meta?.measures.map((m) => m.key) ?? [], [meta]);
   const savedPayload = useMemo(
     () => (original ? JSON.stringify(toPayload(toDraft(original), measureOrder)) : ""),
     [original, measureOrder],
   );
   const dirty = !!draft && JSON.stringify(toPayload(draft, measureOrder)) !== savedPayload;
-  // El predeterminado se cambia marcando OTRO juego (siempre tiene que haber uno).
-  const lockedDefault = !!original?.is_default;
+
+  async function duplicate() {
+    if (!original) return;
+    setDuplicating(true);
+    setError(null);
+    try {
+      const copy = await api.createRuleSet({ name: `${original.name} (copia)`, copy_from_id: original.id });
+      router.push(`/reglas/${copy.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo duplicar");
+      setDuplicating(false);
+    }
+  }
 
   useEffect(() => {
     if (!dirty) return;
@@ -214,7 +235,7 @@ export default function RuleSetEditorPage() {
           <span className="font-semibold text-slate-700 dark:text-slate-300">Nombre</span>
           <input
             value={draft.name}
-            disabled={!isAdmin}
+            disabled={!canEdit}
             maxLength={120}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             className={`mt-1 ${inputCls}`}
@@ -224,25 +245,75 @@ export default function RuleSetEditorPage() {
           <span className="font-semibold text-slate-700 dark:text-slate-300">Descripción</span>
           <input
             value={draft.description}
-            disabled={!isAdmin}
+            disabled={!canEdit}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             className={`mt-1 ${inputCls}`}
           />
         </label>
-        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 md:col-span-2">
-          <input
-            type="checkbox"
-            checked={draft.is_default}
-            disabled={!isAdmin || lockedDefault}
-            onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
-            className="rounded border-slate-300"
-          />
-          Preseleccionado al crear un proyecto
-          {lockedDefault && (
-            <span className="text-xs text-slate-400">(para cambiarlo, marcá otro juego como predeterminado)</span>
-          )}
-        </label>
       </section>
+
+      {original?.is_system && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-500/10 dark:text-brand-200">
+          <span>
+            <strong>Juego estándar</strong> · se usa por defecto en todos los proyectos.{" "}
+            {canEdit
+              ? "Estás editando el estándar de todas las organizaciones."
+              : "Es de solo lectura: duplicalo para ajustar tu propia versión."}
+          </span>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => void duplicate()}
+              disabled={duplicating}
+              className="rounded-md border border-brand-500/40 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:bg-slate-900 dark:text-brand-300"
+            >
+              {duplicating ? "Duplicando…" : "Duplicar para editar"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Filtro: el juego tiene muchas reglas */}
+      <div className="sticky top-0 z-20 -mx-6 mt-4 border-b border-slate-200 bg-white/90 px-6 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar producto o palabra clave…"
+            className="min-w-[220px] flex-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          />
+          <select
+            value={measureFilter}
+            onChange={(e) => setMeasureFilter(e.target.value)}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          >
+            <option value="">Todas las medidas</option>
+            {meta.measures.map((m) => {
+              const n = draft.rules.filter((r) => r.measure === m.key).length;
+              return (
+                <option key={m.key} value={m.key}>
+                  {m.label} ({n})
+                </option>
+              );
+            })}
+          </select>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {filtering
+              ? `${draft.rules.filter(matches).length} de ${draft.rules.length} reglas`
+              : `${draft.rules.length} reglas`}
+          </span>
+          {filtering && (
+            <button
+              type="button"
+              onClick={() => { setQuery(""); setMeasureFilter(""); }}
+              className="text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400"
+            >
+              Limpiar
+            </button>
+          )}
+        </div>
+      </div>
 
       <p className="mt-6 text-xs text-slate-500 dark:text-slate-400">
         Cada regla toma una medida del modelo y la convierte en un producto. El producto se busca en
@@ -252,15 +323,18 @@ export default function RuleSetEditorPage() {
       </p>
 
       {meta.measures.map((m) => {
-        const rules = draft.rules.filter((r) => r.measure === m.key);
-        if (!isAdmin && rules.length === 0) return null;
+        const all = draft.rules.filter((r) => r.measure === m.key);
+        const rules = all.filter(matches);
+        if (measureFilter && measureFilter !== m.key) return null;
+        if (q && rules.length === 0) return null;
+        if (!canEdit && all.length === 0) return null;
         return (
           <section key={m.key} className="mt-6">
             <h2 className="mb-2 flex items-baseline justify-between gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
               <span>
                 {m.label} <span className="font-normal text-slate-400">· por {UNIT_LABEL[m.unit] ?? m.unit}</span>
               </span>
-              {isAdmin && (
+              {canEdit && (
                 <button
                   type="button"
                   onClick={() => addRule(m.key)}
@@ -280,7 +354,7 @@ export default function RuleSetEditorPage() {
                     rule={r}
                     measureUnit={m.unit}
                     meta={meta}
-                    disabled={!isAdmin}
+                    disabled={!canEdit}
                     inputCls={inputCls}
                     onChange={(p) => patchRule(r.uid, p)}
                     onDelete={() => setDraft({ ...draft, rules: draft.rules.filter((x) => x.uid !== r.uid) })}
@@ -292,7 +366,7 @@ export default function RuleSetEditorPage() {
         );
       })}
 
-      {isAdmin && (
+      {canEdit && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/90 py-3 pl-16 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
           <div className="mx-auto flex max-w-6xl items-center justify-end gap-3 px-6">
             {error && <p className="mr-auto text-sm text-red-600 dark:text-red-400">{error}</p>}
