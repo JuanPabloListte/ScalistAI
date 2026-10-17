@@ -165,62 +165,62 @@ export function ProjectPricesPanel({
         </p>
       </div>}
 
-      <div className="flex flex-wrap items-end gap-4">
-        <label className="text-sm">
-          <span className="font-semibold text-slate-700 dark:text-slate-300">Reglas de cómputo</span>
-          <select
-            value={view?.rule_set?.id ?? ""}
-            disabled={busy || uploading}
-            onChange={(e) => patch({ rule_set_id: Number(e.target.value) })}
-            className="mt-1 block rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          >
-            {ruleSets.map((rs) => (
-              <option key={rs.id} value={rs.id}>
-                {rs.name}{rs.is_default ? " (por defecto)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {pl && (
-          <label className="text-sm">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Los precios del archivo</span>
-            <select
+      {pl ? (
+        <div className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700 md:grid-cols-[1.4fr_1fr_1fr]">
+          <Field label="Archivo del proveedor">
+            <div className="flex items-start gap-3">
+              <FileIcon />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100" title={pl.filename}>
+                  {pl.filename}
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {[pl.supplier, pl.document_date && new Date(pl.document_date + "T12:00").toLocaleDateString("es-AR"),
+                    `${pl.lines.length} renglones`].filter(Boolean).join(" · ")}
+                </div>
+                <FilePicker label={uploading ? "Leyendo…" : "Reemplazar archivo"} disabled={uploading || busy} onChange={handleFile} small />
+              </div>
+            </div>
+          </Field>
+          <Field label="Reglas de cómputo">
+            <RuleSetSelect ruleSets={ruleSets} value={view?.rule_set?.id} disabled={busy || uploading}
+                           onChange={(id) => patch({ rule_set_id: id })} />
+            <a href="/reglas" target="_blank" className="mt-1.5 inline-block text-xs text-brand hover:underline dark:text-sky-400">
+              Ver las reglas ↗
+            </a>
+          </Field>
+          <Field label="IVA de los precios">
+            <Select
               value={pl.iva_mode}
               disabled={busy || uploading}
-              onChange={(e) => patch({ iva_mode: e.target.value as IvaMode })}
-              className="mt-1 block rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            >
-              <option value="auto">
-                Detectar ({pl.iva_mode === "auto" ? (pl.iva.included ? "con IVA" : "sin IVA") : "automático"})
-              </option>
-              <option value="included">Incluyen IVA</option>
-              <option value="excluded">No incluyen IVA</option>
-            </select>
-          </label>
-        )}
-      </div>
-
-      {pl ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm dark:border-slate-700">
-          <div>
-            <div className="font-medium">{pl.filename}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              {[pl.supplier, pl.document_date && new Date(pl.document_date + "T12:00").toLocaleDateString("es-AR"),
-                `${pl.lines.length} renglones`,
-                pl.iva.included ? "precios con IVA → se guardan netos" : "precios sin IVA",
-              ].filter(Boolean).join(" · ")}
-              {pl.iva_mode === "auto" && <span className="text-slate-400"> ({pl.iva.method})</span>}
-            </div>
-          </div>
-          <FilePicker label={uploading ? "Leyendo…" : "Reemplazar archivo"} disabled={uploading || busy} onChange={handleFile} small />
+              onChange={(v) => patch({ iva_mode: v as IvaMode })}
+              options={[
+                { value: "auto", label: "Detectar automáticamente" },
+                { value: "included", label: "Incluyen IVA" },
+                { value: "excluded", label: "No incluyen IVA" },
+              ]}
+            />
+            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              {pl.iva_mode === "auto"
+                ? <>Detectado: <strong className="font-medium text-slate-700 dark:text-slate-300">{pl.iva.included ? "con IVA" : "sin IVA"}</strong> · {pl.iva.method.replace(/^aritmética: /, "")}</>
+                : pl.iva.included ? "Se descuenta el 21% para guardar precios netos." : "Se usan tal cual, como precios netos."}
+            </p>
+          </Field>
         </div>
       ) : (
-        <FilePicker
-          label={uploading ? "Leyendo el archivo…" : "Hacé clic para elegir el presupuesto (PDF, Excel o CSV)"}
-          disabled={uploading}
-          onChange={handleFile}
-        />
+        <>
+          <div className="max-w-sm">
+            <Field label="Reglas de cómputo" bare>
+              <RuleSetSelect ruleSets={ruleSets} value={view?.rule_set?.id} disabled={busy || uploading}
+                             onChange={(id) => patch({ rule_set_id: id })} />
+            </Field>
+          </div>
+          <FilePicker
+            label={uploading ? "Leyendo el archivo…" : "Hacé clic para elegir el presupuesto (PDF, Excel o CSV)"}
+            disabled={uploading}
+            onChange={handleFile}
+          />
+        </>
       )}
 
       {pl && pl.warnings.length > 0 && (
@@ -267,6 +267,83 @@ export function ProjectPricesPanel({
   );
 }
 
+function Field({ label, bare, children }: { label: string; bare?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={bare ? "" : "bg-white p-4 dark:bg-slate-800"}>
+      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Select({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  disabled?: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10 w-full cursor-pointer appearance-none rounded-lg border border-slate-300 bg-white pl-3 pr-9 text-sm text-slate-900 transition hover:border-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-500"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </div>
+  );
+}
+
+function RuleSetSelect({
+  ruleSets,
+  value,
+  disabled,
+  onChange,
+}: {
+  ruleSets: RuleSet[];
+  value: number | undefined;
+  disabled?: boolean;
+  onChange: (id: number) => void;
+}) {
+  return (
+    <Select
+      value={value != null ? String(value) : ""}
+      disabled={disabled}
+      onChange={(v) => onChange(Number(v))}
+      options={ruleSets.map((rs) => ({
+        value: String(rs.id),
+        label: rs.name,
+      }))}
+    />
+  );
+}
+
+function FileIcon() {
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
+      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <path d="M14 2v6h6" />
+        <path d="M8 13h8M8 17h5" />
+      </svg>
+    </div>
+  );
+}
+
 function FilePicker({
   label,
   disabled,
@@ -282,7 +359,7 @@ function FilePicker({
     <label
       className={
         small
-          ? `cursor-pointer rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800 ${disabled ? "pointer-events-none opacity-50" : ""}`
+          ? `mt-1.5 inline-block cursor-pointer text-xs font-medium text-brand hover:underline dark:text-sky-400 ${disabled ? "pointer-events-none opacity-50" : ""}`
           : `flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-6 py-10 text-center transition ${
               disabled
                 ? "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"

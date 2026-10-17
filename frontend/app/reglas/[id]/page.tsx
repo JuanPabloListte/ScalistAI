@@ -19,6 +19,12 @@ const UNIT_LABEL: Record<string, string> = {
   kg: "kg", m3: "m³", m2: "m²", m: "m", l: "litros", u: "unidades",
 };
 
+// Nombre corto de cada medida para las pestañas.
+const TAB_LABEL: Record<string, string> = {
+  muro_m2: "Muros", columna_m3: "Columnas", viga_ml: "Vigas", riostra_ml: "Riostras",
+  techo_m2: "Techo", sup_cubierta_m2: "Pisos", cielorraso_m2: "Cielorrasos", armadura_kg: "Armadura",
+};
+
 // Fila en edición: listas de palabras como texto ("cemento, portland") y el
 // factor como string para no pelear con el input numérico mientras se tipea.
 type DraftRule = {
@@ -136,7 +142,6 @@ export default function RuleSetEditorPage() {
   const canEdit = original?.is_system ? !!me?.is_superadmin : isAdmin;
   const [query, setQuery] = useState("");
   const [measureFilter, setMeasureFilter] = useState("");
-  const [duplicating, setDuplicating] = useState(false);
   const q = query.trim().toLowerCase();
   const filtering = !!q || !!measureFilter;
   const matches = (r: DraftRule) =>
@@ -148,19 +153,6 @@ export default function RuleSetEditorPage() {
     [original, measureOrder],
   );
   const dirty = !!draft && JSON.stringify(toPayload(draft, measureOrder)) !== savedPayload;
-
-  async function duplicate() {
-    if (!original) return;
-    setDuplicating(true);
-    setError(null);
-    try {
-      const copy = await api.createRuleSet({ name: `${original.name} (copia)`, copy_from_id: original.id });
-      router.push(`/reglas/${copy.id}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo duplicar");
-      setDuplicating(false);
-    }
-  }
 
   useEffect(() => {
     if (!dirty) return;
@@ -252,67 +244,41 @@ export default function RuleSetEditorPage() {
         </label>
       </section>
 
-      {original?.is_system && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-500/10 dark:text-brand-200">
-          <span>
-            <strong>Juego estándar</strong> · se usa por defecto en todos los proyectos.{" "}
-            {canEdit
-              ? "Estás editando el estándar de todas las organizaciones."
-              : "Es de solo lectura: duplicalo para ajustar tu propia versión."}
-          </span>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => void duplicate()}
-              disabled={duplicating}
-              className="rounded-md border border-brand-500/40 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:bg-slate-900 dark:text-brand-300"
-            >
-              {duplicating ? "Duplicando…" : "Duplicar para editar"}
+      {/* TABS por medida */}
+      <div className="mt-6 flex gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+        {[{ key: "", label: "Todas", n: draft.rules.length },
+          ...meta.measures
+            .map((m) => ({ key: m.key, label: TAB_LABEL[m.key] ?? m.label,
+                           n: draft.rules.filter((r) => r.measure === m.key).length }))
+            .filter((t) => t.n > 0 || canEdit),
+        ].map((t) => {
+          const active = measureFilter === t.key;
+          return (
+            <button key={t.key || "all"} type="button" onClick={() => setMeasureFilter(t.key)}
+                    className={`whitespace-nowrap border-b-2 px-1 pb-2 text-sm font-medium transition ${
+              active
+                ? "border-brand-500 text-brand-600 dark:border-brand-400 dark:text-brand-400"
+                : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+            }`}>
+              {t.label} <span className="text-xs text-slate-400">{t.n}</span>
             </button>
-          )}
-        </div>
-      )}
+          );
+        })}
+      </div>
 
-      {/* Filtro: el juego tiene muchas reglas */}
-      <div className="sticky top-0 z-20 -mx-6 mt-4 border-b border-slate-200 bg-white/90 px-6 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar producto o palabra clave…"
-            className="min-w-[220px] flex-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          />
-          <select
-            value={measureFilter}
-            onChange={(e) => setMeasureFilter(e.target.value)}
-            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          >
-            <option value="">Todas las medidas</option>
-            {meta.measures.map((m) => {
-              const n = draft.rules.filter((r) => r.measure === m.key).length;
-              return (
-                <option key={m.key} value={m.key}>
-                  {m.label} ({n})
-                </option>
-              );
-            })}
-          </select>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {filtering
-              ? `${draft.rules.filter(matches).length} de ${draft.rules.length} reglas`
-              : `${draft.rules.length} reglas`}
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <input
+          type="search"
+          placeholder="Filtrar..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
+        />
+        {filtering && (
+          <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+            {draft.rules.filter(matches).length} de {draft.rules.length} reglas
           </span>
-          {filtering && (
-            <button
-              type="button"
-              onClick={() => { setQuery(""); setMeasureFilter(""); }}
-              className="text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400"
-            >
-              Limpiar
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
       <p className="mt-6 text-xs text-slate-500 dark:text-slate-400">
