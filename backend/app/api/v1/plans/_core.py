@@ -165,9 +165,7 @@ def recommend_plan_pages(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Analiza el PDF y recomienda páginas aplicando overrides manuales del usuario."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF original no disponible")
@@ -206,9 +204,7 @@ def suggest_page_roles(
     si una página es planta, corte, planilla, estructura, etc. y sugiere los
     roles apropiados para la detección.
     """
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF original no disponible")
@@ -229,9 +225,7 @@ def set_page_override(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Setea o quita el override manual para una página."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     try:
         page = int(payload["page"])
@@ -271,9 +265,7 @@ def delete_page(
     """Elimina físicamente una página del PDF y migra todos los datos asociados."""
     import fitz
 
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     if page < 1 or (plan.page_count and page > plan.page_count):
         raise HTTPException(status_code=400, detail="Número de página inválido")

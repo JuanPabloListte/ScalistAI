@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_superadmin
 from app.models import Plan, User
+from app.services import project_access as pa
 
 router = APIRouter(tags=["plans"])
 
@@ -59,9 +60,7 @@ def generate_synthetic_dataset(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Genera N variaciones sintéticas de una página para el dataset de fine-tuning."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     try:
         page = int(payload.get("page", 1))

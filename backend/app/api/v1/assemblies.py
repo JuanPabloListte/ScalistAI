@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_org_admin
 from app.models import Assembly, AssemblyMaterial, Material, User
 from app.schemas.assembly import (
     AssemblyCreate,
@@ -47,7 +47,7 @@ def list_assemblies(
 def create_assembly(
     payload: AssemblyCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ) -> Assembly:
     stmt = select(Assembly).where(
         Assembly.name == payload.name,
@@ -108,7 +108,7 @@ def update_assembly(
     assembly_id: int,
     payload: AssemblyUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ) -> Assembly:
     assembly = db.get(Assembly, assembly_id)
     if not assembly or assembly.organization_id != user.organization_id:
@@ -165,7 +165,7 @@ def update_assembly(
 def delete_assembly(
     assembly_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ):
     assembly = db.get(Assembly, assembly_id)
     if not assembly or assembly.organization_id != user.organization_id:

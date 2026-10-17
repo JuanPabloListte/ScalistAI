@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Plan, User
+from app.services import project_access as pa
 from app.services.pdf import page_count, rasterize
 from app.services.preprocess import enhance_for_display
 from app.services.prewarm import prewarm_plan_pages
@@ -25,9 +26,7 @@ def start_prewarm(
     user: User = Depends(get_current_user),
 ) -> dict[str, int | str]:
     """Dispara (idempotente) el pre-render de todas las páginas en background."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
 
     # Los planos CAD se sirven como SVG vectorial: no hay nada que pre-rasterizar
     # y PyMuPDF no puede abrir el .svg.
@@ -57,9 +56,7 @@ def get_plan_raster(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FileResponse:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
 
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -119,9 +116,7 @@ def get_render_status(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, int]:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     total = plan.page_count or 0
     # Los planos CAD no rasterizan en background: sus páginas (SVG/PNG) quedan
     # listas en el import, así que el conteo de PNGs cacheados no aplica.

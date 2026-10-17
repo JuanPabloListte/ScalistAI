@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Plan, User
+from app.services import project_access as pa
 from app.schemas.plan import ScaleByRatio, ScaleCalibration, ScaleDirect
 from app.services.auto_scale import detect_scales
 from app.services.dimension_text import extract_dimensions
@@ -23,9 +24,7 @@ def calibrate_scale(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Calibra la escala de una página manualmente y la guarda en page_scales[page]."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     if plan.page_count and payload.page > plan.page_count:
         raise HTTPException(status_code=400, detail="Página fuera de rango")
@@ -54,9 +53,7 @@ def set_scale_direct(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Setea la escala de una página a partir de un px_per_m ya calculado."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
     if plan.page_count and payload.page > plan.page_count:
         raise HTTPException(status_code=400, detail="Página fuera de rango")
     scales = dict(plan.page_scales or {})
@@ -76,9 +73,7 @@ def set_scale_by_ratio(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Setea la escala de una página dando directamente el denominador (1:N)."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
     if plan.page_count and payload.page > plan.page_count:
         raise HTTPException(status_code=400, detail="Página fuera de rango")
 
@@ -101,9 +96,7 @@ def set_bulk_scale_by_ratio(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Setea la escala de varias páginas a la vez dando sus denominadores (1:N)."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     dpi = plan.dpi or RASTER_DPI
     scales = dict(plan.page_scales or {})
@@ -134,9 +127,7 @@ def clear_page_scale(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Borra la escala de una página puntual."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
     scales = dict(plan.page_scales or {})
     scales.pop(str(page), None)
     plan.page_scales = scales or None
@@ -155,9 +146,7 @@ def auto_detect_scale(
 
     Las calibraciones manuales previas tienen precedencia y no se sobreescriben.
     """
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
     from pathlib import Path
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -181,9 +170,7 @@ def preview_auto_detect_scale(
     user: User = Depends(get_current_user),
 ) -> dict[str, int]:
     """Escanea el texto del PDF y devuelve las escalas detectadas sin guardarlas."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     from pathlib import Path
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():
@@ -213,9 +200,7 @@ def list_page_dimensions(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Devuelve las cotas decimales detectadas en el texto vectorial del PDF."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     from pathlib import Path
     pdf_path = Path(plan.pdf_path)
     if not pdf_path.exists():

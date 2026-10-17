@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_org_admin
 from app.cost_intelligence.application.use_cases.compare_scenarios import CompareScenarios
 from app.cost_intelligence.application.use_cases.forecast_cost import ForecastCost
 from app.cost_intelligence.application.use_cases.run_simulation import RunSimulation
@@ -275,7 +275,7 @@ def get_cost_settings(
 def update_cost_settings(
     payload: CostSettingsUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ) -> CostSettingsRead:
     s = SqlCostSettingsRepo(db).update(
         user.organization_id,
@@ -303,7 +303,7 @@ def get_parametric_rubros(
 def update_parametric_rubros(
     payload: ParametricRubrosUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ) -> list[ParametricRubro]:
     rubros = SqlCostSettingsRepo(db).update_parametric_rubros(
         user.organization_id, [r.model_dump() for r in payload.rubros])

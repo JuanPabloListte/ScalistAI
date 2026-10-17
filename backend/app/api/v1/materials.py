@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_org_admin
 from app.models import Material, User
 from app.schemas.material import (
     MaterialCreate,
@@ -27,7 +27,7 @@ def list_materials(
 def create_material(
     payload: MaterialCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ) -> Material:
     stmt = select(Material).where(
         Material.name == payload.name,
@@ -68,7 +68,7 @@ def update_material(
     material_id: int,
     payload: MaterialUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ) -> Material:
     material = db.get(Material, material_id)
     if not material or material.organization_id != user.organization_id:
@@ -103,7 +103,7 @@ def update_material(
 def delete_material(
     material_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ):
     material = db.get(Material, material_id)
     if not material or material.organization_id != user.organization_id:
@@ -123,7 +123,7 @@ class MaterialImportItem(BaseModel):
 def import_materials_json(
     items: list[MaterialImportItem],
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_org_admin),
 ):
     imported_count = 0
     updated_count = 0

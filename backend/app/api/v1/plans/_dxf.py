@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Plan, User
+from app.services import project_access as pa
 from app.services.dxf_import import (
     apply_layer_mapping,
     get_dxf_info,
@@ -23,10 +24,8 @@ class DxfLayerMappingBody(BaseModel):
     # o "corte" (solo referencia visual de alturas, no computa).
     region_types: list[str] | None = None
 
-def _get_plan(plan_id: int, db: Session, user: User) -> Plan:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(404, "Plan no encontrado")
+def _get_plan(plan_id: int, db: Session, user: User, *, edit: bool = False) -> Plan:
+    plan = pa.require_plan(plan_id, db, user, edit_plan=edit)[0]
     return plan
 
 @router.get("/plans/{plan_id}/dxf-info")
@@ -70,7 +69,7 @@ def apply_dxf_layer_mapping(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    plan = _get_plan(plan_id, db, user)
+    plan = _get_plan(plan_id, db, user, edit=True)
     count = apply_layer_mapping(
         plan, body.mapping, db, regions=body.regions, region_types=body.region_types
     )
@@ -87,7 +86,7 @@ def update_dxf_scale(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    plan = _get_plan(plan_id, db, user)
+    plan = _get_plan(plan_id, db, user, edit=True)
     
     if body.unit == "m": override = 1.0
     elif body.unit == "cm": override = 0.01

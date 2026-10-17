@@ -7,6 +7,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Plan, User
+from app.services import project_access as pa
 from app.models.plan_ai_context import PlanAiContext
 from app.schemas.plan import PageRolesUpdate
 from app.core.jobs import enqueue
@@ -69,10 +70,9 @@ def _ml_page_candidates(plan: Plan, page: int, kind: str) -> list[dict]:
     return list(getattr(result, kind, []) or [])
 
 
-def _detect_endpoint_guard(plan: Plan | None, page: int, user: User) -> Plan:
+def _detect_endpoint_guard(plan_id: int, page: int, db: Session, user: User) -> Plan:
     """Validaciones comunes de los endpoints de detección on-demand del editor."""
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     if not Path(plan.pdf_path).exists():
         raise HTTPException(status_code=404, detail="PDF original no disponible")
     if plan.page_count and (page < 1 or page > plan.page_count):
@@ -98,9 +98,7 @@ def set_page_roles(
     user: User = Depends(get_current_user),
 ) -> Plan:
     """Guarda el mapeo página → roles y dispara el pipeline de IA en background."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     cleaned: dict[str, list[str]] = {}
     max_page = plan.page_count or 0
@@ -143,9 +141,7 @@ def get_ai_pipeline_status(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Devuelve el progreso del pipeline de IA."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     return get_ai_status(plan_id)
 
 @router.get("/plans/{plan_id}/ai-context")
@@ -155,9 +151,7 @@ def get_ai_context(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Devuelve el contexto y análisis del LLM para este plano, si lo hay."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
     
     ctx = db.query(PlanAiContext).filter(PlanAiContext.plan_id == plan_id).first()
     if not ctx:
@@ -173,7 +167,7 @@ def detect_openings_endpoint(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Devuelve candidatos de aberturas detectados por ML. No persiste nada."""
-    plan = _detect_endpoint_guard(db.get(Plan, plan_id), page, user)
+    plan = _detect_endpoint_guard(plan_id, page, db, user)
     try:
         return _ml_page_candidates(plan, page, "openings")
     except Exception as exc:  # noqa: BLE001
@@ -188,7 +182,7 @@ def detect_walls_endpoint(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Devuelve candidatos de muros detectados por ML. No persiste nada."""
-    plan = _detect_endpoint_guard(db.get(Plan, plan_id), page, user)
+    plan = _detect_endpoint_guard(plan_id, page, db, user)
     try:
         return _ml_page_candidates(plan, page, "walls")
     except Exception as exc:  # noqa: BLE001
@@ -203,7 +197,7 @@ def detect_rooms_endpoint(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Devuelve candidatos de recintos detectados por ML. No persiste nada."""
-    plan = _detect_endpoint_guard(db.get(Plan, plan_id), page, user)
+    plan = _detect_endpoint_guard(plan_id, page, db, user)
     try:
         return _ml_page_candidates(plan, page, "rooms")
     except Exception as exc:  # noqa: BLE001

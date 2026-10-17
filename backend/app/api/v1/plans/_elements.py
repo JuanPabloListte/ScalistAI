@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import DetectedElement, Plan, User
+from app.services import project_access as pa
 from app.schemas.detected_element import (
     CandidateBulkAction,
     DetectedElementCreate,
@@ -26,9 +27,7 @@ def create_element(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DetectedElement:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     element = DetectedElement(
         plan_id=plan_id,
@@ -53,9 +52,7 @@ def list_elements(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[DetectedElement]:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user)[0]
 
     stmt = select(DetectedElement).where(DetectedElement.plan_id == plan_id)
     if page is not None:
@@ -72,9 +69,7 @@ def update_element(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DetectedElement:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     element = db.get(DetectedElement, element_id)
     if element is None or element.plan_id != plan_id:
@@ -96,9 +91,7 @@ def delete_element(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     element = db.get(DetectedElement, element_id)
     if element is None or element.plan_id != plan_id:
@@ -126,9 +119,7 @@ def candidates_bulk_action(
 
     Devuelve los elementos aceptados (lista vacía para discard).
     """
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     query = db.query(DetectedElement).filter(
         DetectedElement.plan_id == plan_id,
@@ -171,9 +162,7 @@ def bulk_delete_elements(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     if not payload:
         return
@@ -197,9 +186,7 @@ def create_elements_bulk(
     user: User = Depends(get_current_user),
 ) -> list[DetectedElement]:
     """Crea N elementos a partir de candidatos aceptados desde el ML."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     created: list[DetectedElement] = []
     for item in payload:
@@ -246,9 +233,7 @@ def create_openings_bulk(
     user: User = Depends(get_current_user),
 ) -> list[DetectedElement]:
     """Crea N aberturas a partir de candidatos ML con posicionamiento por px_per_m."""
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
 
     scales = plan.page_scales or {}
     created: list[DetectedElement] = []
@@ -338,9 +323,7 @@ _APPLIES_TO_TYPES: dict[str, set[str]] = {
 
 
 def _plan_owned(plan_id: int, db: Session, user: User) -> Plan:
-    plan = db.get(Plan, plan_id)
-    if plan is None or plan.project.organization_id != user.organization_id:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    plan = pa.require_plan(plan_id, db, user, edit_plan=True)[0]
     return plan
 
 
