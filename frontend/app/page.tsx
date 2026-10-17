@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Zap, Layers, FileSpreadsheet, Lock, Mail, Phone, Upload, ScanLine, Download, Check, ChevronDown, Ruler, DoorOpen, PencilRuler, ChevronLeft, Folder, Package, Users, Building2, Globe, Trash2, Box, CalendarRange, LineChart, Scale } from "lucide-react";
+import { ArrowRight, Zap, Layers, FileSpreadsheet, Lock, Mail, Phone, Upload, ScanLine, Download, Check, ChevronDown, Ruler, DoorOpen, ChevronLeft, Folder, Package, Users, Building2, Globe, Trash2, Box, CalendarRange, LineChart, Scale } from "lucide-react";
 
 import { QuoteCalculator } from "@/components/landing/quote-calculator";
 import { FEATURES } from "@/lib/features";
@@ -373,19 +373,6 @@ export default function LandingPage() {
           ))}
         </div>
 
-        {/* Control manual / human-in-the-loop — describe la edición de
-            detecciones IA del visor: se muestra junto con el Modelo ML. */}
-        {FEATURES.mlModel && <div className="mt-16 flex flex-col items-center gap-5 rounded-3xl border border-brand-500/20 bg-brand-500/[0.04] p-8 text-center sm:flex-row sm:gap-6 sm:p-10 sm:text-left">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-brand-500/30 bg-slate-900">
-            <PencilRuler className="h-7 w-7 text-brand-400" />
-          </div>
-          <div>
-            <h3 className="text-xl font-semibold text-white">Vos tenés siempre la última palabra</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
-              La IA hace el trabajo pesado, pero ningún resultado se exporta sin tu visto bueno. Si algo no quedó perfecto, podés ajustar cada muro, abertura o área a mano antes de generar el cómputo. Cero cajas negras: el control siempre es tuyo.
-            </p>
-          </div>
-        </div>}
       </section>
 
       {/* Feature Grids */}

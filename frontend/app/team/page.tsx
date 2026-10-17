@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api, isUnauthorized, type OrgUser, type User } from "@/lib/api";
-import { AiConfigSection } from "@/components/AiConfigSection";
 import { JobRolesPicker, ManageJobRolesModal } from "@/components/job-roles-picker";
 import { EditIcon, TrashIcon } from "@/components/icons";
 import { ConfirmModal, Modal } from "@/components/modal";
@@ -17,7 +16,6 @@ export default function TeamPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
-  const [showAiConfig, setShowAiConfig] = useState(false);
   const [showJobRoles, setShowJobRoles] = useState(false);
   const [editing, setEditing] = useState<OrgUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<OrgUser | null>(null);
@@ -70,17 +68,6 @@ export default function TeamPage() {
             Roles de obra
           </button>
         )}
-        {/* PIVOTE: BYOK oculto — reactivar cuando se ofrezca config de IA por org
-        {isAdmin && (
-          <button
-            onClick={() => setShowAiConfig(true)}
-            className="group flex items-center gap-2 rounded-xl bg-cyan-600/10 px-4 py-2 text-sm font-semibold text-cyan-700 transition-colors hover:bg-cyan-600/20 dark:bg-cyan-500/10 dark:text-cyan-400 dark:hover:bg-cyan-500/20"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-80"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            Configurar IA BYOK
-          </button>
-        )}
-        */}
       </header>
 
       {error && (
@@ -172,19 +159,6 @@ export default function TeamPage() {
         <ManageJobRolesModal onClose={() => setShowJobRoles(false)} />
       )}
 
-      {isAdmin && showAiConfig && (
-        <Modal size="lg" onClose={() => setShowAiConfig(false)}>
-          <div className="relative">
-            <button
-              onClick={() => setShowAiConfig(false)}
-              className="absolute -right-2 -top-2 z-20 rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
-            <AiConfigSection />
-          </div>
-        </Modal>
-      )}
 
       {creating && (
         <UserModal

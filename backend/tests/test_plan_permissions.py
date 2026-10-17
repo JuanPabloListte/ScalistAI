@@ -69,31 +69,26 @@ def test_planos_respetan_membresia_y_rol():
         pa.set_member(project, comitente.id, "comitente", db)
         db.commit()
         pid = plan.id
-        escala = {"page": 1, "denominator": 100}
 
         try:
             # Otra org: no ve el plano (404, no filtramos existencia).
             c = _client_as(ajeno)
+            assert c.get(f"/api/v1/plans/{pid}").status_code == 404
             assert c.get(f"/api/v1/plans/{pid}/elements").status_code == 404
-            assert c.post(f"/api/v1/plans/{pid}/scale-ratio", json=escala).status_code == 404
-            assert c.get(f"/api/v1/plans/{pid}/dxf-info").status_code == 404
+            assert c.post(f"/api/v1/plans/{pid}/elements/bulk/delete",
+                          json=[]).status_code == 404
 
             # Comitente: mira, no edita.
             c = _client_as(comitente)
+            assert c.get(f"/api/v1/plans/{pid}").status_code == 200
             assert c.get(f"/api/v1/plans/{pid}/elements").status_code == 200
-            assert c.get(f"/api/v1/plans/{pid}/render-status").status_code == 200
-            assert c.post(f"/api/v1/plans/{pid}/scale-ratio", json=escala).status_code == 403
-            assert c.patch(f"/api/v1/plans/{pid}/page-roles",
-                           json={"page_roles": {}}).status_code == 403
-            assert c.post(f"/api/v1/plans/{pid}/dxf-layers/apply",
-                          json={"mapping": {}}).status_code == 403
             assert c.post(f"/api/v1/plans/{pid}/elements/bulk/delete",
                           json=[]).status_code == 403
 
             # Jefe de obra: edita.
             c = _client_as(jefe)
-            r = c.post(f"/api/v1/plans/{pid}/scale-ratio", json=escala)
-            assert r.status_code == 200, r.text
+            r = c.post(f"/api/v1/plans/{pid}/elements/bulk/delete", json=[])
+            assert r.status_code == 204, r.text
         finally:
             app.dependency_overrides.clear()
     finally:

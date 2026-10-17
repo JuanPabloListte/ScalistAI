@@ -75,14 +75,6 @@ export function AppSidebar() {
       matchPrefix: "/admin/organizations",
       icon: <BuildingIcon />,
     });
-    if (FEATURES.mlModel) {
-      items.push({
-        href: "/admin/model",
-        label: "Modelo ML",
-        matchPrefix: "/admin/model",
-        icon: <BrainIcon />,
-      });
-    }
   }
 
   return (
@@ -253,28 +245,3 @@ function BuildingIcon() {
   );
 }
 
-function BrainIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
-      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
-      <path d="M12 5v14" />
-      <path d="M12 9h4" />
-      <path d="M12 13h6" />
-      <path d="M12 17h4" />
-      <path d="M12 9H8" />
-      <path d="M12 13H6" />
-      <path d="M12 17H8" />
-    </svg>
-  );
-}

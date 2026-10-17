@@ -19,41 +19,12 @@ export type Project = {
   created_at: string;
 };
 
-export type TrainingStats = {
-  total_samples: number;
-  total_batches: number;
-  plans_contributing: number;
-  projects_contributing: number;
-  latest_snapshot_at: string | null;
-  ready_to_train: boolean;
-  recommended_min_samples: number;
-};
-
 export type User = {
   id: number;
   email: string;
   role: string;
   is_superadmin: boolean;
   created_at: string;
-};
-
-export type TrainingStatusResponse = {
-  status: {
-    status: "idle" | "running" | "success" | "failed";
-    mode?: "train" | "procedural";
-    current_epoch: number;
-    total_epochs: number;
-    progress_percent: number;
-    train_loss: number | null;
-    val_loss: number | null;
-    holdout_miou: number | null;
-    error: string | null;
-    started_at: string | null;
-    completed_at: string | null;
-    is_initial: boolean;
-    logs_count: number;
-  };
-  logs: string[];
 };
 
 export type LocationPayload = {
@@ -69,44 +40,9 @@ export type BuildingInfoPayload = {
   building_info: Record<string, number>;
 };
 
-export type AiStage = "pending" | "running" | "done" | "failed";
-
-export type AiStatus = {
-  scales: AiStage;
-  walls: AiStage;
-  rooms: AiStage;
-  openings: AiStage;
-  columns: AiStage;
-  beams: AiStage;
-  roofs: AiStage;
-  ml: AiStage;
-  started_at: number | null;
-};
-
-export type MlModelStatus = {
-  available: boolean;
-  enabled: boolean;
-  model_path: string;
-  model_exists: boolean;
-  model_loaded: boolean;
-  model_size_mb: number | null;
-  device: string | null;
-  model_hash: string | null;
-  active_version: number | null;
-  active_holdout_miou: number | null;
-  active_created_at: string | null;
-};
-
 export type PageOverride = "recommended" | "rejected";
 
 export type PageRole = "walls" | "openings" | "rooms" | "beams" | "roofs" | "columns" | "riostras" | "cloacas" | "electricidad" | "escaleras" | "cortes";
-
-export type PageClassification = {
-  page: number;
-  view_type: "planta" | "corte" | "planilla" | "estructura" | "instalacion" | "techos" | "otro";
-  suggested_roles: PageRole[];
-  reason: string;
-};
 
 export type IfcQualityCheck = {
   id: string;
@@ -147,46 +83,6 @@ export type Plan = {
   created_at: string;
 };
 
-export type PageRecommendation = {
-  page: number;
-  score: number;
-  recommended: boolean;
-  reason: string;
-  override: PageOverride | null;
-};
-
-export type ElementType = "wall" | "room" | "opening" | "beam" | "roof" | "column" | "riostra" | "cloaca" | "electricidad" | "escalera";
-
-export type DxfLayer = {
-  name: string;
-  color_rgb: [number, number, number];
-  entity_count: number;
-  suggested_type: ElementType | null;
-};
-
-export type DxfInfo = {
-  layers: DxfLayer[];
-  width_units: number;
-  height_units: number;
-  suggested_unit: "mm" | "cm" | "m";
-  overview: {
-    /** Marco del contenido en unidades de dibujo: [x1, y1, x2, y2] (y crece hacia arriba) */
-    bounds: [number, number, number, number];
-    /** Recortes ya aplicados (re-edición) */
-    regions: number[][];
-    /** Tipo de cada recorte, paralelo a regions: "planta" | "corte" */
-    region_types: DxfRegionType[];
-  };
-};
-
-export type DxfRegionType = "planta" | "corte";
-
-export type ElementGeometry = {
-  points: number[]; // flat [x1, y1, x2, y2, ...]
-  label?: string;
-  subtype?: string;
-};
-
 export type Material = {
   id: number;
   name: string;
@@ -220,41 +116,6 @@ export type Assembly = {
   assembly_materials: AssemblyMaterial[];
 };
 
-export type DetectedElement = {
-  id: number;
-  plan_id: number;
-  page: number;
-  type: ElementType;
-  geometry: ElementGeometry;
-  length_m: number | null;
-  area_m2: number | null;
-  height_m: number | null;
-  source: "manual" | "ai" | "ai_ml" | "dxf" | "llm";
-  is_candidate: boolean;
-  confidence: number;
-  materials?: any[];
-  created_at: string;
-  updated_at: string;
-  assemblies: Assembly[];
-};
-
-export type ElementCreatePayload = {
-  page: number;
-  type: ElementType;
-  geometry: ElementGeometry;
-  length_m?: number | null;
-  area_m2?: number | null;
-  height_m?: number | null;
-  source?: "manual" | "ai";
-};
-
-export type ElementUpdatePayload = {
-  geometry?: ElementGeometry;
-  length_m?: number | null;
-  area_m2?: number | null;
-  height_m?: number | null;
-};
-
 export type AssemblyMaterialInput = {
   material_id: number;
   consumption: number;
@@ -273,14 +134,6 @@ export type AssemblyUpdatePayload = {
   applies_to?: string;
   daily_yield?: number | null;
   assembly_materials?: AssemblyMaterialInput[];
-};
-
-export type MaterialSummaryItem = {
-  material: Material;
-  quantity: number;
-  unit: string;
-  unit_price: number;
-  subtotal: number;
 };
 
 // ---- Cronograma + curva de inversión ----
@@ -563,28 +416,6 @@ export type AdminUserUpdatePayload = {
   password?: string;
   role?: "admin" | "member";
   job_role_ids?: number[];
-};
-
-export type AiConfigRead = {
-  ai_provider: string;
-  ai_model_name: string | null;
-  has_api_key: boolean;
-};
-
-export type AiConfigUpdate = {
-  ai_provider?: string;
-  ai_api_key?: string;
-  ai_model_name?: string;
-};
-
-export type ProviderModelInfo = {
-  id: string;
-  name: string;
-};
-
-export type PlanAiContextInfo = {
-  provider: string;
-  messages: Array<{ role: string; content: string }>;
 };
 
 function getToken(): string | null {
@@ -901,12 +732,6 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  getAiStatus: (planId: number) =>
-    request<AiStatus>(`/api/v1/plans/${planId}/ai-status`),
-  getAiContext: (planId: number) =>
-    request<PlanAiContextInfo>(`/api/v1/plans/${planId}/ai-context`),
-  getMlStatus: () => request<MlModelStatus>(`/api/v1/plans/ml-status`),
-  getTrainingStats: () => request<TrainingStats>(`/api/v1/plans/training-stats`),
   async getMe(): Promise<User> {
     return request<User>("/api/v1/auth/me");
   },
@@ -918,41 +743,6 @@ export const api = {
     });
   },
 
-  triggerTraining: (epochs: number = 10) =>
-    request<{ success: boolean; message: string; is_initial: boolean }>(
-      `/api/v1/admin/train-now?epochs=${epochs}`,
-      { method: "POST" },
-    ),
-  generateProcedural: (count: number = 3000) =>
-    request<{ success: boolean; message: string }>(
-      `/api/v1/admin/gen-procedural?count=${count}`,
-      { method: "POST" },
-    ),
-  getTrainingStatus: () =>
-    request<TrainingStatusResponse>("/api/v1/admin/train-status"),
-  setTrainingConsent: (projectId: number, allow: boolean) =>
-    request<Project>(`/api/v1/projects/${projectId}/training-consent`, {
-      method: "PATCH",
-      body: JSON.stringify({ allow_training_data: allow }),
-    }),
-  regenerateAllSynthetic: () =>
-    request<{
-      projects_processed: number;
-      plans_processed: number;
-      pages_processed: number;
-      variations_generated: number;
-      details: Array<{
-        project_id: number;
-        plan_id: number;
-        page: number;
-        variations: number;
-        ok: boolean;
-        error?: string;
-      }>;
-      message?: string;
-    }>(`/api/v1/projects/regenerate-synthetic`, {
-      method: "POST",
-    }),
   deleteProject: (id: number) =>
     request<void>(`/api/v1/projects/${id}`, { method: "DELETE" }),
 
@@ -996,117 +786,6 @@ export const api = {
       { method: "POST", body: formData },
     );
   },
-  // PIVOTE IFC (jul-2026): upload DXF vía integración desactivado en UI.
-  // uploadDxf: async (file: File) => {
-  //   const formData = new FormData();
-  //   formData.append("file", file);
-  //   return request<{ success: boolean; project_id: number; plan_id: number; elements_imported: number }>(
-  //     "/api/v1/integrations/dxf/upload",
-  //     { method: "POST", body: formData },
-  //   );
-  // },
-
-  getRenderStatus: (planId: number) =>
-    request<{ rendered: number; total: number }>(
-      `/api/v1/plans/${planId}/render-status`,
-    ),
-
-  startPrewarm: (planId: number) =>
-    request<{ status: string; page_count: number }>(
-      `/api/v1/plans/${planId}/prewarm`,
-      { method: "POST", body: "{}" },
-    ),
-
-  calibrateScale: (
-    planId: number,
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    real_distance_m: number,
-    page = 1,
-  ) =>
-    request<Plan>(`/api/v1/plans/${planId}/scale`, {
-      method: "POST",
-      body: JSON.stringify({ p1, p2, real_distance_m, page }),
-    }),
-
-  previewAutoDetectScales: (planId: number) =>
-    request<Record<string, number>>(`/api/v1/plans/${planId}/preview-auto-detect`),
-
-  setBulkScaleRatios: (planId: number, scales: Record<string, number>) =>
-    request<Plan>(`/api/v1/plans/${planId}/bulk-scale-ratio`, {
-      method: "POST",
-      body: JSON.stringify(scales),
-    }),
-
-  setScaleRatio: (planId: number, page: number, denominator: number) =>
-    request<Plan>(`/api/v1/plans/${planId}/scale-ratio`, {
-      method: "POST",
-      body: JSON.stringify({ page, denominator }),
-    }),
-
-  clearPageScale: (planId: number, page: number) =>
-    request<Plan>(`/api/v1/plans/${planId}/scale/${page}`, {
-      method: "DELETE",
-    }),
-
-  deletePage: (planId: number, page: number) =>
-    request<Plan>(`/api/v1/plans/${planId}/delete-page/${page}`, {
-      method: "POST",
-      body: "{}",
-    }),
-
-  fetchPlanRaster: (planId: number, page = 1) =>
-    requestBlob(`/api/v1/plans/${planId}/raster?page=${page}`),
-
-  listElements: (planId: number, page?: number) => {
-    const qs = page !== undefined ? `?page=${page}` : "";
-    return request<DetectedElement[]>(`/api/v1/plans/${planId}/elements${qs}`);
-  },
-
-  createElement: (planId: number, payload: ElementCreatePayload) =>
-    request<DetectedElement>(`/api/v1/plans/${planId}/elements`, {
-      method: "POST",
-      body: JSON.stringify({
-        source: "manual",
-        height_m: 2.8,
-        ...payload,
-      }),
-    }),
-
-  updateElement: (planId: number, elementId: number, patch: ElementUpdatePayload) =>
-    request<DetectedElement>(`/api/v1/plans/${planId}/elements/${elementId}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
-
-  candidatesBulkAction: (
-    planId: number,
-    action: "accept" | "discard",
-    elementIds?: number[],
-    page?: number,
-  ) =>
-    request<DetectedElement[]>(
-      `/api/v1/plans/${planId}/elements/candidates/bulk-action`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          action,
-          element_ids: elementIds ?? null,
-          page: page ?? null,
-        }),
-      },
-    ),
-
-  deleteElement: (planId: number, elementId: number) =>
-    request<void>(`/api/v1/plans/${planId}/elements/${elementId}`, { method: "DELETE" }),
-
-  bulkDeleteElements: async (planId: number, ids: number[]): Promise<void> => {
-    if (ids.length === 0) return;
-    await request<void>(`/api/v1/plans/${planId}/elements/bulk/delete`, {
-      method: "POST",
-      body: JSON.stringify(ids),
-    });
-  },
 
   // ----- Materiales (catálogo) -----
   listMaterials: () => request<Material[]>("/api/v1/materials/"),
@@ -1143,54 +822,6 @@ export const api = {
 
   deleteAssembly: (id: number) =>
     request<void>(`/api/v1/assemblies/${id}`, { method: "DELETE" }),
-
-  // ----- Asignación elemento ↔ assembly -----
-  assignAssembly: (planId: number, elementId: number, assemblyId: number) =>
-    request<DetectedElement>(
-      `/api/v1/plans/${planId}/elements/${elementId}/assemblies`,
-      {
-        method: "POST",
-        body: JSON.stringify({ assembly_id: assemblyId }),
-      },
-    ),
-
-  removeAssembly: (planId: number, elementId: number, assemblyId: number) =>
-    request<DetectedElement>(
-      `/api/v1/plans/${planId}/elements/${elementId}/assemblies/${assemblyId}`,
-      { method: "DELETE" },
-    ),
-
-  // Asigna el sistema a TODOS los elementos del plano cuyo tipo aplica
-  // (ej: "Muro Ladrillo" → todos los muros). Un solo click.
-  assignAllByType: (planId: number, assemblyId: number) =>
-    request<{ assigned: number; types: string[] }>(
-      `/api/v1/plans/${planId}/assemblies/${assemblyId}/assign-all`,
-      { method: "POST" },
-    ),
-
-  // Inverso: quita el sistema de todos los elementos de su tipo (para deshacer).
-  unassignAllByType: (planId: number, assemblyId: number) =>
-    request<{ removed: number }>(
-      `/api/v1/plans/${planId}/assemblies/${assemblyId}/unassign-all`,
-      { method: "POST" },
-    ),
-
-  bulkAssignAssembly: (planId: number, elementIds: number[], assemblyId: number) =>
-    request<DetectedElement[]>(
-      `/api/v1/plans/${planId}/elements/bulk/assemblies`,
-      {
-        method: "POST",
-        body: JSON.stringify({ element_ids: elementIds, assembly_id: assemblyId }),
-      },
-    ),
-
-  // ----- Cómputo agregado -----
-  getMaterialsSummary: (planId: number, page?: number) => {
-    const qs = page !== undefined ? `?page=${page}` : "";
-    return request<MaterialSummaryItem[]>(
-      `/api/v1/plans/${planId}/materials-summary${qs}`,
-    );
-  },
 
   // ----- Equipo del proyecto (roles de permiso) -----
   getProjectMembers: (projectId: number) =>
@@ -1257,86 +888,6 @@ export const api = {
     const qs = q.toString() ? `?${q.toString()}` : "";
     return request<ScheduleResponse>(`/api/v1/projects/${projectId}/schedule${qs}`);
   },
-
-  detectWalls: (planId: number, page: number) =>
-    request<any[]>(`/api/v1/plans/${planId}/detect-walls?page=${page}`),
-
-  detectRooms: (planId: number, page: number) =>
-    request<any[]>(`/api/v1/plans/${planId}/detect-rooms?page=${page}`),
-
-  detectOpenings: (planId: number, page: number) =>
-    request<any[]>(`/api/v1/plans/${planId}/detect-openings?page=${page}`),
-
-  recommendPages: (planId: number) =>
-    request<PageRecommendation[]>(`/api/v1/plans/${planId}/recommend-pages`),
-
-  suggestRoles: (planId: number) =>
-    request<PageClassification[]>(`/api/v1/plans/${planId}/suggest-roles`),
-
-  setPageOverride: (
-    planId: number,
-    page: number,
-    override: PageOverride | null,
-  ) =>
-    request<Plan>(`/api/v1/plans/${planId}/page-override`, {
-      method: "POST",
-      body: JSON.stringify({ page, override }),
-    }),
-
-  setPageRoles: (
-    planId: number,
-    pageRoles: Record<string, PageRole[]>,
-    skipAiDetection?: boolean,
-  ) =>
-    request<Plan>(`/api/v1/plans/${planId}/page-roles`, {
-      method: "PATCH",
-      body: JSON.stringify({ page_roles: pageRoles, skip_ai_detection: skipAiDetection }),
-    }),
-
-  getDxfInfo: (planId: number) =>
-    request<DxfInfo>(`/api/v1/plans/${planId}/dxf-info`),
-
-  setDxfScale: (planId: number, unit: "mm" | "cm" | "m") =>
-    request<{ success: boolean }>(`/api/v1/plans/${planId}/dxf-scale`, {
-      method: "POST",
-      body: JSON.stringify({ unit }),
-    }),
-
-  fetchDxfOverview: (planId: number) =>
-    requestBlob(`/api/v1/plans/${planId}/dxf-overview`),
-
-  fetchDxfLayerPreview: (planId: number, layer: string) =>
-    requestBlob(`/api/v1/plans/${planId}/dxf-layer-preview?layer=${encodeURIComponent(layer)}`),
-
-  applyDxfLayers: (
-    planId: number,
-    mapping: Record<string, string | null>,
-    regions?: number[][],
-    regionTypes?: DxfRegionType[],
-  ) =>
-    request<{ created: number }>(`/api/v1/plans/${planId}/dxf-layers/apply`, {
-      method: "POST",
-      body: JSON.stringify({
-        mapping,
-        regions: regions ?? null,
-        region_types: regionTypes ?? null,
-      }),
-    }),
-
-  createElementsBulk: (planId: number, payload: any[]) =>
-    request<DetectedElement[]>(`/api/v1/plans/${planId}/elements-bulk`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  createOpeningsBulk: (planId: number, payload: any[]) =>
-    request<DetectedElement[]>(`/api/v1/plans/${planId}/openings-bulk`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  exportXlsx: (planId: number, page?: number) =>
-    requestBlob(`/api/v1/plans/${planId}/export/xlsx${page !== undefined ? `?page=${page}` : ""}`),
 
   // ---- Admin (superadmin) ----
   listOrganizations: () => request<OrganizationListItem[]>(`/api/v1/admin/organizations`),
@@ -1441,19 +992,6 @@ export const api = {
     }),
   deleteTeamUser: (userId: number) =>
     request<void>(`/api/v1/team/users/${userId}`, { method: "DELETE" }),
-
-  // ---- Organization AI Config (BYOK) ----
-  getAiConfig: () => request<AiConfigRead>("/api/v1/organization/ai-config"),
-  updateAiConfig: (payload: AiConfigUpdate) =>
-    request<AiConfigRead>("/api/v1/organization/ai-config", {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-  listProviderModels: (provider: string, api_key?: string) =>
-    request<ProviderModelInfo[]>("/api/v1/ai-providers/list-models", {
-      method: "POST",
-      body: JSON.stringify({ provider, api_key }),
-    }),
 
   async uploadMaterialsJson(items: any[]): Promise<{imported: number, updated: number}> {
     return request<{imported: number, updated: number}>("/api/v1/materials/import-json", {

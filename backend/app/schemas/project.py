@@ -78,8 +78,3 @@ class ProjectRead(BaseModel):
 
     created_at: datetime
 
-
-class TrainingConsentUpdate(BaseModel):
-    """Toggle del consentimiento de uso de datos del proyecto para training."""
-
-    allow_training_data: bool

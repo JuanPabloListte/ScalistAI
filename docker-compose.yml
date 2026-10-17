@@ -27,31 +27,14 @@ services:
       timeout: 3s
       retries: 5
 
-  # LLM local para clasificar nombres de capa que ningún keyword reconoce
-  # (cada estudio nombra distinto: TUONG, S-COLS, A-MURO...). Corre en CPU a
-  # propósito: NO reserva GPU, así nunca compite con el entrenamiento. La
-  # clasificación es texto corto → unos segundos en CPU es de sobra.
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama_data:/root/.ollama
-    ports:
-      - "11434:11434"
-    restart: unless-stopped
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     env_file: .env
-    # /dev/shm más grande: PyTorch DataLoader con num_workers>0 pasa los batches
-    # por memoria compartida. El default de Docker (64MB) tira "Bus error".
-    shm_size: "2gb"
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
-      OLLAMA_HOST: ollama
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       # Windows/WSL: los bind mounts no emiten eventos de inotify y el --reload
       # de uvicorn no ve los cambios. Polling lo resuelve.
       WATCHFILES_FORCE_POLLING: "true"
@@ -65,17 +48,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     command: bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
-  # Worker de trabajos pesados (rq): parseo IFC, import vectorial de PDF,
-  # detección ML, snapshots de training. Misma imagen y volúmenes que el
+  # Worker de trabajos pesados (rq): parseo IFC. Misma imagen y volúmenes que el
   # backend; consume de la cola "scalist-jobs" en Redis. Si este contenedor
   # no corre, la app degrada sola a ejecutar los jobs in-process (como antes).
   # OJO dev: no tiene hot-reload — tras cambiar código de servicios,
@@ -85,12 +60,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file: .env
-    shm_size: "2gb"
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
-      OLLAMA_HOST: ollama
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     volumes:
       - ./backend:/app
       - ./storage:/app/storage
@@ -99,13 +71,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     command: rq worker scalist-jobs --url redis://redis:6379
     restart: unless-stopped
 
@@ -134,4 +99,3 @@ volumes:
   redis_data:
   frontend_node_modules:
   frontend_next:
-  ollama_data:

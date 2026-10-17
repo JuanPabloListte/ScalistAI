@@ -5,8 +5,6 @@
 export const FEATURES = {
   /** /precios — Inteligencia de Precios */
   priceIntelligence: process.env.NEXT_PUBLIC_FEATURE_PRICE_INTELLIGENCE === "true",
-  /** /admin/model — Modelo ML (superadmin) */
-  mlModel: process.env.NEXT_PUBLIC_FEATURE_ML_MODEL === "true",
   /** /materials — Cómputos / Sistemas (Insumos Base + Sistemas Constructivos) */
   computos: process.env.NEXT_PUBLIC_FEATURE_COMPUTOS === "true",
   /** Paso "Construcción" del wizard (tipo de obra). Con IFC se autocompleta
@@ -22,6 +20,5 @@ export const FEATURES = {
 /** Prefijos de ruta de las secciones apagadas. */
 export const DISABLED_PATHS: string[] = [
   ...(FEATURES.priceIntelligence ? [] : ["/precios"]),
-  ...(FEATURES.mlModel ? [] : ["/admin/model"]),
   ...(FEATURES.computos ? [] : ["/materials"]),
 ];

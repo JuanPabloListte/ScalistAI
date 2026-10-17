@@ -8,16 +8,6 @@ import { FEATURES } from "@/lib/features";
 // (1..5) del índice interno (1,2,4,5,6) — antes se veía "1,2,4,5,6".
 type WizardStep = { num: number; label: string; display?: number };
 
-export const WIZARD_STEPS: WizardStep[] = [
-  { num: 1, label: "Datos" },
-  // PIVOTE IFC: label histórico "Plano PDF" — reactivar con PDF/DXF/DWG.
-  { num: 2, label: "Plano PDF" },
-  { num: 3, label: "Páginas" },
-  { num: 4, label: "Ubicación" },
-  { num: 5, label: "Construcción" },
-  { num: 6, label: "Revisión" },
-];
-
 // IFC: modelo BIM exacto -> sin "Páginas" (no tiene láminas).
 // PIVOTE IFC (jul-2026): este es el stepper activo del MVP.
 // El paso 5 "Construcción" se oculta con FEATURES.wizardBuildingStep (el IFC
@@ -36,7 +26,6 @@ export function Stepper({
   currentStep,
   maxReached,
   onJump,
-  // PIVOTE IFC: default = IFC (antes era WIZARD_STEPS)
   steps = IFC_WIZARD_STEPS,
 }: {
   currentStep: number;

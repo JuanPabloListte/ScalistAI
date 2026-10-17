@@ -25,8 +25,6 @@ services:
       retries: 5
     restart: always
 
-  # Sin GPU ni shm grande: el flujo IFC no usa torch. Si se reactiva la
-  # detección ML (features.ts), volver a pedir la GPU acá y en el worker.
   backend:
     build:
       context: ./backend
@@ -81,7 +79,6 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
         NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN:-}
         NEXT_PUBLIC_FEATURE_PRICE_INTELLIGENCE: ${NEXT_PUBLIC_FEATURE_PRICE_INTELLIGENCE:-false}
-        NEXT_PUBLIC_FEATURE_ML_MODEL: ${NEXT_PUBLIC_FEATURE_ML_MODEL:-false}
         NEXT_PUBLIC_FEATURE_COMPUTOS: ${NEXT_PUBLIC_FEATURE_COMPUTOS:-false}
         NEXT_PUBLIC_FEATURE_WIZARD_BUILDING: ${NEXT_PUBLIC_FEATURE_WIZARD_BUILDING:-false}
         NEXT_PUBLIC_FEATURE_LEGACY_BUDGET: ${NEXT_PUBLIC_FEATURE_LEGACY_BUDGET:-false}

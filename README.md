@@ -93,16 +93,17 @@ el frontend (`frontend/lib/features.ts`).
 | Variable | Qué prende |
 |---|---|
 | `NEXT_PUBLIC_FEATURE_PRICE_INTELLIGENCE` | `/precios` — Inteligencia de Precios |
-| `NEXT_PUBLIC_FEATURE_ML_MODEL` | `/admin/model` — modelo ML |
 | `NEXT_PUBLIC_FEATURE_COMPUTOS` | `/materials` — insumos y sistemas constructivos |
 | `NEXT_PUBLIC_FEATURE_WIZARD_BUILDING` | Paso "Construcción" del wizard |
 | `NEXT_PUBLIC_FEATURE_LEGACY_BUDGET` | Presupuesto viejo (insumos/sistemas + paramétricos) |
 | `NEXT_PUBLIC_FEATURE_LANDING_PRICING` | Cotizador de planes en la landing |
 
-También quedan ocultos, sin flag propio, los planos PDF/DXF/DWG con visor
-2D/3D y detección por IA (el wizard usa solo IFC).
+Los planos PDF/DXF/DWG con visor 2D/3D, la detección por IA y el modelo ML
+se retiraron del código; están en el tag `archivo/planos-pdf-ia` (ver
+`docs/archivo/funciones-retiradas.md`).
 
 ## Documentación anterior
 
-El README original (planos PDF, calibración, dibujo manual), la hoja de
-ruta de ML y el contexto del pipeline CAD están en `docs/archivo/`.
+En `docs/archivo/`: el README original (planos PDF, calibración, dibujo
+manual), la hoja de ruta de ML, el contexto del pipeline CAD y
+`funciones-retiradas.md`, que dice qué se borró y cómo recuperarlo.

@@ -7,9 +7,6 @@ import { useCallback, useEffect, useState } from "react";
 import { IFC_WIZARD_STEPS, Stepper } from "@/components/wizard/stepper";
 import { Step1Basics } from "@/components/wizard/step-1-basics";
 import { Step2Plan } from "@/components/wizard/step-2-plan";
-// PIVOTE IFC: Step3PageRoles (páginas PDF / capas DXF) desactivado — reactivar
-// junto con WIZARD_STEPS y la rama step===3 al volver a PDF/DXF/DWG.
-// import { Step3PageRoles } from "@/components/wizard/step-3-page-roles";
 import { Step3Location } from "@/components/wizard/step-3-location";
 import { Step3Prices } from "@/components/wizard/step-3-prices";
 import { Step4Building } from "@/components/wizard/step-4-building";
@@ -131,16 +128,6 @@ function NewProjectWizardInner() {
           />
         )}
 
-        {/* PIVOTE IFC: step 3 (páginas PDF / capas DXF) desactivado — el índice
-            lo usa ahora Step3Prices; al volver a PDF/DXF renumerar.
-        {step === 3 && project && (
-          <Step3PageRoles
-            project={project}
-            onSaved={() => setStep(4)}
-            onBack={goBack}
-          />
-        )}
-        */}
 
         {step === 4 && project && (
           <Step3Location
