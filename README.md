@@ -1,4 +1,4 @@
-# ScalistAI
+# Scalist
 
 Presupuesto de obra a partir del modelo BIM. El usuario sube el **IFC** del
 proyecto y el **presupuesto del proveedor** (PDF, Excel o CSV); las **reglas de
@@ -98,7 +98,7 @@ el frontend (`frontend/lib/features.ts`).
 | `NEXT_PUBLIC_FEATURE_LEGACY_BUDGET` | Presupuesto viejo (insumos/sistemas + paramétricos) |
 | `NEXT_PUBLIC_FEATURE_LANDING_PRICING` | Cotizador de planes en la landing |
 
-Los planos PDF/DXF/DWG con visor 2D/3D, la detección por IA y el modelo ML
+Los planos PDF/DXF/DWG con visor 2D/3D, la detección automática y el modelo de reconocimiento
 se retiraron del código; están en el tag `archivo/planos-pdf-ia` (ver
 `docs/archivo/funciones-retiradas.md`).
 
