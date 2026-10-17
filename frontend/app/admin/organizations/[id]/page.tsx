@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError, isUnauthorized, type OrganizationDetail, type OrgUser } from "@/lib/api";
 import { JobRolesPicker } from "@/components/job-roles-picker";
+import { EditIcon, TrashIcon } from "@/components/icons";
+import { ConfirmModal, Modal } from "@/components/modal";
 
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   active: { label: "Activa", tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
@@ -299,7 +301,7 @@ function UserModal({
   }
 
   return (
-    <Modal onCancel={onCancel}>
+    <Modal size="lg" onClose={onCancel}>
       <form onSubmit={handle}>
         <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">
           {mode === "create" ? "Nuevo usuario" : "Editar usuario"}
@@ -405,7 +407,7 @@ function EditOrgModal({
   }
 
   return (
-    <Modal onCancel={onCancel}>
+    <Modal size="lg" onClose={onCancel}>
       <form onSubmit={handle}>
         <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">Editar organización</h2>
         <div className="space-y-4">
@@ -455,95 +457,3 @@ function EditOrgModal({
   );
 }
 
-function ConfirmModal({
-  title,
-  message,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  message: string;
-  onCancel: () => void;
-  onConfirm: () => Promise<void>;
-}) {
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function handle() {
-    setLoading(true);
-    setErr(null);
-    try {
-      await onConfirm();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Error");
-      setLoading(false);
-    }
-  }
-
-  return (
-    <Modal onCancel={loading ? undefined : onCancel}>
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h2>
-      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{message}</p>
-      {err && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{err}</p>}
-      <div className="mt-6 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={loading}
-          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          Cancelar
-        </button>
-        <button
-          type="button"
-          onClick={handle}
-          disabled={loading}
-          className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-        >
-          {loading ? "Eliminando..." : "Eliminar"}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function Modal({
-  children,
-  onCancel,
-}: {
-  children: React.ReactNode;
-  onCancel?: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-surface-lg dark:border-slate-700 dark:bg-slate-900"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
-    </svg>
-  );
-}

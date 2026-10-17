@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { api, isUnauthorized, type Project } from "@/lib/api";
 import { BUILDING_FIELDS } from "@/components/wizard/step-4-building";
+import { ConfirmModal, Modal } from "@/components/modal";
 
 const TYPE_LABEL: Record<string, string> = {
   casa: "Casa",
@@ -228,10 +229,19 @@ export default function ProjectsPage() {
       )}
 
       {deleting && (
-        <DeleteProjectModal
-          project={deleting}
+        <ConfirmModal
+          title="Eliminar proyecto"
+          message={
+            <>
+              ¿Eliminar <span className="font-semibold">{deleting.name}</span>? Se borran también
+              todos los planos cargados y los archivos asociados. Esta acción no se puede deshacer.
+            </>
+          }
           onCancel={() => setDeleting(null)}
-          onDeleted={() => handleDeleted(deleting.id)}
+          onConfirm={async () => {
+            await api.deleteProject(deleting.id);
+            handleDeleted(deleting.id);
+          }}
         />
       )}
     </main>
@@ -349,7 +359,6 @@ function EditProjectModal({
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-
         <div className="mt-2 flex justify-end gap-2">
           <button
             type="button"
@@ -368,86 +377,6 @@ function EditProjectModal({
         </div>
       </form>
     </Modal>
-  );
-}
-
-function DeleteProjectModal({
-  project,
-  onCancel,
-  onDeleted,
-}: {
-  project: Project;
-  onCancel: () => void;
-  onDeleted: () => void;
-}) {
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleDelete() {
-    setDeleting(true);
-    setError(null);
-    try {
-      await api.deleteProject(project.id);
-      onDeleted();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error desconocido");
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <Modal onClose={deleting ? undefined : onCancel}>
-      <div className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">Eliminar proyecto</h2>
-        <p className="text-sm text-slate-600 dark:text-slate-300">
-          ¿Eliminar <span className="font-semibold">{project.name}</span>? Se borran también
-          todos los planos cargados y los archivos asociados. Esta acción no se puede deshacer.
-        </p>
-
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-
-        <div className="mt-2 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={deleting}
-            className="rounded-md border border-slate-300/50 bg-white/50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white/80 disabled:opacity-50 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800/80"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
-          >
-            {deleting ? "Eliminando..." : "Eliminar"}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function Modal({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose?: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-[2px]"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md surface p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
   );
 }
 

@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowRight, CalendarRange, Check, LineChart, Minus, Plus, Users,
 } from "lucide-react";
+import { fmtARS } from "@/lib/format";
 // PIVOTE IFC: Box se usaba en el módulo add-on BIM — reactivar con ese ítem.
 
 // ---------------------------------------------------------------- pricing
@@ -47,9 +48,6 @@ const QUOTE_PRICING = {
   enterpriseUsersFrom: 11, // desde acá sugerimos plan Empresa (precio a medida)
 };
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
-
 export function QuoteCalculator() {
   const [users, setUsers] = useState(3);
   const [projects, setProjects] = useState<"3" | "10" | "unlimited">("3");
@@ -84,7 +82,7 @@ export function QuoteCalculator() {
     `• Módulos: cómputo y presupuesto${quote.moduleItems.map((m) => ", " + m.name.toLowerCase()).join("")}\n` +
     (quote.enterprise
       ? `Me gustaría coordinar una propuesta a medida.`
-      : `• Estimado: $${fmt(quote.monthly)}/mes (${annual ? "anual" : "mensual"})\nMe gustaría coordinar una demo.`),
+      : `• Estimado: $${fmtARS(quote.monthly)}/mes (${annual ? "anual" : "mensual"})\nMe gustaría coordinar una demo.`),
   );
 
   const toggleModule = (key: string) =>
@@ -102,7 +100,7 @@ export function QuoteCalculator() {
           </div>
           <p className="mb-4 text-xs text-slate-500">
             Arquitectos, cómputistas y administración. Incluye {P.includedUsers} usuarios;
-            cada adicional ${fmt(P.extraUser)}/mes. Roles y permisos incluidos en todos los planes.
+            cada adicional ${fmtARS(P.extraUser)}/mes. Roles y permisos incluidos en todos los planes.
           </p>
           <div className="flex items-center gap-4">
             <button
@@ -150,7 +148,7 @@ export function QuoteCalculator() {
               >
                 {P.projects[k].label}
                 {P.projects[k].price > 0 && (
-                  <span className="ml-1.5 text-xs opacity-70">+${fmt(P.projects[k].price)}</span>
+                  <span className="ml-1.5 text-xs opacity-70">+${fmtARS(P.projects[k].price)}</span>
                 )}
               </button>
             ))}
@@ -207,7 +205,7 @@ export function QuoteCalculator() {
                         <m.icon className="h-4 w-4 text-brand-400" /> {m.name}
                       </span>
                       <span className="shrink-0 text-xs font-medium text-slate-400">
-                        +${fmt(m.price)}/mes
+                        +${fmtARS(m.price)}/mes
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{m.desc}</p>
@@ -254,7 +252,7 @@ export function QuoteCalculator() {
             <h3 className="text-2xl font-bold text-white">Plan {quote.plan}</h3>
             {annual && !quote.enterprise && (
               <span className="rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-semibold text-green-400">
-                Ahorrás ${fmt((quote.monthlyList - quote.monthly) * 12)}/año
+                Ahorrás ${fmtARS((quote.monthlyList - quote.monthly) * 12)}/año
               </span>
             )}
           </div>
@@ -288,13 +286,13 @@ export function QuoteCalculator() {
               <>
                 <div className="flex items-baseline justify-center gap-1.5">
                   <span className="text-4xl font-extrabold tracking-tight text-white">
-                    ${fmt(quote.monthly)}
+                    ${fmtARS(quote.monthly)}
                   </span>
                   <span className="text-sm text-slate-400">/mes</span>
                 </div>
                 {annual && (
                   <div className="mt-1 text-xs text-slate-500">
-                    <span className="line-through">${fmt(quote.monthlyList)}</span> pagando anual
+                    <span className="line-through">${fmtARS(quote.monthlyList)}</span> pagando anual
                   </div>
                 )}
               </>

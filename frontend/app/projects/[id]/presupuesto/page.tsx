@@ -8,9 +8,7 @@ import { LegacyBudget } from "@/components/legacy-budget";
 import { ProjectPricesPanel } from "@/components/wizard/step-3-prices";
 import { api, isUnauthorized, type Project, type ProjectBudgetView } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
-
-const money = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+import { money } from "@/lib/format";
 
 export default function PresupuestoPage() {
   return FEATURES.legacyBudget ? <LegacyBudget /> : <SupplierBudget />;

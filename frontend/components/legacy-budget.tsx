@@ -4,10 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, type ParametricRubro, type Plan, type ProjectBudgetSummary } from "@/lib/api";
 import { IfcParseProgress, planErrorMessage } from "@/components/ifc-status";
-
-function fmtARS(n: number): string {
-  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
-}
+import { fmtARS } from "@/lib/format";
 
 /** Presupuesto VIEJO (catálogo de insumos/sistemas + rubros paramétricos +
  *  mano de obra). Oculto tras FEATURES.legacyBudget desde que el presupuesto

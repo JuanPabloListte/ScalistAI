@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { ConfirmModal, Overlay } from "@/components/rule-sets-ui";
+import { ConfirmModal, Modal } from "@/components/modal";
 import { api, isUnauthorized, type RuleSet, type User } from "@/lib/api";
 
 export default function RuleSetsPage() {
@@ -159,9 +159,9 @@ export default function RuleSetsPage() {
       {confirmDelete && (
         <ConfirmModal
           title={`¿Borrar "${confirmDelete.name}"?`}
-          body={
-            "Los proyectos que lo usaban pasan a usar el juego estándar."
-          }
+          message="Los proyectos que lo usaban pasan a usar el juego estándar."
+          confirmLabel="Borrar"
+          busyLabel="Borrando..."
           onCancel={() => setConfirmDelete(null)}
           onConfirm={async () => {
             await api.deleteRuleSet(confirmDelete.id);
@@ -207,7 +207,7 @@ function CreateRuleSetModal({
   }
 
   return (
-    <Overlay onClose={onCancel}>
+    <Modal onClose={onCancel}>
       <form onSubmit={submit}>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Nuevo juego de reglas</h2>
         <label className="mt-4 block text-sm">
@@ -255,6 +255,6 @@ function CreateRuleSetModal({
           </button>
         </div>
       </form>
-    </Overlay>
+    </Modal>
   );
 }

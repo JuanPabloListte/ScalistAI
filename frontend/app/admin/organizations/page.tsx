@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api, ApiError, isUnauthorized, type OrganizationListItem } from "@/lib/api";
+import { Modal } from "@/components/modal";
 
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   active: { label: "Activa", tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
@@ -163,15 +164,8 @@ function CreateOrgModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
-      onClick={onCancel}
-    >
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-surface-lg dark:border-slate-700 dark:bg-slate-900"
-      >
+    <Modal onClose={onCancel}>
+      <form onSubmit={submit}>
         <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-white">Nueva organización</h2>
         <p className="mb-5 text-xs text-slate-500 dark:text-slate-400">
           Creá una organización y opcionalmente su primer admin.
@@ -264,6 +258,6 @@ function CreateOrgModal({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

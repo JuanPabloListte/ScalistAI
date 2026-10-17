@@ -7,13 +7,10 @@ import {
 } from "recharts";
 
 import { api, type PriceSeriesPoint, type PriceSeriesProduct } from "@/lib/api";
+import { fmtARS } from "@/lib/format";
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
-}
-
-function fmtARS(n: number): string {
-  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
 }
 
 // Punto proyectado para el gráfico: última fecha real + horizonte (meses).

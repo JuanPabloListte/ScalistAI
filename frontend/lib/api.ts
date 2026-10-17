@@ -638,11 +638,14 @@ function parseFastApiDetail(raw: string, status: number): string {
   return raw;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** fetch al backend con el token; si la respuesta no es OK lanza ApiError
+ *  (y ante un 401 limpia la sesión y manda al login). */
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (!(init.body instanceof FormData) && init.body) {
+  // Los body string son JSON; FormData / URLSearchParams ponen su propio Content-Type.
+  if (typeof init.body === "string") {
     headers.set("Content-Type", "application/json");
   }
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
@@ -661,6 +664,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(message, res.status);
   }
+  return res;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await send(path, init);
   // DELETE / acciones que responden 204 No Content: no hay body que parsear.
   if (res.status === 204) {
     return undefined as T;
@@ -668,6 +676,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await res.text();
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+/** Igual que request() pero devuelve el archivo (Excel, PDF, imagen). */
+async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  return (await send(path, init)).blob();
+}
+
+/** Dispara la descarga de un archivo en el navegador. */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // --- Reglas de cómputo (IFC → productos del presupuesto del proveedor) ---
@@ -833,14 +858,16 @@ export const api = {
   // Sin registro público: las cuentas las crea el admin (panel / equipo).
 
   login: async (email: string, password: string) => {
-    const body = new URLSearchParams({ username: email, password });
-    const res = await fetch(`${API_URL}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    if (!res.ok) throw new Error("Credenciales inválidas");
-    const data = (await res.json()) as { access_token: string };
+    let data: { access_token: string };
+    try {
+      data = await request<{ access_token: string }>("/api/v1/auth/login", {
+        method: "POST",
+        body: new URLSearchParams({ username: email, password }),
+      });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) throw new Error("Credenciales inválidas");
+      throw e;
+    }
     window.localStorage.setItem("scalistai_token", data.access_token);
     return data;
   },
@@ -926,16 +953,8 @@ export const api = {
     }>(`/api/v1/projects/regenerate-synthetic`, {
       method: "POST",
     }),
-  deleteProject: async (id: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/projects/${id}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) {
-      throw new Error(`No se pudo eliminar (HTTP ${res.status})`);
-    }
-  },
+  deleteProject: (id: number) =>
+    request<void>(`/api/v1/projects/${id}`, { method: "DELETE" }),
 
   listPlans: (projectId: number) =>
     request<Plan[]>(`/api/v1/projects/${projectId}/plans`),
@@ -953,29 +972,9 @@ export const api = {
     request<ProjectBudgetSummary>(`/api/v1/plans/${planId}/budget-summary`),
   /** Excel del presupuesto completo (obra gris + paramétricos). Misma fuente que la pantalla. */
   downloadBudgetXlsx: async (planId: number, projectName?: string) => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/budget-export/xlsx`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) {
-      const raw = await res.text();
-      let message = raw || `HTTP ${res.status}`;
-      try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed?.detail === "string") message = parsed.detail;
-      } catch { /* ignore */ }
-      throw new Error(message);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
+    const blob = await requestBlob(`/api/v1/plans/${planId}/budget-export/xlsx`);
     const safe = (projectName || `plan_${planId}`).replace(/[^\w\-]+/g, "_").slice(0, 60);
-    a.download = `presupuesto_${safe}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `presupuesto_${safe}.xlsx`);
   },
   updateCostSettings: (patch: Partial<CostSettings>) =>
     request<CostSettings>("/api/v1/cost-settings", {
@@ -1056,14 +1055,8 @@ export const api = {
       body: "{}",
     }),
 
-  fetchPlanRaster: async (planId: number, page = 1): Promise<Blob> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/raster?page=${page}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`No se pudo cargar el raster (HTTP ${res.status})`);
-    return res.blob();
-  },
+  fetchPlanRaster: (planId: number, page = 1) =>
+    requestBlob(`/api/v1/plans/${planId}/raster?page=${page}`),
 
   listElements: (planId: number, page?: number) => {
     const qs = page !== undefined ? `?page=${page}` : "";
@@ -1104,36 +1097,15 @@ export const api = {
       },
     ),
 
-  deleteElement: async (planId: number, elementId: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(
-      `${API_URL}/api/v1/plans/${planId}/elements/${elementId}`,
-      {
-        method: "DELETE",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      },
-    );
-    if (!res.ok && res.status !== 204) {
-      throw new Error(`No se pudo eliminar (HTTP ${res.status})`);
-    }
-  },
+  deleteElement: (planId: number, elementId: number) =>
+    request<void>(`/api/v1/plans/${planId}/elements/${elementId}`, { method: "DELETE" }),
 
   bulkDeleteElements: async (planId: number, ids: number[]): Promise<void> => {
     if (ids.length === 0) return;
-    const token = getToken();
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(
-      `${API_URL}/api/v1/plans/${planId}/elements/bulk/delete`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(ids),
-      },
-    );
-    if (!res.ok && res.status !== 204) {
-      throw new Error(`No se pudo eliminar en lote (HTTP ${res.status})`);
-    }
+    await request<void>(`/api/v1/plans/${planId}/elements/bulk/delete`, {
+      method: "POST",
+      body: JSON.stringify(ids),
+    });
   },
 
   // ----- Materiales (catálogo) -----
@@ -1151,16 +1123,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  deleteMaterial: async (id: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/materials/${id}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) {
-      throw new Error(`No se pudo eliminar el material (HTTP ${res.status})`);
-    }
-  },
+  deleteMaterial: (id: number) =>
+    request<void>(`/api/v1/materials/${id}`, { method: "DELETE" }),
 
   // ----- Assemblies (Sistemas Constructivos) -----
   listAssemblies: () => request<Assembly[]>("/api/v1/assemblies/"),
@@ -1177,16 +1141,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  deleteAssembly: async (id: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/assemblies/${id}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) {
-      throw new Error(`No se pudo eliminar el sistema constructivo (HTTP ${res.status})`);
-    }
-  },
+  deleteAssembly: (id: number) =>
+    request<void>(`/api/v1/assemblies/${id}`, { method: "DELETE" }),
 
   // ----- Asignación elemento ↔ assembly -----
   assignAssembly: (planId: number, elementId: number, assemblyId: number) =>
@@ -1198,22 +1154,11 @@ export const api = {
       },
     ),
 
-  removeAssembly: async (
-    planId: number,
-    elementId: number,
-    assemblyId: number,
-  ): Promise<DetectedElement> => {
-    const token = getToken();
-    const res = await fetch(
-      `${API_URL}/api/v1/plans/${planId}/elements/${elementId}/assemblies/${assemblyId}`,
-      {
-        method: "DELETE",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      },
-    );
-    if (!res.ok) throw new Error(`No se pudo quitar el sistema constructivo (HTTP ${res.status})`);
-    return res.json() as Promise<DetectedElement>;
-  },
+  removeAssembly: (planId: number, elementId: number, assemblyId: number) =>
+    request<DetectedElement>(
+      `/api/v1/plans/${planId}/elements/${elementId}/assemblies/${assemblyId}`,
+      { method: "DELETE" },
+    ),
 
   // Asigna el sistema a TODOS los elementos del plano cuyo tipo aplica
   // (ej: "Muro Ladrillo" → todos los muros). Un solo click.
@@ -1255,14 +1200,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ user_id: userId, role }),
     }),
-  removeProjectMember: async (projectId: number, userId: number) => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/members/${userId}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) throw new Error(`No se pudo quitar (HTTP ${res.status})`);
-  },
+  removeProjectMember: (projectId: number, userId: number) =>
+    request<void>(`/api/v1/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
 
   // ----- Plan de obra persistido (módulo Obra) -----
   getWorkPlan: (projectId: number) =>
@@ -1363,24 +1302,11 @@ export const api = {
       body: JSON.stringify({ unit }),
     }),
 
-  fetchDxfOverview: async (planId: number): Promise<Blob> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/dxf-overview`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`No se pudo cargar la vista de la lámina (HTTP ${res.status})`);
-    return res.blob();
-  },
+  fetchDxfOverview: (planId: number) =>
+    requestBlob(`/api/v1/plans/${planId}/dxf-overview`),
 
-  fetchDxfLayerPreview: async (planId: number, layer: string): Promise<Blob> => {
-    const token = getToken();
-    const res = await fetch(
-      `${API_URL}/api/v1/plans/${planId}/dxf-layer-preview?layer=${encodeURIComponent(layer)}`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
-    );
-    if (!res.ok) throw new Error(`No se pudo cargar la vista previa de la capa (HTTP ${res.status})`);
-    return res.blob();
-  },
+  fetchDxfLayerPreview: (planId: number, layer: string) =>
+    requestBlob(`/api/v1/plans/${planId}/dxf-layer-preview?layer=${encodeURIComponent(layer)}`),
 
   applyDxfLayers: (
     planId: number,
@@ -1409,15 +1335,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  exportXlsx: async (planId: number, page?: number): Promise<Blob> => {
-    const token = getToken();
-    const qs = page !== undefined ? `?page=${page}` : "";
-    const res = await fetch(`${API_URL}/api/v1/plans/${planId}/export/xlsx${qs}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`No se pudo exportar (HTTP ${res.status})`);
-    return res.blob();
-  },
+  exportXlsx: (planId: number, page?: number) =>
+    requestBlob(`/api/v1/plans/${planId}/export/xlsx${page !== undefined ? `?page=${page}` : ""}`),
 
   // ---- Admin (superadmin) ----
   listOrganizations: () => request<OrganizationListItem[]>(`/api/v1/admin/organizations`),
@@ -1433,14 +1352,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-  deleteOrganization: async (id: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/admin/organizations/${id}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar la organización");
-  },
+  deleteOrganization: (id: number) =>
+    request<void>(`/api/v1/admin/organizations/${id}`, { method: "DELETE" }),
 
   createOrgUser: (orgId: number, payload: AdminUserCreatePayload) =>
     request<OrgUser>(`/api/v1/admin/organizations/${orgId}/users`, {
@@ -1452,14 +1365,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-  deleteOrgUser: async (userId: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/admin/users/${userId}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  },
+  deleteOrgUser: (userId: number) =>
+    request<void>(`/api/v1/admin/users/${userId}`, { method: "DELETE" }),
 
   // ---- Presupuesto del proveedor del proyecto ----
   getProjectPriceList: (projectId: number) =>
@@ -1489,20 +1396,9 @@ export const api = {
   deleteProjectPriceList: (projectId: number) =>
     request<void>(`/api/v1/projects/${projectId}/price-list`, { method: "DELETE" }),
   downloadProjectBudgetXlsx: async (projectId: number, projectName?: string) => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/price-list/export.xlsx`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new ApiError(parseFastApiDetail(await res.text(), res.status), res.status);
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement("a");
-    a.href = url;
+    const blob = await requestBlob(`/api/v1/projects/${projectId}/price-list/export.xlsx`);
     const safe = (projectName || `proyecto_${projectId}`).replace(/[^\w\-]+/g, "_").slice(0, 60);
-    a.download = `presupuesto_${safe}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `presupuesto_${safe}.xlsx`);
   },
 
   // ---- Reglas de cómputo ----
@@ -1543,14 +1439,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-  deleteTeamUser: async (userId: number): Promise<void> => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/team/users/${userId}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  },
+  deleteTeamUser: (userId: number) =>
+    request<void>(`/api/v1/team/users/${userId}`, { method: "DELETE" }),
 
   // ---- Organization AI Config (BYOK) ----
   getAiConfig: () => request<AiConfigRead>("/api/v1/organization/ai-config"),
@@ -1593,59 +1483,25 @@ export const api = {
     }),
   getTaskHistory: (taskId: number) =>
     request<WorkTaskHistoryRow[]>(`/api/v1/work-tasks/${taskId}/history`),
-  deleteWorkTask: async (taskId: number) => {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/api/v1/work-tasks/${taskId}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok && res.status !== 204) {
-      const detail = await res.json().catch(() => null);
-      throw new Error(detail?.detail || `No se pudo eliminar (HTTP ${res.status})`);
-    }
-  },
-  parseInvoice: async (projectId: number, file: File) => {
-    const token = getToken();
+  deleteWorkTask: (taskId: number) =>
+    request<void>(`/api/v1/work-tasks/${taskId}`, { method: "DELETE" }),
+  parseInvoice: (projectId: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/invoices/parse`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: form,
-    });
-    if (!res.ok) {
-      const detail = await res.json().catch(() => null);
-      throw new Error(detail?.detail || `No se pudo leer la factura (HTTP ${res.status})`);
-    }
-    return res.json() as Promise<{
+    return request<{
       ok: boolean; reason?: string;
       amount: number | null; date: string | null; vendor: string | null; cuit: string | null;
       amount_candidates: number[]; date_candidates: string[]; note?: string;
-    }>;
+    }>(`/api/v1/projects/${projectId}/invoices/parse`, { method: "POST", body: form });
   },
   // Descarga directa del reporte PDF al disco del usuario (sin generar un link).
   // audience="comitente" arma la versión sin financieros, para reenviarla vos
   // mismo (mail/WhatsApp) sin exponer una URL pública.
   downloadWorkReport: async (projectId: number, projectName?: string, audience: "interno" | "comitente" = "interno") => {
-    const token = getToken();
     const qs = audience === "comitente" ? "?audience=comitente" : "";
-    const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/work-report.pdf${qs}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) {
-      const detail = await res.json().catch(() => null);
-      throw new Error(detail?.detail || `No se pudo generar el reporte (HTTP ${res.status})`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
+    const blob = await requestBlob(`/api/v1/projects/${projectId}/work-report.pdf${qs}`);
     const safe = (projectName || `proyecto_${projectId}`).replace(/[^a-zA-Z0-9-_]/g, "_").slice(0, 60);
-    a.download = `obra_${safe}${audience === "comitente" ? "_comitente" : ""}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `obra_${safe}${audience === "comitente" ? "_comitente" : ""}.pdf`);
   },
 };
 

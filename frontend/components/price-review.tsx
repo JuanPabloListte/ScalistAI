@@ -8,20 +8,15 @@ import type {
   PriceLine,
   ProjectBudgetView,
 } from "@/lib/api";
+import { fmtNum, money } from "@/lib/format";
 
 const UNIT: Record<string, string> = { kg: "kg", m3: "m³", m2: "m²", m: "m", l: "l", u: "u" };
 const SALE_UNITS = ["u", "kg", "m3", "m2", "m", "l"];
 
-const money = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
-const num = (n: number | null | undefined, d = 2) =>
-  n == null ? "—" : n.toLocaleString("es-AR", { maximumFractionDigits: d });
 
 export function presentationLabel(p: { amount: number; unit: string }) {
   if (p.unit === "u" && p.amount === 1) return "por unidad";
-  return `x ${num(p.amount)} ${UNIT[p.unit] ?? p.unit}`;
+  return `x ${fmtNum(p.amount)} ${UNIT[p.unit] ?? p.unit}`;
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -146,13 +141,13 @@ export function PriceReview({
             {view.measures.measures.map((m) => (
               <div key={m.key} className="flex justify-between gap-3 border-b border-slate-100 py-1 dark:border-slate-800">
                 <span className="text-slate-600 dark:text-slate-400">{m.label}</span>
-                <span className="tabular-nums">{num(m.value, 1)} {UNIT[m.unit] ?? m.unit}</span>
+                <span className="tabular-nums">{fmtNum(m.value, 1)} {UNIT[m.unit] ?? m.unit}</span>
               </div>
             ))}
             {view.measures.rebar_by_diameter.map((r) => (
               <div key={r.diameter_mm} className="flex justify-between gap-3 border-b border-slate-100 py-1 pl-4 dark:border-slate-800">
-                <span className="text-slate-500">Hierro Ø{num(r.diameter_mm, 1)}</span>
-                <span className="tabular-nums">{num(r.kg, 1)} kg</span>
+                <span className="text-slate-500">Hierro Ø{fmtNum(r.diameter_mm, 1)}</span>
+                <span className="tabular-nums">{fmtNum(r.kg, 1)} kg</span>
               </div>
             ))}
           </div>
@@ -232,8 +227,8 @@ function ItemRow({
   const value = it.line ? String(it.line.row) : "none";
   const formula =
     it.measure === "armadura_kg"
-      ? `${num(it.measure_value, 1)} kg del modelo`
-      : `${num(it.measure_value, 1)} ${UNIT[it.measure_unit] ?? it.measure_unit} × ${num(it.factor, 4)} ${UNIT[it.unit] ?? it.unit}`;
+      ? `${fmtNum(it.measure_value, 1)} kg del modelo`
+      : `${fmtNum(it.measure_value, 1)} ${UNIT[it.measure_unit] ?? it.measure_unit} × ${fmtNum(it.factor, 4)} ${UNIT[it.unit] ?? it.unit}`;
 
   return (
     <tr className="align-top">
@@ -241,11 +236,11 @@ function ItemRow({
         <div className="font-medium text-slate-800 dark:text-slate-200">{it.label}</div>
         <div className="text-xs text-slate-400" title={it.notes ?? undefined}>
           {formula}
-          {it.waste_pct ? ` + ${num(it.waste_pct)}%` : ""}
+          {it.waste_pct ? ` + ${fmtNum(it.waste_pct)}%` : ""}
         </div>
       </td>
       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-        {it.quantity == null ? "—" : `${num(it.quantity)} ${UNIT[it.unit] ?? it.unit}`}
+        {it.quantity == null ? "—" : `${fmtNum(it.quantity)} ${UNIT[it.unit] ?? it.unit}`}
       </td>
       <td className="px-3 py-2">
         {it.status === "sin_medida" ? (
@@ -296,7 +291,7 @@ function ItemRow({
           </div>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{num(it.units_to_buy)}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtNum(it.units_to_buy)}</td>
       <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">{money(it.subtotal)}</td>
     </tr>
   );

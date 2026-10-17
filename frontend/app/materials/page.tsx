@@ -13,6 +13,8 @@ import {
 } from "@/lib/api";
 
 import { ExcelMapperModal } from "@/components/ExcelMapperModal";
+import { EditIcon, TrashIcon } from "@/components/icons";
+import { ConfirmModal, Modal } from "@/components/modal";
 
 const APPLIES_TO_OPTIONS: { value: string; label: string }[] = [
   { value: "wall", label: "Muro" },
@@ -293,13 +295,13 @@ export default function MaterialsPage() {
                       onClick={() => setEditingAssembly(a)}
                       className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-brand-600 dark:hover:bg-slate-800 dark:hover:text-brand-400"
                     >
-                      <EditIcon />
+                      <EditIcon size={18} />
                     </button>
                     <button
                       onClick={() => setDeletingAssembly(a)}
                       className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                     >
-                      <TrashIcon />
+                      <TrashIcon size={18} />
                     </button>
                   </div>
                 </div>
@@ -366,7 +368,7 @@ export default function MaterialsPage() {
         />
       )}
       {deletingMaterial && (
-        <DeleteModal
+        <ConfirmModal
           title="Eliminar insumo"
           message={`¿Eliminar ${deletingMaterial.name}? Esto podría afectar a los sistemas constructivos que lo utilicen.`}
           onCancel={() => setDeletingMaterial(null)}
@@ -386,7 +388,7 @@ export default function MaterialsPage() {
         />
       )}
       {deletingAssembly && (
-        <DeleteModal
+        <ConfirmModal
           title="Eliminar sistema"
           message={`¿Eliminar el sistema constructivo ${deletingAssembly.name}? Se quitará de todos los elementos de los planos.`}
           onCancel={() => setDeletingAssembly(null)}
@@ -482,8 +484,8 @@ function MaterialModal({ material, onCancel, onSaved }: { material: Material | n
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={onCancel}>
-      <form onSubmit={submit} onClick={e => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+    <Modal size="sm" onClose={onCancel}>
+      <form onSubmit={submit}>
         <h2 className="mb-4 text-xl font-bold dark:text-white">{isEdit ? "Editar Insumo" : "Nuevo Insumo"}</h2>
         
         <div className="space-y-4">
@@ -515,7 +517,7 @@ function MaterialModal({ material, onCancel, onSaved }: { material: Material | n
           <button type="submit" disabled={saving} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-md hover:bg-brand-700 disabled:opacity-50">Guardar</button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 
@@ -551,8 +553,8 @@ function AssemblyModal({ assembly, allMaterials, onCancel, onSaved }: { assembly
   const base = baseUnitFor(appliesTo);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={onCancel}>
-      <form onSubmit={submit} onClick={e => e.stopPropagation()} className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+    <Modal size="2xl" onClose={onCancel}>
+      <form onSubmit={submit} className="flex flex-col gap-4">
         <div>
           <h2 className="text-xl font-bold dark:text-white">{isEdit ? "Editar Sistema" : "Nuevo Sistema"}</h2>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -689,49 +691,7 @@ function AssemblyModal({ assembly, allMaterials, onCancel, onSaved }: { assembly
           <button type="submit" disabled={saving} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-md hover:bg-brand-700 disabled:opacity-50">Guardar</button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 
-function DeleteModal({ title, message, onCancel, onConfirm }: { title: string; message: string; onCancel: () => void; onConfirm: () => Promise<void>; }) {
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function submit() {
-    setLoading(true); setErr(null);
-    try { await onConfirm(); } catch (e) { setErr(e instanceof Error ? e.message : "Error"); setLoading(false); }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={loading ? undefined : onCancel}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-        <h3 className="text-lg font-bold text-slate-900 dark:text-white">{title}</h3>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{message}</p>
-        {err && <p className="mt-4 text-sm text-red-600">{err}</p>}
-        <div className="mt-6 flex justify-end gap-3">
-          <button onClick={onCancel} disabled={loading} className="rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700">Cancelar</button>
-          <button onClick={submit} disabled={loading} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-md hover:bg-red-700 disabled:opacity-50">Eliminar</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EditIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-
-function TrashIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
-    </svg>
-  );
-}
