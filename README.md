@@ -71,8 +71,9 @@ docker compose up --build
 
 Servicios: `postgres`, `redis`, `backend` (FastAPI, corre `alembic upgrade
 head` al arrancar), `worker` (RQ) y `frontend` (Next.js 14). Producción:
-`docker-compose.prod.yml` + `nginx/`, con `deploy.sh` y
-`init-letsencrypt.sh`.
+`docker-compose.prod.yml` + `nginx/`: guía paso a paso en
+`docs/despliegue.md` (servidor, dominio, certificado, primer usuario,
+actualizaciones y backups con `backup.sh`).
 
 Si cambian dependencias del frontend, recrear los volúmenes:
 `docker compose down -v && docker compose up --build`.

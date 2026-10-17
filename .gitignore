@@ -85,3 +85,7 @@ backend/backend/
 # Scripts sueltos de debug contra la DB local
 backend/query_db.py
 backend/count_openings.py
+
+# Producción: certificados (claves privadas) y backups locales
+certbot/
+backups/
