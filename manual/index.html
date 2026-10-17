@@ -161,8 +161,8 @@
   figure.shot.tall .frame::after { content: 'Ver completa'; position: absolute; left: 0; right: 0; bottom: 0; padding: 2.2rem 0 .7rem; text-align: center; font-size: .8rem; font-weight: 600; color: var(--accent); background: linear-gradient(transparent, var(--shot-frame) 70%); }
   figure.video video { display: block; width: 100%; height: auto; border: 1px solid var(--rule-strong); border-radius: 10px; box-shadow: var(--shadow); background: #000; }
   figure.video .poster-print { display: none; }
-  figcaption { display: flex; gap: .7rem; align-items: baseline; font-size: .85rem; color: var(--ink-2); margin-top: .65rem; max-width: var(--measure); }
-  figcaption .fig { font-family: var(--mono); font-size: .74rem; color: var(--brand); white-space: nowrap; }
+  figcaption { display: block; font-size: .85rem; color: var(--ink-2); margin-top: .65rem; max-width: var(--measure); }
+  figcaption .fig { font-family: var(--mono); font-size: .74rem; color: var(--brand); white-space: nowrap; margin-right: .6rem; }
   .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
   .pair figure.shot { margin-top: .6rem; }
   .tabs { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .6rem; margin: .8rem 0 1.6rem; }
@@ -206,7 +206,15 @@
     body { font-size: 10.5pt; line-height: 1.55; }
     .side, .menu-btn, .lb, .search { display: none !important; }
     .shell { display: block; } main { padding: 0; }
-    .cover { min-height: 240mm; align-content: end; border-bottom: 0; }
+    .cover { min-height: 0; padding-top: 55mm; border-bottom: 0; }
+    .flow { break-inside: avoid; margin-top: 18mm; }
+    .ui { background: none; padding: 0; }
+    .tbl { overflow: visible; max-width: none; }
+    table { font-size: 8.5pt; }
+    th, td { padding: .4rem .55rem; }
+    td:first-child { white-space: normal; }
+    /* La página A4 mide menos de 860px: sin esto, el modo angosto apila los pares. */
+    .pair { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; break-inside: avoid; }
     section.ch { break-before: page; padding-top: 0; }
     h3, h4 { break-after: avoid; }
     figure.shot, figure.video, .tbl, .pipe, .note, .tabs div { break-inside: avoid; }
