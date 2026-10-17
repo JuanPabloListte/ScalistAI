@@ -282,10 +282,7 @@ export default function RuleSetEditorPage() {
       </div>
 
       <p className="mt-6 text-xs text-slate-500 dark:text-slate-400">
-        Cada regla toma una medida del modelo y la convierte en un producto. El producto se busca en
-        el PDF/Excel del proveedor por las palabras clave (separadas por coma: alcanza con que coincida
-        una; dentro de cada una tienen que aparecer todas las palabras). Si hay varios candidatos se
-        usa el más barato, y en la revisión del proyecto se puede cambiar.
+        Cada producto se busca en el presupuesto del proveedor por sus palabras clave; si hay varios, se usa el más barato.
       </p>
 
       {meta.measures.map((m) => {

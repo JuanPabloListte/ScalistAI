@@ -54,11 +54,8 @@ export default function RuleSetsPage() {
             Reglas de cómputo
           </h1>
           <p className="mt-0.5 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Cómo se pasa del modelo IFC a los productos del presupuesto del proveedor
-            (cuánto cemento por m² de muro, cuántos ladrillos, cuánto hierro).
-            Al crear un proyecto elegís qué juego usar.
-            {" "}El estándar se usa por defecto y no se modifica: duplicalo para tener tu propia versión.
-            {!isAdmin && " · Solo lectura: los cambios los hace un admin."}
+            Cuánto material lleva cada m² de muro, m³ de hormigón o kg de hierro.
+            {!isAdmin && " · Solo lectura."}
           </p>
         </div>
         {isAdmin && (
