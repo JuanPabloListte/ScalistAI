@@ -89,3 +89,6 @@ backend/count_openings.py
 # Producción: certificados (claves privadas) y backups locales
 certbot/
 backups/
+
+# Planillas de clientes (datos reales): quedan en disco, fuera del repo
+backend/data/imports/
