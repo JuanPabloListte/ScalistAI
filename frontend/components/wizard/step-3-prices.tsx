@@ -73,6 +73,7 @@ export function ProjectPricesPanel({
   showShoppingList = true,
   renderFooter,
   onViewChange,
+  viewOverride,
 }: {
   projectId: number;
   showIntro?: boolean;
@@ -81,8 +82,14 @@ export function ProjectPricesPanel({
   showShoppingList?: boolean;
   renderFooter?: (s: { hasList: boolean; working: boolean }) => React.ReactNode;
   onViewChange?: (v: ProjectBudgetView) => void;
+  /** Vista actualizada desde afuera (p. ej. al cambiar la mano de obra). */
+  viewOverride?: ProjectBudgetView | null;
 }) {
   const [view, setView] = useState<ProjectBudgetView | null>(null);
+
+  useEffect(() => {
+    if (viewOverride) setView(viewOverride);
+  }, [viewOverride]);
   const [ruleSets, setRuleSets] = useState<RuleSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);

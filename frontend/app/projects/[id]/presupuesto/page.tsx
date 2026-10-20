@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { LaborPanel, SalePricePanel } from "@/components/labor-budget";
 import { LegacyBudget } from "@/components/legacy-budget";
 import { ProjectPricesPanel } from "@/components/wizard/step-3-prices";
-import { api, isUnauthorized, type Project, type ProjectBudgetView } from "@/lib/api";
+import { api, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 import { money } from "@/lib/format";
 
@@ -14,7 +15,8 @@ export default function PresupuestoPage() {
   return FEATURES.legacyBudget ? <LegacyBudget /> : <SupplierBudget />;
 }
 
-/** Presupuesto de materiales: presupuesto del proveedor × reglas × IFC. */
+/** Presupuesto de obra: materiales (proveedor × reglas × IFC), mano de obra
+ *  por rubro y precio de venta. */
 function SupplierBudget() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -22,10 +24,14 @@ function SupplierBudget() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [view, setView] = useState<ProjectBudgetView | null>(null);
+  // Vista que devuelve la mano de obra: se la pasa al panel del proveedor.
+  const [laborView, setLaborView] = useState<ProjectBudgetView | null>(null);
+  const [me, setMe] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
+    api.getMe().then(setMe).catch(() => {});
     api.getProject(projectId).then(setProject).catch((e) => {
       if (isUnauthorized(e)) router.push("/login");
       else setError(e instanceof Error ? e.message : String(e));
@@ -46,6 +52,12 @@ function SupplierBudget() {
 
   const budget = view?.budget;
   const pl = view?.price_list;
+  const price = view?.price;
+  const pending = (budget?.counts.sin_precio ?? 0) + (view?.labor?.counts.pendientes ?? 0);
+  const onLaborView = (v: ProjectBudgetView) => {
+    setView(v);
+    setLaborView(v);
+  };
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
@@ -73,8 +85,8 @@ function SupplierBudget() {
         <p className="text-sm text-slate-300">{project?.name ?? " "}</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-wide text-slate-400">Materiales (neto)</p>
-            <p className="text-4xl font-bold tabular-nums">{budget ? money(budget.totals.net) : "—"}</p>
+            <p className="text-xs uppercase tracking-wide text-slate-400">Precio de venta</p>
+            <p className="text-4xl font-bold tabular-nums">{price ? money(price.total) : "—"}</p>
             <p className="mt-1 text-sm text-slate-300">
               {pl
                 ? [pl.supplier ?? pl.filename, view?.rule_set?.name && `reglas: ${view.rule_set.name}`]
@@ -82,14 +94,20 @@ function SupplierBudget() {
                 : "Falta el presupuesto del proveedor"}
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-xs uppercase tracking-wide text-slate-400">Total con IVA</p>
-            <p className="text-2xl font-semibold tabular-nums text-emerald-400">
-              {budget ? money(budget.totals.total) : "—"}
-            </p>
-            {budget && budget.counts.sin_precio > 0 && (
-              <p className="mt-1 text-xs text-amber-300">{budget.counts.sin_precio} ítems sin precio</p>
-            )}
+          <div className="flex gap-8 text-right">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Materiales</p>
+              <p className="text-xl font-semibold tabular-nums">{price ? money(price.materials) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Mano de obra</p>
+              <p className="text-xl font-semibold tabular-nums">{price ? money(price.labor) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Costo directo</p>
+              <p className="text-xl font-semibold tabular-nums text-emerald-400">{price ? money(price.direct) : "—"}</p>
+              {pending > 0 && <p className="mt-1 text-xs text-amber-300">{pending} ítems sin precio</p>}
+            </div>
           </div>
         </div>
       </div>
@@ -97,8 +115,16 @@ function SupplierBudget() {
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-        <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView} />
+        <h2 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">Materiales</h2>
+        <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView}
+                            viewOverride={laborView} />
       </section>
+
+      {view && (
+        <LaborPanel projectId={projectId} view={view} canEdit
+                    isAdmin={!!(me?.is_superadmin || me?.role === "admin")} onView={onLaborView} />
+      )}
+      {view && <SalePricePanel projectId={projectId} view={view} canEdit onView={onLaborView} />}
     </main>
   );
 }

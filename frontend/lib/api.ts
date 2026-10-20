@@ -539,7 +539,20 @@ export type RuleInput = {
   mode: RuleMode;
   waste_pct: number;
   notes: string | null;
+  /** material: producto del proveedor. labor: mano de obra de un rubro. */
+  kind?: RuleKind;
+  /** Rubro ("Mampostería", "Estructura"…). Solo mano de obra. */
+  stage?: string | null;
+  /** Unidades de la medida que avanza una cuadrilla por día. */
+  daily_yield?: number | null;
+  labor_mode?: LaborMode | null;
+  /** Precio de referencia por unidad, sin IVA (modo tercerizado). */
+  unit_price?: number | null;
+  crew?: CrewMember[] | null;
 };
+export type RuleKind = "material" | "labor";
+export type LaborMode = "unit" | "daily";
+export type CrewMember = { trade: string; count: number };
 export type Rule = RuleInput & { id: number; position: number };
 export type RuleSet = {
   id: number;
@@ -625,12 +638,73 @@ export type ProjectPriceList = {
   line_patches: Record<string, { amount: number; unit: string }>;
   updated_at: string | null;
 };
+export type LaborItemStatus = "ok" | "sin_precio" | "sin_jornal" | "sin_rendimiento" | "sin_medida";
+export type LaborItem = {
+  key: string;
+  rule_id: number | null;
+  label: string;
+  stage: string;
+  measure: string;
+  measure_label: string;
+  measure_unit: string;
+  quantity: number;
+  mode: LaborMode;
+  daily_yield: number | null;
+  crew: CrewMember[];
+  notes: string | null;
+  /** Días de una cuadrilla (cantidad / rendimiento). */
+  days: number | null;
+  /** Jornales totales (modo cuadrilla propia). */
+  workdays: number | null;
+  unit_price: number | null;
+  cost: number | null;
+  /** El proyecto pisa el modo o el precio de la regla. */
+  manual: boolean;
+  missing_trades: string[];
+  status: LaborItemStatus;
+};
+export type LaborBudget = {
+  items: LaborItem[];
+  by_stage: { stage: string; cost: number; items: string[] }[];
+  total: number;
+  counts: { ok: number; pendientes: number; sin_medida: number };
+};
+export type SalePrice = {
+  materials: number;
+  labor: number;
+  direct: number;
+  overhead: number;
+  profit: number;
+  net: number;
+  iva: number;
+  total: number;
+  overhead_pct: number;
+  profit_pct: number;
+  iva_pct: number;
+};
+export type LaborSetting = { mode?: LaborMode; unit_price?: number | null };
+export type BudgetSettings = {
+  overhead_pct: number;
+  profit_pct: number;
+  iva_pct: number;
+  /** El proyecto tiene márgenes propios (distintos a los de la empresa). */
+  margins_custom: boolean;
+  org_overhead_pct: number;
+  org_profit_pct: number;
+  labor: Record<string, LaborSetting>;
+};
+export type LaborRate = { trade: string; daily_cost: number; updated_on: string | null };
 export type ProjectBudgetView = {
   rule_set: { id: number; name: string } | null;
   model_status: "ready" | "processing" | "error" | "missing";
   price_list: ProjectPriceList | null;
   measures: ModelMeasures | null;
   budget: RuleBudget | null;
+  /** Mano de obra: se calcula con el modelo listo, haya o no presupuesto del proveedor. */
+  labor: LaborBudget | null;
+  price: SalePrice | null;
+  settings: BudgetSettings;
+  trades?: { trade: string; daily_cost: number }[];
 };
 
 // --- Motor de Inteligencia de Costos ---
@@ -944,6 +1018,19 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  patchProjectBudgetSettings: (
+    projectId: number,
+    payload: {
+      labor?: Record<string, LaborSetting | null>;
+      overhead_pct?: number;
+      profit_pct?: number;
+      reset_margins?: boolean;
+    },
+  ) =>
+    request<ProjectBudgetView>(`/api/v1/projects/${projectId}/budget-settings`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   deleteProjectPriceList: (projectId: number) =>
     request<void>(`/api/v1/projects/${projectId}/price-list`, { method: "DELETE" }),
   downloadProjectBudgetXlsx: async (projectId: number, projectName?: string) => {
@@ -964,6 +1051,11 @@ export const api = {
   ) => request<RuleSet>(`/api/v1/rule-sets/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteRuleSet: (id: number) =>
     request<void>(`/api/v1/rule-sets/${id}`, { method: "DELETE" }),
+
+  // ---- Jornales de la empresa (mano de obra por cuadrilla propia) ----
+  listLaborRates: () => request<LaborRate[]>(`/api/v1/labor-rates`),
+  replaceLaborRates: (rates: { trade: string; daily_cost: number }[]) =>
+    request<LaborRate[]>(`/api/v1/labor-rates`, { method: "PUT", body: JSON.stringify(rates) }),
 
   // ---- Team (org admin / member) ----
   listTeam: () => request<OrgUser[]>(`/api/v1/team/users`),
