@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.models.plan import Plan
 from app.models.project import Project
+from app.models.project_budget_settings import ProjectBudgetSettings
 from app.models.project_price_list import ProjectPriceList
 from app.models.rule_set import RuleSet
 from app.services import budget_rules as br
@@ -74,21 +75,100 @@ def _patched_lines(pl: ProjectPriceList) -> list[dict]:
     return lines
 
 
+def get_budget_settings(project_id: int, db: Session) -> ProjectBudgetSettings | None:
+    return db.scalar(select(ProjectBudgetSettings)
+                     .where(ProjectBudgetSettings.project_id == project_id))
+
+
+def update_budget_settings(project: Project, db: Session, *, labor: dict | None = None,
+                           overhead_pct: float | None = None, profit_pct: float | None = None,
+                           reset_margins: bool = False) -> None:
+    """`labor`: rule_id → {"mode", "unit_price"}; un valor null borra el ajuste
+    de ese rubro (vuelve a lo que dice la regla)."""
+    s = get_budget_settings(project.id, db)
+    if s is None:
+        s = ProjectBudgetSettings(project_id=project.id, labor={})
+        db.add(s)
+    if labor is not None:
+        merged = dict(s.labor or {})
+        for key, val in labor.items():
+            if val is None:
+                merged.pop(str(key), None)
+            else:
+                merged[str(key)] = {k: v for k, v in val.items() if k in ("mode", "unit_price")}
+        s.labor = merged
+    if reset_margins:
+        s.overhead_pct = s.profit_pct = None
+    if overhead_pct is not None:
+        s.overhead_pct = overhead_pct
+    if profit_pct is not None:
+        s.profit_pct = profit_pct
+    db.flush()
+
+
+def _org_margins(organization_id: int, db: Session) -> tuple[float, float, float]:
+    from app.cost_intelligence.infrastructure.persistence.cost_settings_repo import (
+        SqlCostSettingsRepo,
+    )
+
+    cs = SqlCostSettingsRepo(db).get_or_create(organization_id)
+    return cs.overhead_pct, cs.profit_pct, cs.iva_pct
+
+
 def build_view(project: Project, db: Session) -> dict:
+    from app.services.labor_rates import trade_costs
+
     rule_set = resolve_rule_set(project, db)
     pl = get_price_list(project.id, db)
     status = model_status(project.id, db)
+    settings_row = get_budget_settings(project.id, db)
+    org_overhead, org_profit, iva_pct = _org_margins(project.organization_id, db)
+    overhead = settings_row.overhead_pct if settings_row and settings_row.overhead_pct is not None \
+        else org_overhead
+    profit = settings_row.profit_pct if settings_row and settings_row.profit_pct is not None \
+        else org_profit
     view: dict = {
         "rule_set": {"id": rule_set.id, "name": rule_set.name} if rule_set else None,
         "model_status": status,
         "price_list": None,
         "measures": None,
         "budget": None,
+        "labor": None,
+        "price": None,
+        "settings": {
+            "overhead_pct": overhead, "profit_pct": profit, "iva_pct": iva_pct,
+            "margins_custom": bool(settings_row and (settings_row.overhead_pct is not None
+                                                     or settings_row.profit_pct is not None)),
+            "org_overhead_pct": org_overhead, "org_profit_pct": org_profit,
+            "labor": (settings_row.labor if settings_row else None) or {},
+        },
     }
-    if pl is None:
-        return view
+    measures = br.project_measures(project.id, db) if status == "ready" else None
+    if measures is not None:
+        view["measures"] = measures.as_dict()
+        if rule_set is not None:
+            costs = trade_costs(project.organization_id, db)
+            view["labor"] = br.compute_labor(
+                measures, [br.RuleSpec.of(r) for r in rule_set.rules], costs,
+                view["settings"]["labor"])
+            view["trades"] = [{"trade": k, "daily_cost": v} for k, v in costs.items()]
+    if pl is not None:
+        view["price_list"] = _price_list_view(pl)
+        if measures is not None and rule_set is not None:
+            view["budget"] = br.compute_budget(
+                measures, [br.RuleSpec.of(r) for r in rule_set.rules],
+                view["price_list"]["lines"], overrides=pl.overrides or {})
+    if view["labor"] is not None or view["budget"] is not None:
+        view["price"] = br.compute_price(
+            (view["budget"] or {}).get("totals", {}).get("net", 0.0),
+            (view["labor"] or {}).get("total", 0.0),
+            overhead_pct=overhead, profit_pct=profit, iva_pct=iva_pct)
+    return view
+
+
+def _price_list_view(pl: ProjectPriceList) -> dict:
     lines = _patched_lines(pl)
-    view["price_list"] = {
+    return {
         **{k: v for k, v in pl.parsed.items() if k != "lines"},
         "lines": lines,
         "filename": pl.original_filename,
@@ -98,16 +178,6 @@ def build_view(project: Project, db: Session) -> dict:
         "line_patches": pl.line_patches or {},
         "updated_at": pl.updated_at.isoformat() if pl.updated_at else None,
     }
-    if status != "ready" or rule_set is None:
-        return view
-    measures = br.project_measures(project.id, db)
-    if measures is None:
-        return view
-    view["measures"] = measures.as_dict()
-    view["budget"] = br.compute_budget(
-        measures, [br.RuleSpec.of(r) for r in rule_set.rules], lines,
-        overrides=pl.overrides or {})
-    return view
 
 
 def _store_file(project_id: int, filename: str, data: bytes) -> str:
@@ -177,9 +247,15 @@ _STATUS_LABEL = {"ok": "Con precio", "sin_precio": "Sin precio",
                  "regla_invalida": "Regla inválida"}
 
 
+_LABOR_STATUS = {"ok": "Con precio", "sin_precio": "Falta el precio",
+                 "sin_jornal": "Faltan jornales", "sin_rendimiento": "Falta el rendimiento",
+                 "sin_medida": "El modelo no lo trae"}
+
+
 def budget_xlsx(project: Project, view: dict) -> bytes:
-    """Presupuesto de materiales: resumen, lista de compras, detalle por regla
-    y medidas del modelo. `view` es la salida de build_view (con budget)."""
+    """Presupuesto de obra: resumen con precio de venta, lista de compras, mano
+    de obra, detalle de materiales por regla y medidas del modelo. `view` es la
+    salida de build_view (con budget)."""
     import io
 
     from openpyxl import Workbook
@@ -187,6 +263,7 @@ def budget_xlsx(project: Project, view: dict) -> bytes:
     from openpyxl.utils import get_column_letter
 
     budget, pl, measures = view["budget"], view["price_list"], view["measures"]
+    labor, price = view.get("labor"), view.get("price")
     money = '"$" #,##0.00'
     qty = "#,##0.00"
     head_font = Font(bold=True, color="FFFFFF")
@@ -212,7 +289,7 @@ def budget_xlsx(project: Project, view: dict) -> bytes:
     ws = wb.active
     ws.title = "Resumen"
     t = budget["totals"]
-    ws.append(["Presupuesto de materiales"])
+    ws.append(["Presupuesto de obra"])
     ws["A1"].font = Font(bold=True, size=14)
     ws.append([])
     info = [
@@ -225,8 +302,21 @@ def budget_xlsx(project: Project, view: dict) -> bytes:
          "con IVA (se pasaron a neto)" if pl["iva"]["included"] else "sin IVA"),
         None,
         ("Materiales (neto)", t["net"]),
-        (f"IVA {round(t['iva_rate'] * 100)}%", t["iva"]),
-        ("Total con IVA", t["total"]),
+    ]
+    if price is not None:
+        info += [
+            ("Mano de obra", price["labor"]),
+            ("Costo directo", price["direct"]),
+            (f"Gastos generales {round(price['overhead_pct'] * 100, 1):g}%", price["overhead"]),
+            (f"Beneficio {round(price['profit_pct'] * 100, 1):g}%", price["profit"]),
+            ("Precio sin IVA", price["net"]),
+            (f"IVA {round(price['iva_pct'] * 100)}%", price["iva"]),
+            ("Precio de venta", price["total"]),
+        ]
+    else:
+        info += [(f"IVA {round(t['iva_rate'] * 100)}%", t["iva"]),
+                 ("Total con IVA", t["total"])]
+    info += [
         None,
         ("Ítems con precio", budget["counts"]["ok"]),
         ("Ítems sin precio", budget["counts"]["sin_precio"]),
@@ -239,7 +329,7 @@ def budget_xlsx(project: Project, view: dict) -> bytes:
         ws.append(list(entry))
         if isinstance(entry[1], float):
             ws.cell(row=ws.max_row, column=2).number_format = money
-        if entry[0] == "Total con IVA":
+        if entry[0] in ("Total con IVA", "Precio de venta"):
             for col in (1, 2):
                 ws.cell(row=ws.max_row, column=col).font = Font(bold=True)
     ws.column_dimensions["A"].width = 32
@@ -274,6 +364,25 @@ def budget_xlsx(project: Project, view: dict) -> bytes:
            "Cantidad", "Unidad", "Renglón del proveedor", "Unidades", "Subtotal neto", "Estado"],
           rows, [30, 34, 14, 8, 10, 12, 14, 8, 50, 12, 16, 18],
           {3: qty, 5: "0.0000", 7: qty, 10: qty, 11: money})
+
+    # --- Mano de obra
+    if labor is not None:
+        mode_label = {"unit": "Tercerizado", "daily": "Cuadrilla propia"}
+        rows = []
+        for it in labor["items"]:
+            how = mode_label.get(it["mode"], it["mode"])
+            if it["mode"] == "daily" and it.get("workdays"):
+                how += f" · {it['workdays']:g} jornales"
+            rows.append([
+                it["stage"], it["label"], it["quantity"], unit(it["measure_unit"]), how,
+                it.get("days"), it.get("unit_price"), it.get("cost"),
+                _LABOR_STATUS.get(it["status"], it["status"]),
+            ])
+        rows.append(["", "TOTAL MANO DE OBRA", None, "", "", None, None, labor["total"], ""])
+        table(wb.create_sheet("Mano de obra", 2),
+              ["Rubro", "Tarea", "Cantidad", "Unidad", "Cómo se cotiza", "Días",
+               "Precio por unidad", "Subtotal", "Estado"],
+              rows, [16, 40, 12, 8, 30, 10, 18, 18, 20], {3: qty, 6: "0.0", 7: money, 8: money})
 
     # --- Medidas del modelo
     rows = [[m["label"], m["value"], unit(m["unit"]), m["count"]] for m in measures["measures"]]

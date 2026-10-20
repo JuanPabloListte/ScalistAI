@@ -8,7 +8,10 @@
    convierte a la unidad de venta (bolsa de 25 kg, camión de 6 m³, barra de
    12 m). Entre varios candidatos gana el más barato por unidad de producto.
 4. La lista de compras agrupa por renglón del proveedor y redondea hacia
-   arriba (no se compran 3,4 bolsas): ese es el total del presupuesto.
+   arriba (no se compran 3,4 bolsas): ese es el total de materiales.
+5. Las reglas de mano de obra (kind="labor") cotizan cada rubro por unidad
+   (tercerizado, $/m²) o por jornal (rendimiento × cuadrilla × jornal), y el
+   precio de venta suma gastos generales, beneficio e IVA.
 
 Todo es puro (sin DB) salvo los helpers de juegos de reglas del final.
 """
@@ -43,6 +46,10 @@ MEASURES: dict[str, tuple[str, str]] = {
 
 MODES = ("fixed", "brick_dims", "rebar")
 UNITS = ("kg", "m3", "m2", "m", "l", "u")
+KINDS = ("material", "labor")
+LABOR_MODES = ("unit", "daily")
+# Oficios de la tabla de jornales que se ofrecen por defecto.
+DEFAULT_TRADES = ("Oficial especializado", "Oficial", "Medio oficial", "Ayudante")
 
 # Diámetros comerciales (mm) para redondear lo que sale del modelo: los Revit
 # con biblioteca US traen 3/8" (9,5 mm) o 5/8" (15,9 mm).
@@ -206,12 +213,23 @@ class RuleSpec:
     waste_pct: float = 0.0
     exclude_keywords: list[str] = field(default_factory=list)
     notes: str | None = None
+    kind: str = "material"
+    stage: str | None = None
+    daily_yield: float | None = None
+    labor_mode: str | None = None
+    unit_price: float | None = None
+    crew: list[dict] | None = None
 
     @classmethod
     def of(cls, r) -> "RuleSpec":
         return cls(id=r.id, measure=r.measure, label=r.label, keywords=list(r.keywords or []),
                    unit=r.unit, factor=r.factor, mode=r.mode, waste_pct=r.waste_pct or 0.0,
-                   exclude_keywords=list(r.exclude_keywords or []), notes=r.notes)
+                   exclude_keywords=list(r.exclude_keywords or []), notes=r.notes,
+                   kind=getattr(r, "kind", None) or "material", stage=getattr(r, "stage", None),
+                   daily_yield=getattr(r, "daily_yield", None),
+                   labor_mode=getattr(r, "labor_mode", None),
+                   unit_price=getattr(r, "unit_price", None),
+                   crew=list(getattr(r, "crew", None) or []) or None)
 
 
 def _candidates(rule: RuleSpec, lines: list[dict], diameter: float | None) -> list[dict]:
@@ -259,6 +277,8 @@ def compute_budget(
     items: list[dict] = []
 
     for idx, rule in enumerate(rules):
+        if rule.kind == "labor":
+            continue  # la mano de obra se calcula aparte (compute_labor)
         rid = rule.id if rule.id is not None else f"n{idx}"
         if rule.measure not in MEASURES:
             items.append({"key": str(rid), "rule_id": rule.id, "label": rule.label,
@@ -359,6 +379,111 @@ def compute_budget(
 
 
 # ---------------------------------------------------------------------------
+# Mano de obra y precio de venta
+# ---------------------------------------------------------------------------
+
+def compute_labor(
+    measures: Measures,
+    rules: list[RuleSpec],
+    trade_costs: dict[str, float],
+    settings: dict[str, dict] | None = None,
+) -> dict:
+    """Costo de mano de obra por rubro.
+
+    Cada regla de mano de obra se cotiza en uno de dos modos (la regla trae el
+    habitual y `settings` lo puede pisar por proyecto, junto con el precio):
+    - unit: medida × precio por unidad (tercerizado: "$ 18.000 por m²").
+    - daily: días = medida / rendimiento; costo = días × Σ(cuadrilla × jornal).
+    `trade_costs`: oficio → costo por día para la empresa (con cargas).
+    El rendimiento da los días también en modo unit (los usa el cronograma).
+    """
+    settings = settings or {}
+    items: list[dict] = []
+    for idx, rule in enumerate(rules):
+        if rule.kind != "labor":
+            continue
+        rid = rule.id if rule.id is not None else f"n{idx}"
+        over = settings.get(str(rid)) or {}
+        mode = over.get("mode") or rule.labor_mode or "unit"
+        m_label, m_unit = MEASURES.get(rule.measure, (rule.measure, ""))
+        qty = measures.values.get(rule.measure, 0.0) if rule.measure in MEASURES else 0.0
+        crew = [c for c in (rule.crew or []) if c.get("trade") and (c.get("count") or 0) > 0]
+        y = rule.daily_yield or 0.0
+        days = qty / y if y > 0 else None
+        item = {
+            "key": str(rid), "rule_id": rule.id, "label": rule.label,
+            "stage": rule.stage or "Sin rubro", "measure": rule.measure,
+            "measure_label": m_label, "measure_unit": m_unit, "quantity": round(qty, 3),
+            "mode": mode, "daily_yield": rule.daily_yield, "crew": crew,
+            "notes": rule.notes, "days": round(days, 2) if days is not None else None,
+            "workdays": None, "unit_price": None, "cost": None,
+            "manual": bool(over), "missing_trades": [],
+        }
+        if qty <= 0:
+            item["status"] = "sin_medida"
+        elif mode == "daily":
+            missing = [c["trade"] for c in crew if not trade_costs.get(c["trade"])]
+            if days is None:
+                item["status"] = "sin_rendimiento"
+            elif not crew or missing:
+                item["status"] = "sin_jornal"
+                item["missing_trades"] = missing
+            else:
+                per_day = sum(c["count"] * trade_costs[c["trade"]] for c in crew)
+                item.update({
+                    "status": "ok", "unit_price": round(per_day / y, 2),
+                    "workdays": round(days * sum(c["count"] for c in crew), 1),
+                    "cost": round(days * per_day, 2),
+                })
+        else:
+            price = over["unit_price"] if "unit_price" in over else rule.unit_price
+            if price is None or price <= 0:
+                item["status"] = "sin_precio"
+            else:
+                item.update({"status": "ok", "unit_price": round(float(price), 2),
+                             "cost": round(qty * float(price), 2)})
+        items.append(item)
+
+    stages: dict[str, dict] = {}
+    for it in items:
+        s = stages.setdefault(it["stage"], {"stage": it["stage"], "cost": 0.0, "items": []})
+        s["items"].append(it["key"])
+        if it["cost"]:
+            s["cost"] = round(s["cost"] + it["cost"], 2)
+    return {
+        "items": items,
+        "by_stage": list(stages.values()),
+        "total": round(sum(i["cost"] or 0 for i in items), 2),
+        "counts": {
+            "ok": sum(1 for i in items if i["status"] == "ok"),
+            "pendientes": sum(1 for i in items if i["status"] in
+                              ("sin_precio", "sin_jornal", "sin_rendimiento")),
+            "sin_medida": sum(1 for i in items if i["status"] == "sin_medida"),
+        },
+    }
+
+
+def compute_price(materials_net: float, labor_total: float, *, overhead_pct: float,
+                  profit_pct: float, iva_pct: float = IVA_RATE) -> dict:
+    """Costo directo (materiales + mano de obra) → precio de venta, con la
+    cuenta de cost_intelligence: directo + GG% = costo; + beneficio% sobre el
+    costo = precio sin IVA; + IVA."""
+    from decimal import Decimal
+
+    from app.cost_intelligence.domain.pricing_breakdown import IndirectRates, build_price
+    from app.cost_intelligence.domain.value_objects import Money
+
+    direct = Money(Decimal(str(materials_net)) + Decimal(str(labor_total)))
+    b = build_price(direct, IndirectRates(Decimal(str(overhead_pct)), Decimal(str(profit_pct)),
+                                          Decimal(str(iva_pct))))
+    f = lambda m: float(m.amount)  # noqa: E731
+    return {"materials": round(materials_net, 2), "labor": round(labor_total, 2),
+            "direct": f(b.direct), "overhead": f(b.overhead), "profit": f(b.profit),
+            "net": f(b.net), "iva": f(b.iva), "total": f(b.total),
+            "overhead_pct": overhead_pct, "profit_pct": profit_pct, "iva_pct": iva_pct}
+
+
+# ---------------------------------------------------------------------------
 # Juego de reglas por defecto
 # ---------------------------------------------------------------------------
 
@@ -416,14 +541,42 @@ DEFAULT_RULES: list[tuple] = [
 ]
 
 
+_CUADRILLA_2 = [{"trade": "Oficial", "count": 1}, {"trade": "Ayudante", "count": 1}]
+_CUADRILLA_3 = [{"trade": "Oficial", "count": 1}, {"trade": "Ayudante", "count": 2}]
+_LABOR_NOTE = "Rendimiento de referencia: ajustalo a tu gente."
+
+# (measure, label, rubro, rendimiento por día de la cuadrilla, cuadrilla).
+# Modo por defecto: tercerizado (precio por unidad, que carga cada proyecto).
+# Hay copia en la migración o4c5d6e7f8a9 para juegos ya sembrados.
+DEFAULT_LABOR_RULES: list[tuple] = [
+    ("muro_m2", "Mano de obra: mampostería", "Mampostería", 8.0, _CUADRILLA_2),
+    ("muro_m2", "Mano de obra: revoques (2 caras)", "Revoques", 6.0, _CUADRILLA_2),
+    ("columna_m3", "Mano de obra: columnas de H°A°", "Estructura", 0.5, _CUADRILLA_3),
+    ("viga_ml", "Mano de obra: vigas de H°A°", "Estructura", 4.0, _CUADRILLA_3),
+    ("riostra_ml", "Mano de obra: vigas de fundación", "Fundaciones", 5.0, _CUADRILLA_3),
+    ("techo_m2", "Mano de obra: losa de cubierta", "Cubierta", 10.0, _CUADRILLA_3),
+    ("sup_cubierta_m2", "Mano de obra: contrapiso y carpeta", "Pisos", 12.0, _CUADRILLA_2),
+    ("cielorraso_m2", "Mano de obra: cielorrasos", "Terminaciones", 10.0, _CUADRILLA_2),
+]
+
+
 def _default_rules():
     from app.models.rule_set import Rule
 
-    return [
+    rules = [
         Rule(position=i, measure=m, label=lbl, keywords=list(kw), unit=u, factor=f,
              mode=mode, waste_pct=w, exclude_keywords=list(ex), notes=notes)
         for i, (m, lbl, kw, u, f, mode, w, ex, notes) in enumerate(DEFAULT_RULES)
     ]
+    start = len(rules)
+    rules += [
+        Rule(position=start + i, measure=m, label=lbl, keywords=[], exclude_keywords=[],
+             unit=MEASURES[m][1], factor=1.0, mode="fixed", waste_pct=0.0, notes=_LABOR_NOTE,
+             kind="labor", stage=stage, daily_yield=y, labor_mode="unit", unit_price=None,
+             crew=[dict(c) for c in crew])
+        for i, (m, lbl, stage, y, crew) in enumerate(DEFAULT_LABOR_RULES)
+    ]
+    return rules
 
 
 def ensure_system_rule_set(db: Session):
@@ -472,7 +625,10 @@ def duplicate_rule_set(src, name: str, organization_id: int, db: Session):
                  rules=[Rule(position=r.position, measure=r.measure, label=r.label,
                              keywords=list(r.keywords), exclude_keywords=list(r.exclude_keywords),
                              unit=r.unit, factor=r.factor, mode=r.mode,
-                             waste_pct=r.waste_pct, notes=r.notes)
+                             waste_pct=r.waste_pct, notes=r.notes, kind=r.kind,
+                             stage=r.stage, daily_yield=r.daily_yield,
+                             labor_mode=r.labor_mode, unit_price=r.unit_price,
+                             crew=[dict(c) for c in (r.crew or [])] or None)
                         for r in src.rules])
     db.add(rs)
     db.flush()

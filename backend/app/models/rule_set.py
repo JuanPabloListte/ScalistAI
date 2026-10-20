@@ -72,4 +72,21 @@ class Rule(Base):
     waste_pct: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- Mano de obra (kind == "labor"): no busca productos del proveedor.
+    # material: producto del proveedor. labor: costo de mano de obra de un rubro.
+    kind: Mapped[str] = mapped_column(String(16), default="material", nullable=False,
+                                      server_default="material")
+    # Rubro del presupuesto ("Mampostería", "Estructura"…). Agrupa el PDF y el Gantt.
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Unidades de la medida que avanza una cuadrilla por día: plazo (Gantt) y,
+    # en modo jornal, también el costo.
+    daily_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # unit: precio por unidad de medida (tercerizado). daily: rendimiento ×
+    # cuadrilla × jornal (personal propio).
+    labor_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Precio de referencia por unidad de medida, sin IVA (modo unit).
+    unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Cuadrilla (modo daily): [{"trade": "Oficial", "count": 1}, …].
+    crew: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+
     rule_set: Mapped[RuleSet] = relationship(back_populates="rules")

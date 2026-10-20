@@ -19,5 +19,6 @@ from app.models.job_role import JobRole, user_job_roles
 from app.models.project_member import PROJECT_ROLES, ProjectMember
 from app.models.rule_set import Rule, RuleSet
 from app.models.project_price_list import ProjectPriceList
+from app.models.project_budget_settings import ProjectBudgetSettings
 
-__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries", "CostSettings", "MaterialGroup", "WorkPlan", "WorkPlanMaterialPrice", "WorkTask", "ProgressEntry", "ActualCost", "JobRole", "user_job_roles", "ProjectMember", "PROJECT_ROLES", "RuleSet", "Rule", "ProjectPriceList"]
+__all__ = ["User", "Project", "Plan", "DetectedElement", "Material", "Assembly", "AssemblyMaterial", "element_assemblies", "Organization", "PlanAiContext", "ConstructionEntity", "MaterialPriceHistory", "LaborRate", "LaborRateHistory", "Simulation", "MacroSeries", "CostSettings", "MaterialGroup", "WorkPlan", "WorkPlanMaterialPrice", "WorkTask", "ProgressEntry", "ActualCost", "JobRole", "user_job_roles", "ProjectMember", "PROJECT_ROLES", "RuleSet", "Rule", "ProjectPriceList", "ProjectBudgetSettings"]

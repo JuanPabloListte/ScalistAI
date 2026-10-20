@@ -105,9 +105,12 @@ def test_flujo_completo():
         x = client.get(url + "/export.xlsx")
         assert x.status_code == 200, x.text
         wb = openpyxl.load_workbook(io.BytesIO(x.content))
-        assert wb.sheetnames == ["Resumen", "Lista de compras", "Detalle", "Medidas del modelo"]
+        assert wb.sheetnames == ["Resumen", "Lista de compras", "Mano de obra", "Detalle",
+                                 "Medidas del modelo"]
         compras = wb["Lista de compras"]
         assert compras.cell(compras.max_row, 6).value == b["totals"]["net"]
+        resumen = {r[0]: r[1] for r in wb["Resumen"].iter_rows(values_only=True) if r and r[0]}
+        assert resumen["Precio de venta"] == v["price"]["total"] > b["totals"]["net"]
 
         # Override: cemento sin precio a propósito.
         v = client.patch(url, json={"overrides": {cem["key"]: None}}).json()

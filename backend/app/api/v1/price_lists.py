@@ -158,6 +158,39 @@ def update_project_price_list(
     return pb.build_view(project, db)
 
 
+class LaborSetting(BaseModel):
+    mode: Literal["unit", "daily"] | None = None
+    unit_price: float | None = Field(default=None, ge=0)
+
+
+class BudgetSettingsPatch(BaseModel):
+    # rule_id → ajuste del rubro; null = volver a lo que dice la regla.
+    labor: dict[str, LaborSetting | None] | None = None
+    overhead_pct: float | None = Field(default=None, ge=0, le=5)
+    profit_pct: float | None = Field(default=None, ge=0, le=5)
+    # True = volver a los márgenes de la empresa.
+    reset_margins: bool = False
+
+
+@project_router.patch("/{project_id}/budget-settings")
+def update_project_budget_settings(
+    project_id: int,
+    payload: BudgetSettingsPatch,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Mano de obra de esta obra (modo y precio por rubro) y márgenes propios."""
+    project, _ = require_project(project_id, db, user, financials=True, edit_plan=True)
+    pb.update_budget_settings(
+        project, db,
+        labor=({k: (v.model_dump(exclude_unset=True) if v is not None else None)
+                for k, v in payload.labor.items()} if payload.labor is not None else None),
+        overhead_pct=payload.overhead_pct, profit_pct=payload.profit_pct,
+        reset_margins=payload.reset_margins)
+    db.commit()
+    return pb.build_view(project, db)
+
+
 @project_router.delete("/{project_id}/price-list", status_code=204)
 def delete_project_price_list(
     project_id: int,

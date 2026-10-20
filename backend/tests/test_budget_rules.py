@@ -273,10 +273,12 @@ def test_superadmin_edita_el_estandar():
     original = db.get(RuleSet, std["id"])
     backup = {"name": original.name, "description": original.description,
               "rules": [{k: getattr(r, k) for k in ("measure", "label", "keywords",
-                         "exclude_keywords", "unit", "factor", "mode", "waste_pct", "notes")}
+                         "exclude_keywords", "unit", "factor", "mode", "waste_pct", "notes",
+                         "kind", "stage", "daily_yield", "labor_mode", "unit_price", "crew")}
                         for r in original.rules]}
     try:
         payload = {**backup, "rules": backup["rules"][:1]}
+        assert any(r["kind"] == "labor" for r in backup["rules"]), "el estándar trae mano de obra"
         r = client.put(f"/api/v1/rule-sets/{std['id']}", json=payload)
         assert r.status_code == 200, r.text
         assert len(r.json()["rules"]) == 1 and r.json()["is_system"]
