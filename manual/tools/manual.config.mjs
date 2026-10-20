@@ -1,7 +1,10 @@
 // manual.config.mjs — qué capturar y cómo autenticar cada rol (lo usan capturar.mjs y grabar-videos.mjs).
 // Entorno: .\entorno-demo.ps1 up + web, datos: node cargar-datos-demo.mjs (deja datos-demo/ids.json).
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { firmarJwt } from './token-jwt.mjs';
 
@@ -23,6 +26,24 @@ async function api(id, path) {
   return r.json();
 }
 
+// El PDF del presupuesto se baja de la API y se abre en el visor de Chrome, sin barra
+// y con la primera hoja entera (A4 ≈ 1:1,414).
+const verPdf = (id, path, nombre) => async (page) => {
+  const r = await fetch(`${API}${path}`, { headers: { authorization: `Bearer ${tokenDe(id)}` } });
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  const archivo = join(tmpdir(), `manual-${nombre}.pdf`);
+  writeFileSync(archivo, Buffer.from(await r.arrayBuffer()));
+  await page.setViewportSize({ width: 1000, height: 1400 });
+  await page.goto(`${pathToFileURL(archivo).href}#toolbar=0&navpanes=0&view=FitH`);
+  await page.waitForTimeout(3000);
+};
+
+// Lleva un título de la página arriba de todo (para capturar una sección del medio).
+const irA = (texto) => async (page) => {
+  const el = page.getByRole('heading', { name: texto, exact: true }).first();
+  await el.evaluate((n) => { n.scrollIntoView({ block: 'start' }); window.scrollBy(0, -24); });
+};
+
 const SUPER = 'superadmin';
 const ADMIN = 'admin';
 const JEFE = 'jefe';
@@ -39,8 +60,9 @@ export default {
   cssLimpio: `
     /* Marcadores del mapa y controles de Mapbox se dejan; se oculta el aviso de atribución grande. */
     .mapboxgl-ctrl-attrib-inner { display: none !important; }
-    /* Capturas de página completa: la barra lateral fija acompaña todo el alto. */
-    body { position: relative; }
+    /* Capturas de página completa: la barra lateral fija acompaña todo el alto.
+       (Solo en la app: en el visor de PDF de Chrome deja la hoja en blanco.) */
+    body:has(aside.fixed) { position: relative; }
     aside.fixed { position: absolute !important; }
   `,
 
@@ -102,19 +124,28 @@ export default {
 
       // Presupuesto del proyecto
       { id: 'presupuesto-resumen', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras' },
-      { id: 'presupuesto-completo', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
-        fullPage: true },
       { id: 'presupuesto-renglones', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
         pasos: async (p) => {
-          const r = p.getByText(/Renglones leídos del archivo/).first();
-          await r.click();
-          await r.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+          await p.getByText(/Renglones leídos del archivo/).first().click();
+          await p.getByText(/Lista de compras/).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
         } },
       { id: 'presupuesto-medidas', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
         pasos: async (p) => {
           await p.getByText(/Medidas del modelo/).first().click();
-          await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+          await p.getByText(/Medidas del modelo/).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
         } },
+      { id: 'presupuesto-mano-de-obra', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
+        pasos: irA('Mano de obra') },
+      { id: 'presupuesto-jornales', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
+        pasos: (p) => p.getByRole('button', { name: 'Jornales y márgenes' }).click() },
+      { id: 'presupuesto-precio-venta', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
+        pasos: irA('Precio de venta') },
+      { id: 'presupuesto-pdf-menu', rol: ADMIN, url: `/projects/${P.activo}/presupuesto`, esperar: 'Lista de compras',
+        pasos: (p) => p.getByRole('button', { name: 'Descargar PDF' }).click() },
+      { id: 'presupuesto-pdf-comitente', rol: null, url: '/login',
+        pasos: verPdf(ids.adminId, `/projects/${P.activo}/price-list/export.pdf?audience=comitente`, 'comitente') },
+      { id: 'presupuesto-pdf-interno', rol: null, url: '/login',
+        pasos: verPdf(ids.adminId, `/projects/${P.activo}/price-list/export.pdf?audience=interno`, 'interno') },
 
       // Reglas de cómputo
       { id: 'reglas-lista', rol: ADMIN, url: '/reglas', esperar: 'Obra económica' },
@@ -123,6 +154,10 @@ export default {
       { id: 'reglas-editor', rol: ADMIN, url: `/reglas/${ids.juegoOrg}`, esperar: 'Muros' },
       { id: 'reglas-editor-armadura', rol: ADMIN, url: `/reglas/${ids.juegoOrg}`, esperar: 'Muros',
         pasos: (p) => p.getByRole('button', { name: /^Armadura/ }).first().click() },
+      { id: 'reglas-editor-mano-de-obra', rol: ADMIN, url: `/reglas/${ids.juegoOrg}`, esperar: 'Muros',
+        // En "Todas": debajo de Muros sigue Columnas, así el bloque no queda bajo la barra de guardar.
+        pasos: (p) => p.getByText('Mano de obra', { exact: true }).first()
+          .evaluate((el) => { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -260); }) },
       { id: 'reglas-estandar-lectura', rol: ADMIN, url: `/reglas/${ids.juegoEstandar}`, esperar: 'Muros' },
 
       // Equipo de la organización

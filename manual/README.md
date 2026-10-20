@@ -11,11 +11,13 @@ Manual funcional de la plataforma, con capturas de pantalla.
 
 Todas las capturas usan la organización ficticia **"Constructora Del Valle Demo S.R.L."**, un
 modelo IFC público de ejemplo (la casa AC20-FZK-Haus del KIT, renombrada como "Casa Los Aromos")
-y un presupuesto de proveedor inventado ("Corralón Demo S.A.", marcado como documento ficticio).
+un presupuesto de proveedor inventado ("Corralón Demo S.A.", marcado como documento ficticio) y un
+logo ficticio ("Del Valle constructora · demo", `tools/datos-demo/logo-demo.svg` → `.png`).
 
-**Alcance de la v1.0:** acceso, navegación, proyectos, asistente de proyecto nuevo, preparación y
-exportación del IFC, presupuesto, reglas de cómputo, equipo, perfil y administración de la
-plataforma. **Cronograma, Obra, Costos y Cambios** quedan para la próxima versión (se estaban
+**Alcance de la v1.1:** acceso, navegación, proyectos, asistente de proyecto nuevo, preparación y
+exportación del IFC, presupuesto (materiales, mano de obra por rubro, jornales y márgenes, precio de
+venta y PDF por rubros para el comitente e interno), reglas de cómputo (con la mano de obra), equipo
+(con el membrete del PDF), perfil y administración de la plataforma. **Cronograma, Obra, Costos y Cambios** quedan para la próxima versión (se estaban
 rehaciendo para usar el presupuesto nuevo).
 
 ## Regenerar el manual
@@ -73,6 +75,11 @@ entorno demo (definido en `docker-compose.manual.yml`, solo existe ahí) y lo gu
   recién creado).
 - El IFC se procesa de verdad en el worker del entorno demo y el presupuesto del proveedor lo lee
   el lector real.
+- Membrete (logo y datos de contacto), jornales de los cuatro oficios, márgenes de la empresa (15% y
+  10%) y la mano de obra de "Casa Los Aromos" (cuatro tareas tercerizadas con precios inventados y
+  los revoques con cuadrilla propia). A "Obra económica" le copia la mano de obra del estándar si no
+  la tiene. Todo sale de `datos-demo/datos.json`.
+- Las dos hojas del PDF del presupuesto se capturan abriendo el PDF de la API en el visor de Chrome.
 
 ## Versión 2: videos
 

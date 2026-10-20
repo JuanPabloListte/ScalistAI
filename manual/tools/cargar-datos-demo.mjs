@@ -104,6 +104,33 @@ for (const u of datos.usuarios) {
 usuarios = await api(tAdmin, 'GET', '/team/users');
 const idUsuario = (email) => usuarios.find((x) => x.email === email).id;
 
+// ---------------------------------------------------------------- 3b. membrete, jornales y márgenes
+const membrete = await api(tAdmin, 'GET', '/organization/letterhead');
+if (membrete.contact_info !== datos.membrete.contacto) {
+  await api(tAdmin, 'PUT', '/organization/letterhead', { contact_info: datos.membrete.contacto });
+  console.log('  membrete: datos de contacto');
+}
+const logo = readFileSync(join(AQUI, 'datos-demo', datos.membrete.logo));
+const logoActual = membrete.has_logo
+  ? Buffer.from(await (await fetch(`${API}/organization/letterhead/logo`, { headers: { Authorization: `Bearer ${tAdmin}` } })).arrayBuffer())
+  : null;
+if (!logoActual?.equals(logo)) {
+  await api(tAdmin, 'PUT', '/organization/letterhead/logo', archivo(join(AQUI, 'datos-demo', datos.membrete.logo), datos.membrete.logo, 'image/png'));
+  console.log('  membrete: logo');
+}
+
+const jornales = await api(tAdmin, 'GET', '/labor-rates');
+const jornalesDemo = datos.jornales.map((j) => ({ trade: j.oficio, daily_cost: j.costo }));
+if (JSON.stringify(jornales.map((j) => ({ trade: j.trade, daily_cost: j.daily_cost }))) !== JSON.stringify(jornalesDemo)) {
+  await api(tAdmin, 'PUT', '/labor-rates', jornalesDemo);
+  console.log('  jornales de la empresa');
+}
+const margenes = await api(tAdmin, 'GET', '/cost-settings');
+if (margenes.overhead_pct !== datos.margenes.gastosGenerales || margenes.profit_pct !== datos.margenes.beneficio) {
+  await api(tAdmin, 'PUT', '/cost-settings', { overhead_pct: datos.margenes.gastosGenerales, profit_pct: datos.margenes.beneficio });
+  console.log('  márgenes de la empresa');
+}
+
 // ---------------------------------------------------------------- 4. juegos de reglas
 let juegos = await api(tAdmin, 'GET', '/rule-sets');
 const estandar = juegos.find((j) => j.is_system || j.organization_id == null);
@@ -111,6 +138,21 @@ for (const j of datos.juegosDeReglas) {
   if (!juegos.some((x) => x.name === j.nombre)) {
     await api(tAdmin, 'POST', '/rule-sets', { name: j.nombre, description: j.descripcion, copy_from_id: estandar.id });
     console.log(`+ juego de reglas ${j.nombre}`);
+  }
+}
+juegos = await api(tAdmin, 'GET', '/rule-sets');
+// Mano de obra en los juegos propios: las copias hechas antes de que existiera no la traen.
+const sinId = ({ id, position, ...r }) => r;
+for (const j of datos.juegosDeReglas) {
+  const juego = juegos.find((x) => x.name === j.nombre);
+  let reglas = juego.rules.map(sinId);
+  if (!reglas.some((r) => r.kind === 'labor')) {
+    reglas = [...reglas, ...estandar.rules.filter((r) => r.kind === 'labor').map(sinId)];
+  }
+  reglas = reglas.map((r) => (r.kind === 'labor' && j.cuadrillaPropia?.includes(r.label) ? { ...r, labor_mode: 'daily' } : r));
+  if (JSON.stringify(reglas) !== JSON.stringify(juego.rules.map(sinId))) {
+    await api(tAdmin, 'PUT', `/rule-sets/${juego.id}`, { name: juego.name, description: juego.description, rules: reglas });
+    console.log(`  mano de obra en ${j.nombre}`);
   }
 }
 juegos = await api(tAdmin, 'GET', '/rule-sets');
@@ -151,6 +193,22 @@ for (const p of datos.proyectos) {
   }
   if (['ubicacion', 'activo'].includes(hasta) && !proj.address) {
     await api(tAdmin, 'PATCH', `/projects/${proj.id}/location`, p.ubicacion);
+  }
+  if (p.manoDeObra) {
+    // Modo y precio de cada tarea en esta obra; los márgenes, los de la empresa.
+    const vista = await api(tAdmin, 'GET', `/projects/${proj.id}/price-list`);
+    const cambios = {};
+    for (const m of p.manoDeObra) {
+      const item = vista.labor.items.find((i) => i.label === m.tarea);
+      if (!item) throw new Error(`El presupuesto no tiene la tarea "${m.tarea}"`);
+      const quiero = m.modo === 'unit' ? { mode: 'unit', unit_price: m.precio } : { mode: m.modo };
+      if (JSON.stringify(vista.settings.labor[item.key] ?? null) !== JSON.stringify(quiero)) cambios[item.key] = quiero;
+    }
+    if (Object.keys(cambios).length || vista.settings.margins_custom) {
+      await api(tAdmin, 'PATCH', `/projects/${proj.id}/budget-settings`,
+        { labor: cambios, reset_margins: vista.settings.margins_custom });
+      console.log(`  mano de obra de ${p.nombre}`);
+    }
   }
   if (hasta === 'activo') {
     const actual = await api(tAdmin, 'GET', `/projects/${proj.id}`);

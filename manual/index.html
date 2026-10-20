@@ -233,7 +233,7 @@
 
 <div class="shell">
   <aside class="side" id="side" aria-label="Índice">
-    <div class="brandmark"><b>Scalist</b><span>Manual de usuario · v1.0</span></div>
+    <div class="brandmark"><b>Scalist</b><span>Manual de usuario · v1.1</span></div>
     <input class="search" id="q" type="search" placeholder="Buscar en el manual…" aria-label="Buscar en el manual">
     <ul class="toc" id="toc"></ul>
     <div class="side-foot">
@@ -249,11 +249,11 @@
       <header class="cover" id="inicio">
         <div>
           <div class="eyebrow">Presupuesto de obra · Manual de usuario</div>
-          <h1>Cómo usar Scalist: del modelo IFC a la lista de compras</h1>
-          <p class="lede">Para estudios, constructoras y computistas que arman presupuestos de obra con Scalist. Explica cómo preparar el modelo BIM, crear un proyecto, cruzarlo con el presupuesto del corralón, ajustar las reglas de cómputo y administrar el equipo.</p>
+          <h1>Cómo usar Scalist: del modelo IFC al precio de venta</h1>
+          <p class="lede">Para estudios, constructoras y computistas que arman presupuestos de obra con Scalist. Explica cómo preparar el modelo BIM, crear un proyecto, cruzarlo con el presupuesto del corralón, sumar la mano de obra, llegar al precio de venta y al PDF para el comitente, ajustar las reglas de cómputo y administrar el equipo.</p>
         </div>
         <dl class="meta">
-          <dt>Versión</dt><dd>1.0 — con capturas de pantalla</dd>
+          <dt>Versión</dt><dd>1.1 — con mano de obra y precio de venta</dd>
           <dt>Fecha</dt><dd>Octubre 2026</dd>
           <dt>Idioma</dt><dd>Español (Argentina)</dd>
           <dt>Datos</dt><dd>“Constructora Del Valle Demo S.R.L.”, datos ficticios</dd>
@@ -263,8 +263,8 @@
       <nav class="flow" aria-label="Recorrido recomendado">
         <a href="#ifc"><span class="k">1 · Preparar</span><b>Exportar el IFC</b><span>Qué tildar en Revit, ArchiCAD, Vectorworks o Allplan.</span></a>
         <a href="#crear"><span class="k">2 · Cargar</span><b>Crear el proyecto</b><span>Modelo, presupuesto del proveedor y ubicación.</span></a>
-        <a href="#presupuesto"><span class="k">3 · Revisar</span><b>Revisar el presupuesto</b><span>Cantidades, renglones elegidos y lista de compras.</span></a>
-        <a href="#reglas"><span class="k">4 · Ajustar</span><b>Ajustar las reglas</b><span>Cuánto material lleva cada m², m³ o kg.</span></a>
+        <a href="#presupuesto"><span class="k">3 · Revisar</span><b>Revisar el presupuesto</b><span>Materiales, mano de obra, precio de venta y PDF.</span></a>
+        <a href="#reglas"><span class="k">4 · Ajustar</span><b>Ajustar las reglas</b><span>Cuánto material y cuánta mano de obra lleva cada m², m³ o kg.</span></a>
       </nav>
 
       <!-- ===================================================== 01 -->
@@ -272,7 +272,7 @@
         <div class="ch-head"><span class="num">01</span><h2>Introducción</h2></div>
         <div class="prose">
           <p>Scalist arma el presupuesto de materiales de una obra a partir del <b>modelo BIM en formato IFC</b>. El modelo trae las medidas exactas: metros cuadrados de muro, metros de viga, superficie de techo, kilos de armadura. Scalist las convierte en productos con las <b>reglas de cómputo</b> (por ejemplo, 3 kg de cemento por m² de muro). Después busca cada producto en el <b>presupuesto del proveedor</b> que subís (el PDF o Excel del corralón).</p>
-          <p>El resultado es una <b>lista de compras</b> en unidades enteras de venta (bolsas, camiones, barras), con precio neto, IVA y total. Se descarga en Excel.</p>
+          <p>El resultado es una <b>lista de compras</b> en unidades enteras de venta (bolsas, camiones, barras), con precio neto, IVA y total. A los materiales se suma la <b>mano de obra</b> de cada rubro, tercerizada o con tu propia cuadrilla, y con tus gastos generales y tu beneficio se llega al <b>precio de venta</b>. Todo se descarga en Excel y en un PDF por rubros con el membrete de tu empresa, listo para mandarle al comitente.</p>
           <div class="note tip"><b class="tag">Dato</b><p>El presupuesto se recalcula solo. Si cambiás una regla, el juego de reglas del proyecto o el archivo del proveedor, los números se actualizan sin que tengas que volver a cargar nada.</p></div>
           <h3 id="conceptos">Conceptos básicos</h3>
         </div>
@@ -283,6 +283,9 @@
           <dt>Presupuesto del proveedor</dt><dd>El presupuesto del corralón en PDF, Excel o CSV. Scalist lee cada renglón: descripción, precio y presentación de venta (bolsa de 25 kg, camión de 6 m³, barra de 12 m).</dd>
           <dt>Juego de reglas de cómputo</dt><dd>La receta: cuánto de cada producto lleva cada unidad de medida, con qué palabras se lo busca en el presupuesto del proveedor y con qué desperdicio. Hay uno estándar (“Estándar Argentina”) y podés crear los tuyos.</dd>
           <dt>Lista de compras</dt><dd>El resultado: un renglón por producto del proveedor, en unidades enteras y con precio.</dd>
+          <dt>Rubro</dt><dd>La etapa de obra donde se agrupan materiales y mano de obra: Mampostería, Revoques, Estructura, Cubierta, Pisos… El PDF del presupuesto se arma por rubros.</dd>
+          <dt>Mano de obra</dt><dd>Lo que cuesta ejecutar cada tarea. Se cotiza <b>tercerizada</b> (precio del contratista por m², m³ o m) o con <b>cuadrilla propia</b> (rendimiento por día × jornales de tu gente).</dd>
+          <dt>Precio de venta</dt><dd>Materiales + mano de obra (costo directo) + gastos generales + beneficio + IVA. Es el número que le pasás al comitente.</dd>
         </dl>
         <div class="prose"><h3 id="roles">Quién ve qué</h3>
           <p>Hay dos niveles de permisos: el de la <b>organización</b> (qué menú ves) y el que tenés <b>en cada proyecto</b> (si ves la plata o no).</p>
@@ -540,11 +543,18 @@
         <div class="ch-head"><span class="num">07</span><h2>Presupuesto del proyecto</h2></div>
         <p class="route"><span>/projects/“id”/presupuesto</span><span class="who">Admin · Jefe de obra</span></p>
         <div class="prose">
-          <p>Es la pantalla del proyecto. Arriba, una tarjeta oscura con <span class="ui">MATERIALES (NETO)</span>, el proveedor y el juego de reglas, y <span class="ui">TOTAL CON IVA</span>. Debajo, el archivo del proveedor, las reglas, el IVA y el detalle por medida.</p>
+          <p>Es la pantalla del proyecto. Arriba, una tarjeta oscura con el <span class="ui">PRECIO DE VENTA</span>, el proveedor y el juego de reglas y, a la derecha, <span class="ui">MATERIALES</span>, <span class="ui">MANO DE OBRA</span> y <span class="ui">COSTO DIRECTO</span>. Si queda algo sin precio, debajo del costo directo se ve cuántos ítems faltan.</p>
+          <p>Debajo hay tres bloques, en este orden:</p>
+          <ul>
+            <li><b>Materiales:</b> el archivo del proveedor, las reglas, el IVA y el detalle por medida, con la lista de compras.</li>
+            <li><b>Mano de obra:</b> cada tarea por rubro, tercerizada o con cuadrilla propia (ver <a href="#mano-de-obra">Mano de obra</a>).</li>
+            <li><b>Precio de venta:</b> costo directo, gastos generales, beneficio e IVA (ver <a href="#precio-venta">Precio de venta</a>).</li>
+          </ul>
+          <p>Arriba a la derecha están <span class="ui">Descargar PDF</span> y <span class="ui">Descargar Excel</span>.</p>
         </div>
-        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/1/presupuesto</em></div><img src="img/presupuesto-resumen.png" alt="Pantalla de presupuesto del proyecto" loading="lazy"></button><figcaption><span class="fig">Fig. 7.1</span>Resumen del proyecto y comienzo de la tabla de muros: cada producto muestra cómo se calculó (221,4 m² × 3 kg + 5%) y qué renglón del proveedor se eligió.</figcaption></figure>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/1/presupuesto</em></div><img src="img/presupuesto-resumen.png" alt="Pantalla de presupuesto del proyecto" loading="lazy"></button><figcaption><span class="fig">Fig. 7.1</span>Tarjeta de resumen con el precio de venta ($ 30.770.375) y su apertura en materiales, mano de obra y costo directo. Debajo, el bloque <span class="ui">Materiales</span>: cada producto muestra cómo se calculó (221,4 m² × 3 kg + 5%) y qué renglón del proveedor se eligió.</figcaption></figure>
         <div class="prose">
-          <h3 id="leer-items">Leer cada ítem</h3>
+          <h3 id="leer-items">Leer cada ítem de materiales</h3>
           <p>Hay una tabla por medida (Muros, Columnas, Vigas, Riostras, Techo, Armadura…). Cada fila es una regla del juego aplicada a tu modelo:</p>
           <ul>
             <li><b>Producto:</b> el nombre de la regla y, debajo, la cuenta: medida × factor + desperdicio. Al pasar el mouse se ve la nota de la regla.</li>
@@ -614,10 +624,103 @@
           </tbody>
         </table></div>
         <div class="prose">
-          <h3 id="excel">Descargar el Excel</h3>
-          <p><span class="ui">Descargar Excel</span> (arriba a la derecha) baja <code>presupuesto_“proyecto”.xlsx</code> con cuatro hojas: <b>Resumen</b>, <b>Lista de compras</b>, <b>Detalle</b> (cada regla con su cuenta) y <b>Medidas del modelo</b>. El botón se habilita cuando el proyecto está creado y tiene presupuesto del proveedor.</p>
+          <h3 id="mano-de-obra">Mano de obra</h3>
+          <p>El bloque <span class="ui">Mano de obra</span> lista las tareas del juego de reglas que se pueden calcular con tu modelo, agrupadas por rubro (MAMPOSTERÍA, REVOQUES, ESTRUCTURA…), con el subtotal de cada rubro a la derecha. Se calcula apenas el modelo IFC termina de procesarse, aunque todavía no hayas subido el presupuesto del proveedor.</p>
+          <p>En cada tarea elegís en <span class="ui">Se cotiza</span> cómo la vas a pagar:</p>
         </div>
-        <figure class="shot tall"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/projects/1/presupuesto</em></div><img src="img/presupuesto-completo.png" alt="Presupuesto completo" loading="lazy"></button><figcaption><span class="fig">Fig. 7.4</span>La pantalla completa, de la tarjeta de resumen a las medidas del modelo. Hacé clic para ampliarla.</figcaption></figure>
+        <div class="tbl"><table>
+          <thead><tr><th>Se cotiza</th><th>Cómo cuenta</th><th>Cuándo usarlo</th></tr></thead>
+          <tbody>
+            <tr><td>Tercerizado</td><td>Cantidad × el precio por unidad que escribís (lo que te cobra el contratista por m², m³ o m, sin IVA).</td><td>La tarea la hace un contratista que cobra por unidad.</td></tr>
+            <tr><td>Cuadrilla propia</td><td>Días × el costo por día de la cuadrilla. Los días salen de la cantidad dividida por el rendimiento de la regla; la cuadrilla (por ejemplo, 1 oficial + 1 ayudante) y su rendimiento también vienen de la regla; el costo por día de cada oficio, de <a href="#jornales">Jornales y márgenes</a>.</td><td>La tarea la hace tu gente y le pagás por jornal.</td></tr>
+          </tbody>
+        </table></div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Mano de obra</em></div><img src="img/presupuesto-mano-de-obra.png" alt="Bloque Mano de obra del presupuesto" loading="lazy"></button><figcaption><span class="fig">Fig. 7.4</span>Mano de obra de la casa demo: la mampostería, las vigas, la losa y el contrapiso van tercerizados con el precio del contratista; los revoques los hace una cuadrilla propia de 1 oficial + 1 ayudante a 6 m² por día (36,9 días, 73,8 jornales).</figcaption></figure>
+        <div class="prose">
+          <p>Cada fila muestra:</p>
+          <ul>
+            <li><b>Tarea:</b> el nombre de la regla y su estado. Al pasar el mouse se ve la nota de la regla.</li>
+            <li><b>Cantidad:</b> la medida del modelo (m² de muro, m de viga, m² de techo…).</li>
+            <li><b>Precio por unidad:</b> en tercerizado, el campo para escribir el precio; en cuadrilla propia, lo que termina costando cada unidad.</li>
+            <li><b>Días:</b> cantidad ÷ rendimiento, para una cuadrilla. En cuadrilla propia, debajo se ven los jornales (días × personas de la cuadrilla).</li>
+            <li><b>Subtotal:</b> lo que cuesta la tarea, sin IVA.</li>
+          </ul>
+          <p>Para cargar el precio de una tarea tercerizada:</p>
+          <ol class="steps">
+            <li><span>Dejá <span class="ui">Tercerizado</span> en <span class="ui">Se cotiza</span>.</span></li>
+            <li><span>Escribí el precio por unidad en el campo con el <b>$</b>, sin IVA (por ejemplo, 21.500 o 21500).</span></li>
+            <li><span>Apretá Enter o hacé clic afuera del campo. El subtotal y el precio de venta se recalculan solos.</span></li>
+          </ol>
+          <p>Lo que cambiás acá vale solo para este proyecto. La tarea muestra <span class="ui">↺ volver a la regla</span>: con ese enlace descartás tu cambio y vuelve a regir lo que dice el juego de reglas.</p>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Estado</th><th>Qué significa</th><th>Qué hacer</th></tr></thead>
+          <tbody>
+            <tr><td><span class="st ok">Con precio</span></td><td>La tarea tiene su subtotal.</td><td>Nada.</td></tr>
+            <tr><td><span class="st warn">Falta el precio</span></td><td>Es tercerizada y no tiene precio por unidad.</td><td>Escribí el precio del contratista.</td></tr>
+            <tr><td><span class="st warn">Faltan jornales</span></td><td>Es de cuadrilla propia y algún oficio de la cuadrilla no está en los jornales de la empresa o tiene costo por día en $ 0. Al lado dice cuál (“sin jornal: Oficial”).</td><td>Cargá ese jornal en <a href="#jornales">Jornales y márgenes</a>, con el mismo nombre que en la cuadrilla.</td></tr>
+            <tr><td><span class="st warn">Falta el rendimiento</span></td><td>Es de cuadrilla propia y la regla no dice cuánto avanza la cuadrilla por día.</td><td>Completá el <span class="ui">Rendimiento</span> de la regla (ver <a href="#reglas-mano-de-obra">Mano de obra en las reglas</a>).</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <p>Las tareas cuya medida vale 0 en el modelo no se muestran. Debajo de la tabla se avisa cuántas son, por ejemplo “3 tareas no aplican: el modelo no trae esa medida.”</p>
+          <div class="note tip"><b class="tag">Dato</b><p>Los ítems sin precio, de materiales o de mano de obra, no suman al precio de venta. La tarjeta de arriba avisa cuántos quedan pendientes en total (“N ítems sin precio”).</p></div>
+
+          <h3 id="jornales">Jornales y márgenes</h3>
+          <p>El botón <span class="ui">Jornales y márgenes</span>, arriba del bloque de mano de obra, abre los valores de la empresa: lo que te cuesta un día de cada oficio, con cargas sociales, y los márgenes por defecto. Valen para todos los proyectos. Solo un administrador los puede cambiar; el resto los ve en solo lectura.</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Jornales y márgenes</em></div><img src="img/presupuesto-jornales.png" alt="Diálogo Jornales y márgenes de la empresa" loading="lazy"></button><figcaption><span class="fig">Fig. 7.5</span><span class="ui">Jornales y márgenes de la empresa</span>: costo por día de cada oficio, la fecha de la última actualización y los márgenes por defecto (15% de gastos generales y 10% de beneficio en la empresa demo).</figcaption></figure>
+        <div class="prose">
+          <ol class="steps">
+            <li><span>Escribí el <span class="ui">Costo por día</span> de cada oficio. La organización arranca con Oficial especializado, Oficial, Medio oficial y Ayudante en $ 0.</span></li>
+            <li><span>Con <span class="ui">+ Agregar oficio</span> sumás uno (por ejemplo, “Plomero”); con la ✕ lo quitás. Los nombres tienen que coincidir con los de las cuadrillas de las reglas.</span></li>
+            <li><span>En <span class="ui">Márgenes por defecto</span>, completá <span class="ui">Gastos generales</span> y <span class="ui">Beneficio</span> en %.</span></li>
+            <li><span>Hacé clic en <span class="ui">Guardar</span>. Los presupuestos que usan esos valores se recalculan.</span></li>
+          </ol>
+          <p>Cada cambio de jornal queda registrado con su fecha: la columna <span class="ui">Actualizado</span> muestra la última.</p>
+
+          <h3 id="precio-venta">Precio de venta</h3>
+          <p>El último bloque arma el precio con el que cotizás la obra:</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Precio de venta</em></div><img src="img/presupuesto-precio-venta.png" alt="Bloque Precio de venta" loading="lazy"></button><figcaption><span class="fig">Fig. 7.6</span>Del costo directo ($ 20.102.815) al precio de venta ($ 30.770.375), con los márgenes de la empresa: 15% de gastos generales y 10% de beneficio.</figcaption></figure>
+        <div class="tbl"><table>
+          <thead><tr><th>Renglón</th><th>Cómo se calcula</th><th>En la casa demo</th></tr></thead>
+          <tbody>
+            <tr><td>Materiales</td><td>Neto de la lista de compras (unidades enteras).</td><td>$ 6.201.960</td></tr>
+            <tr><td>Mano de obra</td><td>Suma del bloque Mano de obra.</td><td>$ 13.900.855</td></tr>
+            <tr><td><b>Costo directo</b></td><td>Materiales + mano de obra.</td><td>$ 20.102.815</td></tr>
+            <tr><td>Gastos generales</td><td>% sobre el costo directo.</td><td>15% → $ 3.015.422</td></tr>
+            <tr><td>Beneficio</td><td>% sobre el costo directo más los gastos generales.</td><td>10% → $ 2.311.824</td></tr>
+            <tr><td><b>Precio sin IVA</b></td><td>Costo directo + gastos generales + beneficio.</td><td>$ 25.430.062</td></tr>
+            <tr><td>IVA</td><td>21% sobre el precio sin IVA.</td><td>$ 5.340.313</td></tr>
+            <tr><td><b>Precio de venta</b></td><td>Precio sin IVA + IVA.</td><td>$ 30.770.375</td></tr>
+          </tbody>
+        </table></div>
+        <div class="prose">
+          <p>Los porcentajes de <span class="ui">Gastos generales</span> y <span class="ui">Beneficio</span> se pueden cambiar para este proyecto: escribí el nuevo valor en el campo con el <b>%</b> y apretá Enter. Cuando el proyecto tiene márgenes propios aparece <span class="ui">↺ Usar los márgenes de la empresa (15% y 10%)</span>, para volver a los de <a href="#jornales">Jornales y márgenes</a>.</p>
+
+          <h3 id="pdf">Descargar el presupuesto en PDF</h3>
+          <p><span class="ui">Descargar PDF</span> (arriba a la derecha) arma el presupuesto por rubros, con el logo y los datos de contacto de tu empresa en el encabezado (se cargan en <a href="#membrete">Mi equipo</a>). Tiene dos versiones:</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Descargar PDF</em></div><img src="img/presupuesto-pdf-menu.png" alt="Menú Descargar PDF con sus dos versiones" loading="lazy"></button><figcaption><span class="fig">Fig. 7.7</span>El menú de <span class="ui">Descargar PDF</span>: <span class="ui">Para el comitente</span> o <span class="ui">Interno</span>.</figcaption></figure>
+        <div class="tbl"><table>
+          <thead><tr><th>Versión</th><th>Qué muestra</th><th>Para qué</th></tr></thead>
+          <tbody>
+            <tr><td>Para el comitente</td><td>Un resumen con el importe y la incidencia de cada rubro, subtotal sin IVA, IVA y <b>Precio total</b>; después, el detalle de cada rubro ítem por ítem. Los gastos generales y el beneficio ya están repartidos dentro de cada precio, así que no aparecen.</td><td>Es el que le mandás al cliente.</td></tr>
+            <tr><td>Interno</td><td>Materiales y mano de obra por separado en cada rubro, el redondeo a unidades de venta, <b>Costo directo</b>, gastos generales, beneficio, IVA y <b>Precio de venta</b>. En el detalle, cada ítem dice si es material o mano de obra, con su costo sin márgenes.</td><td>Para revisar costos y márgenes dentro de la empresa. No lo mandes al cliente.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="pair">
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>presupuesto_Casa_Los_Aromos.pdf</em></div><img src="img/presupuesto-pdf-comitente.png" alt="Primera hoja del PDF para el comitente" loading="lazy"></button><figcaption><span class="fig">Fig. 7.8</span>Para el comitente: membrete, resumen por rubros con su incidencia y <b>Precio total</b> con IVA.</figcaption></figure>
+          <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>presupuesto_Casa_Los_Aromos_interno.pdf</em></div><img src="img/presupuesto-pdf-interno.png" alt="Primera hoja del PDF interno" loading="lazy"></button><figcaption><span class="fig">Fig. 7.9</span>Interno: materiales y mano de obra por rubro, redondeo, gastos generales y beneficio a la vista.</figcaption></figure>
+        </div>
+        <div class="prose">
+          <p>En la versión para el comitente, cada precio se multiplica por el mismo <b>coeficiente de pase</b>: precio sin IVA ÷ costo de los ítems. En la casa demo, cada peso de costo se cotiza a unos $ 1,27. Así los márgenes quedan repartidos en proporción y la suma de los rubros da exactamente el subtotal. En ese coeficiente entra también el redondeo a unidades enteras de la lista de compras.</p>
+          <div class="note warn"><b class="tag">Ojo</b><p><span class="ui">Descargar PDF</span> se habilita cuando el proyecto está creado (no en borrador) y su modelo IFC ya está procesado. Lo que está sin precio no entra en el PDF: antes de mandarlo, revisá que la tarjeta de arriba no avise ítems sin precio.</p></div>
+
+          <h3 id="excel">Descargar el Excel</h3>
+          <p><span class="ui">Descargar Excel</span> baja <code>presupuesto_“proyecto”.xlsx</code> con las hojas <b>Resumen</b> (con el precio de venta), <b>Lista de compras</b>, <b>Mano de obra</b>, <b>Detalle</b> (cada regla con su cuenta) y <b>Medidas del modelo</b>. El botón se habilita cuando el proyecto está creado y tiene presupuesto del proveedor.</p>
+        </div>
         <div class="prose">
           <div class="note warn"><b class="tag">Ojo</b><p>El capataz y el comitente no ven importes. Si abren esta pantalla, ven el aviso “Tu rol en este proyecto no tiene acceso a la información económica.” y la tarjeta superior sin números.</p></div>
         </div>
@@ -628,12 +731,12 @@
         <div class="ch-head"><span class="num">08</span><h2>Reglas de cómputo</h2></div>
         <p class="route"><span>/reglas</span><span class="who">Todos ven · Admin edita</span></p>
         <div class="prose">
-          <p>Un <b>juego de reglas</b> dice cuánto material lleva cada unidad de medida del modelo: cuánto cemento, cal y arena por m² de muro; cuánto hormigón por metro de viga; cuántos ladrillos de losa por m² de techo. Cada proyecto usa un juego, que se elige en el paso Precios o en el presupuesto.</p>
+          <p>Un <b>juego de reglas</b> dice cuánto material lleva cada unidad de medida del modelo: cuánto cemento, cal y arena por m² de muro; cuánto hormigón por metro de viga; cuántos ladrillos de losa por m² de techo. También dice cómo se cotiza la <b>mano de obra</b> de cada tarea: en qué rubro va, cuánto avanza una cuadrilla por día y si se terceriza o la hace tu gente. Cada proyecto usa un juego, que se elige en el paso Precios o en el presupuesto.</p>
         </div>
         <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/reglas</em></div><img src="img/reglas-lista.png" alt="Lista de juegos de reglas" loading="lazy"></button><figcaption><span class="fig">Fig. 8.1</span>El juego del sistema “Estándar Argentina” (etiquetas <span class="ui">Estándar</span> y <span class="ui">Por defecto</span>) y un juego propio de la organización con <span class="ui">Editar</span>, <span class="ui">Duplicar</span> y <span class="ui">Borrar</span>.</figcaption></figure>
         <div class="prose">
           <h3 id="estandar">El juego “Estándar Argentina”</h3>
-          <p>Trae 22 reglas de referencia para obra húmeda tradicional (ladrillo cerámico y hormigón armado H21): mortero de asiento y revoque para muros, hormigón para columnas, vigas y riostras, losa cerámica con capa de compresión para el techo, y hierro con alambre de atar para la armadura. Es el que se usa por defecto. Lo ve todo el mundo, pero solo lo edita el administrador de la plataforma. Para adaptarlo a tu forma de construir, <b>duplicalo</b>.</p>
+          <p>Trae 22 reglas de materiales de referencia para obra húmeda tradicional (ladrillo cerámico y hormigón armado H21): mortero de asiento y revoque para muros, hormigón para columnas, vigas y riostras, losa cerámica con capa de compresión para el techo, y hierro con alambre de atar para la armadura. Suma 8 tareas de mano de obra (mampostería, revoques, columnas y vigas de H°A°, vigas de fundación, losa de cubierta, contrapiso y carpeta, y cielorrasos), tercerizadas y sin precio: el precio lo carga cada proyecto. Es el que se usa por defecto. Lo ve todo el mundo, pero solo lo edita el administrador de la plataforma. Para adaptarlo a tu forma de construir, <b>duplicalo</b>.</p>
           <h3 id="nuevo-juego">Crear un juego propio</h3>
           <ol class="steps">
             <li><span>Hacé clic en <span class="ui">+ Nuevo juego</span>, o en <span class="ui">Duplicar</span> sobre un juego existente.</span></li>
@@ -644,9 +747,9 @@
         <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>Nuevo juego de reglas</em></div><img src="img/reglas-nuevo.png" alt="Diálogo Nuevo juego de reglas" loading="lazy"></button><figcaption><span class="fig">Fig. 8.2</span>Lo más práctico es partir de una copia del estándar y cambiar solo lo que hace falta.</figcaption></figure>
         <div class="prose">
           <h3 id="editor">Editar las reglas</h3>
-          <p>El editor tiene pestañas por medida (<span class="ui">Todas</span>, <span class="ui">Muros</span>, <span class="ui">Columnas</span>, <span class="ui">Vigas</span>, <span class="ui">Riostras</span>, <span class="ui">Techo</span>, <span class="ui">Pisos</span>, <span class="ui">Cielorrasos</span>, <span class="ui">Armadura</span>) con la cantidad de reglas de cada una, y un buscador <span class="ui">Filtrar...</span>.</p>
+          <p>El editor tiene pestañas por medida (<span class="ui">Todas</span>, <span class="ui">Muros</span>, <span class="ui">Columnas</span>, <span class="ui">Vigas</span>, <span class="ui">Riostras</span>, <span class="ui">Techo</span>, <span class="ui">Pisos</span>, <span class="ui">Cielorrasos</span>, <span class="ui">Armadura</span>) con la cantidad de reglas de cada una, materiales y mano de obra, y un buscador <span class="ui">Filtrar...</span>. Dentro de cada medida van primero los materiales y después el bloque <span class="ui">MANO DE OBRA</span>.</p>
         </div>
-        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/reglas/“id”</em></div><img src="img/reglas-editor.png" alt="Editor de reglas de cómputo" loading="lazy"></button><figcaption><span class="fig">Fig. 8.3</span>Editor de un juego propio: cada regla tiene producto, palabras para buscar, exclusiones, cantidad por unidad, desperdicio y modo de cálculo. Abajo, la barra para guardar.</figcaption></figure>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/reglas/“id”</em></div><img src="img/reglas-editor.png" alt="Editor de reglas de cómputo" loading="lazy"></button><figcaption><span class="fig">Fig. 8.3</span>Editor de un juego propio: cada regla tiene producto, palabras para buscar, exclusiones, cantidad por unidad, desperdicio, modo de cálculo y rubro. Abajo, la barra para guardar.</figcaption></figure>
         <div class="tabs">
           <div><b>Producto</b>Nombre que vas a ver en el presupuesto (por ejemplo, “Cemento (mortero de asiento)”).</div>
           <div><b>Buscar en el PDF</b>Palabras para encontrar el producto en el presupuesto del proveedor, separadas por coma. Tienen que aparecer todas las palabras de una frase; se acepta el plural. Sirve también para Excel y CSV.</div>
@@ -654,6 +757,7 @@
           <div><b>Cantidad</b>Cuánto producto por unidad de la medida (por m², m³, m o kg), con su unidad: kg, m³, m², m, litros o unidades.</div>
           <div><b>Desperdicio</b>Porcentaje que se suma a la cantidad (roturas, sobrantes).</div>
           <div><b>Cálculo</b>El modo de cálculo (ver abajo). Con <span class="ui">+ nota</span> podés anotar de dónde sale el valor.</div>
+          <div><b>Rubro</b>En qué rubro del presupuesto se agrupa el material (Mampostería, Revoques, Estructura…). Si lo dejás vacío (“según la medida”), va al de su medida: Mampostería para muros, Estructura para columnas y vigas, Cubierta para el techo.</div>
         </div>
         <div class="tbl"><table>
           <thead><tr><th>Cálculo</th><th>Cómo cuenta</th><th>Para qué</th></tr></thead>
@@ -669,12 +773,28 @@
         </div>
         <div class="prose">
           <ol class="steps">
-            <li><span>Cambiá lo que necesites. Con <span class="ui">+ Agregar regla</span> sumás una regla a esa medida; con el tacho la borrás.</span></li>
+            <li><span>Cambiá lo que necesites. Con <span class="ui">+ Agregar material</span> o <span class="ui">+ Agregar mano de obra</span> sumás una regla a esa medida; con el tacho la borrás.</span></li>
             <li><span>Abajo aparece “Hay cambios sin guardar.” Hacé clic en <span class="ui">Guardar cambios</span>, o en <span class="ui">Descartar</span> para volver atrás.</span></li>
             <li><span>Todos los proyectos que usan ese juego se recalculan solos.</span></li>
           </ol>
           <div class="note tip"><b class="tag">Dato</b><p>Si un producto sale “Sin precio” en muchos proyectos, casi siempre es una palabra clave que no coincide con cómo lo escribe tu corralón. Abrí <span class="ui">Renglones leídos del archivo</span> en un presupuesto, copiá cómo aparece el producto y agregá esa palabra a la regla.</p></div>
           <p>Al borrar un juego, los proyectos que lo usaban pasan a usar el estándar.</p>
+
+          <h3 id="reglas-mano-de-obra">Mano de obra en las reglas</h3>
+          <p>Debajo de los materiales de cada medida está el bloque <span class="ui">MANO DE OBRA</span>, con una fila por tarea. Es la referencia de tu empresa: en cada proyecto se puede cambiar el modo y el precio sin tocar la regla (ver <a href="#mano-de-obra">Mano de obra</a> en el presupuesto).</p>
+        </div>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/reglas/“id” · Mano de obra</em></div><img src="img/reglas-editor-mano-de-obra.png" alt="Bloque Mano de obra en el editor de reglas" loading="lazy"></button><figcaption><span class="fig">Fig. 8.6</span>Mano de obra de los muros en “Obra económica”: la mampostería, tercerizada y con el precio a cargar en cada proyecto; los revoques, con cuadrilla propia de 1 oficial + 1 ayudante.</figcaption></figure>
+        <div class="tabs">
+          <div><b>Tarea</b>Nombre que vas a ver en el presupuesto (por ejemplo, “Mano de obra: mampostería”).</div>
+          <div><b>Rubro</b>Rubro del presupuesto. Hay sugeridos (Fundaciones, Estructura, Mampostería, Revoques, Cubierta, Pisos…) y podés escribir otro.</div>
+          <div><b>Rendimiento</b>Cuántas unidades de la medida avanza una cuadrilla por día (por ejemplo, 8 m² de muro). Da los días de la tarea y, en cuadrilla propia, el costo.</div>
+          <div><b>Se cotiza</b>El modo habitual: <span class="ui">Tercerizado</span> o <span class="ui">Cuadrilla propia</span>.</div>
+          <div><b>Precio de referencia</b>Solo en tercerizado: el precio por unidad, sin IVA. Vacío (“lo carga cada proyecto”) si cambia de obra en obra.</div>
+          <div><b>Cuadrilla</b>Solo en cuadrilla propia: cantidad y oficio de cada integrante. Con <span class="ui">+ oficio</span> sumás uno; con la ✕ lo quitás. Los oficios se eligen de los de <a href="#jornales">Jornales y márgenes</a>.</div>
+        </div>
+        <div class="prose">
+          <p>La armadura no tiene mano de obra: se paga dentro del hormigón armado de columnas, vigas y losas.</p>
+          <div class="note tip"><b class="tag">Dato</b><p>Para que los materiales y la mano de obra de una misma tarea queden juntos en el PDF, poné el mismo <span class="ui">Rubro</span> en las dos reglas. Por ejemplo, “Revoques” en el cemento, la cal y la arena del revoque y en “Mano de obra: revoques”. Si no, los materiales del revoque van a Mampostería, que es el rubro de los muros.</p></div>
         </div>
       </section>
 
@@ -683,10 +803,18 @@
         <div class="ch-head"><span class="num">09</span><h2>Mi equipo</h2></div>
         <p class="route"><span>/team</span><span class="who">Admin de la organización</span></p>
         <div class="prose">
-          <p>Lista los usuarios de tu organización con su permiso (ADMIN o MEMBER) y sus roles de obra (oficios). Desde acá se crean, editan y eliminan usuarios.</p>
+          <p>Arriba, el <span class="ui">Membrete del presupuesto</span>: el logo y los datos de contacto que encabezan el PDF. Debajo, los usuarios de tu organización con su permiso (ADMIN o MEMBER) y sus roles de obra (oficios). Desde acá se crean, editan y eliminan usuarios.</p>
         </div>
-        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/team</em></div><img src="img/equipo-lista.png" alt="Mi equipo" loading="lazy"></button><figcaption><span class="fig">Fig. 9.1</span>Usuarios de la organización con su permiso y sus oficios. Al pasar el mouse sobre una tarjeta aparecen <span class="ui">Editar</span> y <span class="ui">Eliminar</span>.</figcaption></figure>
+        <figure class="shot"><button class="frame" type="button"><div class="bar"><i></i><i></i><i></i><em>/team</em></div><img src="img/equipo-lista.png" alt="Mi equipo" loading="lazy"></button><figcaption><span class="fig">Fig. 9.1</span>El membrete con el logo y los datos de contacto de la empresa demo y, debajo, los usuarios con su permiso y sus oficios. Al pasar el mouse sobre una tarjeta aparecen <span class="ui">Editar</span> y <span class="ui">Eliminar</span>.</figcaption></figure>
         <div class="prose">
+          <h3 id="membrete">Membrete del presupuesto</h3>
+          <p>Es el encabezado del <a href="#pdf">presupuesto en PDF</a>: el logo a la izquierda y, a la derecha, el nombre de la organización con sus datos de contacto. Lo carga un administrador una sola vez y vale para todos los proyectos.</p>
+          <ol class="steps">
+            <li><span>Hacé clic en <span class="ui">Subir logo</span> y elegí la imagen: PNG o JPG, hasta 2 MB. Se ve mejor un logo apaisado con fondo blanco.</span></li>
+            <li><span>En <span class="ui">Datos de contacto</span>, escribí una línea por dato: dirección, teléfono y mail, CUIT.</span></li>
+            <li><span>Hacé clic en <span class="ui">Guardar datos</span>. Vas a ver “Datos guardados.”</span></li>
+          </ol>
+          <p>Para reemplazar el logo, <span class="ui">Cambiar logo</span>; para sacarlo, <span class="ui">Quitar</span>. Sin logo, el PDF sale igual, con el nombre y los datos de contacto.</p>
           <h3 id="nuevo-usuario">Dar de alta un usuario</h3>
           <ol class="steps">
             <li><span>Hacé clic en la tarjeta <span class="ui">Nuevo usuario</span>.</span></li>
@@ -768,6 +896,10 @@
         <details class="faq"><summary>Un producto sale “Sin precio” aunque el corralón lo tiene. ¿Qué hago?</summary><div><ol class="steps"><li><span>En el presupuesto, abrí <span class="ui">Renglones leídos del archivo</span> y fijate cómo está escrito el producto.</span></li><li><span>Para este proyecto, elegí ese renglón a mano en el desplegable del ítem.</span></li><li><span>Para que no vuelva a pasar, agregá esa palabra en <span class="ui">Buscar en el PDF</span> de la regla, en tu juego de reglas.</span></li></ol></div></details>
         <details class="faq"><summary>La cantidad de bolsas (o camiones) es absurda. ¿Por qué?</summary><div><p>Casi siempre la presentación del renglón se leyó mal (por ejemplo, “por unidad” en lugar de “x 25 kg”). Corregila como se explica en <a href="#corregir-presentacion">Corregir la presentación de un renglón</a>.</p></div></details>
         <details class="faq"><summary>El total no coincide con el del corralón.</summary><div><p>Es esperable: el corralón cotizó las cantidades que vos le pediste y Scalist calcula las que necesita tu obra. Para comparar precios unitarios, mirá la columna <span class="ui">Precio neto</span>. Revisá también el <span class="ui">IVA de los precios</span>: si el documento tenía IVA y se tomó como sin IVA, los netos quedan inflados un 21%.</p></div></details>
+        <details class="faq"><summary>Una tarea de mano de obra dice “Faltan jornales”. ¿Qué hago?</summary><div><p>La tarea va con cuadrilla propia y a algún oficio de la cuadrilla le falta el costo por día. Al lado del estado dice cuál (“sin jornal: Oficial”). Cargalo en <a href="#jornales">Jornales y márgenes</a>, escrito igual que en la cuadrilla de la regla. Si esa tarea en esta obra la hace un contratista, cambiala a <span class="ui">Tercerizado</span> y escribí su precio.</p></div></details>
+        <details class="faq"><summary>¿Qué PDF le mando al comitente?</summary><div><p>El de <span class="ui">Descargar PDF</span> → <span class="ui">Para el comitente</span>: muestra el precio de cada rubro con tus gastos generales y tu beneficio ya incluidos, sin abrirlos. El <span class="ui">Interno</span> muestra tus costos y márgenes: es para vos. Ver <a href="#pdf">Descargar el presupuesto en PDF</a>.</p></div></details>
+        <details class="faq"><summary>El botón “Descargar PDF” está gris.</summary><div><p>Se habilita cuando el proyecto ya está creado (no en borrador) y su modelo IFC terminó de procesarse. Si el proyecto está en borrador, terminá el asistente. Si el modelo sigue procesando, esperá a que termine.</p></div></details>
+        <details class="faq"><summary>Cambié los márgenes en un proyecto y quiero volver a los de la empresa.</summary><div><p>En el bloque <span class="ui">Precio de venta</span>, hacé clic en <span class="ui">↺ Usar los márgenes de la empresa</span>. El proyecto vuelve a seguir los de <a href="#jornales">Jornales y márgenes</a>, también si después los cambia un administrador.</p></div></details>
         <details class="faq"><summary>El modelo quedó “procesando” y no avanza.</summary><div><p>Los modelos grandes pueden tardar varios minutos. Si pasaron más de 15 minutos sin cambios, volvé al paso <span class="ui">Modelo BIM</span> y subí el archivo de nuevo. Si vuelve a pasar, avisale a soporte.</p></div></details>
         <details class="faq"><summary>Un compañero no ve un proyecto.</summary><div><p>Si el proyecto tiene equipo asignado, solo lo ven sus integrantes y los administradores. Pedile al jefe de obra o a un administrador que lo sume al equipo del proyecto.</p></div></details>
         <details class="faq"><summary>No puedo pasar del paso Ubicación.</summary><div><p>Tenés que elegir la dirección <b>del listado de sugerencias</b>, no alcanza con escribirla. Si el paso solo muestra un aviso técnico y no hay buscador, la instalación no tiene configurado el servicio de mapas: avisale a soporte.</p></div></details>
@@ -780,14 +912,24 @@
         <h3 id="glosario">Glosario</h3>
         <dl class="gloss">
           <dt>Base quantities</dt><dd>Cantidades que el programa de diseño calcula y guarda dentro del IFC (largo, alto y superficie de cada elemento). Mejoran la exactitud del cómputo.</dd>
+          <dt>Beneficio</dt><dd>Porcentaje de ganancia que se suma sobre el costo directo más los gastos generales.</dd>
           <dt>BIM</dt><dd>Modelo de información del edificio: un modelo 3D donde cada elemento sabe qué es (muro, losa, viga) y cuánto mide.</dd>
+          <dt>Coeficiente de pase</dt><dd>Número por el que se multiplica cada costo para llegar al precio sin IVA (precio sin IVA ÷ costo). Reparte los gastos generales y el beneficio en el PDF para el comitente.</dd>
+          <dt>Costo directo</dt><dd>Materiales + mano de obra, sin gastos generales, beneficio ni IVA.</dd>
+          <dt>Cuadrilla</dt><dd>El equipo que hace una tarea, por ejemplo 1 oficial + 1 ayudante.</dd>
           <dt>Desperdicio</dt><dd>Porcentaje que se suma a la cantidad de una regla para cubrir roturas y sobrantes.</dd>
+          <dt>Gastos generales</dt><dd>Lo que cuesta sostener la empresa y la obra y no se imputa a una tarea (oficina, seguros, movilidad). Se cargan como % del costo directo.</dd>
           <dt>IFC</dt><dd>Formato abierto para intercambiar modelos BIM entre programas. Archivo <code>.ifc</code>.</dd>
+          <dt>Jornal</dt><dd>Lo que te cuesta un día de trabajo de un oficio, con cargas sociales.</dd>
           <dt>Juego de reglas</dt><dd>Conjunto de reglas de cómputo que usa un proyecto.</dd>
+          <dt>Membrete</dt><dd>Logo y datos de contacto de la empresa que encabezan el presupuesto en PDF.</dd>
           <dt>Neto</dt><dd>Precio sin IVA.</dd>
           <dt>Presentación</dt><dd>Cómo vende el proveedor un producto: bolsa de 25 kg, camión de 6 m³, barra de 12 m, por unidad.</dd>
+          <dt>Rendimiento</dt><dd>Cuánto avanza una cuadrilla por día: m² de muro, m de viga, m³ de hormigón.</dd>
           <dt>Renglón</dt><dd>Una línea del presupuesto del proveedor: código, descripción, cantidad y precio.</dd>
           <dt>Riostra</dt><dd>Viga de fundación que vincula zapatas o bases.</dd>
+          <dt>Rubro</dt><dd>Etapa de obra que agrupa materiales y mano de obra en el presupuesto (Mampostería, Estructura, Cubierta…).</dd>
+          <dt>Tercerizado</dt><dd>Tarea que hace un contratista y se paga por unidad (por m², m³ o m).</dd>
         </dl>
         <h3 id="permisos">Permisos</h3>
         <div class="tbl"><table>
@@ -797,12 +939,16 @@
             <tr><td>Crear proyectos nuevos</td><td>Sí</td><td>Sí</td><td colspan="3">Cualquier usuario de la organización</td></tr>
             <tr><td>Editar o borrar un proyecto</td><td>Sí</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td></tr>
             <tr><td>Ver presupuesto e importes</td><td>Sí</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td></tr>
+            <tr><td>Mano de obra y márgenes del proyecto</td><td>Sí</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td></tr>
+            <tr><td>Descargar el presupuesto (PDF y Excel)</td><td>Sí</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td></tr>
+            <tr><td>Cambiar jornales y márgenes de la empresa</td><td>—</td><td>Sí</td><td>No (solo los ve)</td><td>No</td><td>No</td></tr>
+            <tr><td>Editar el membrete</td><td>—</td><td>Sí</td><td>No</td><td>No</td><td>No</td></tr>
             <tr><td>Crear y editar juegos de reglas</td><td>Sí (también el estándar)</td><td>Sí (los de su org.)</td><td>No</td><td>No</td><td>No</td></tr>
             <tr><td>Gestionar usuarios de la organización</td><td>Sí</td><td>Sí</td><td>No</td><td>No</td><td>No</td></tr>
             <tr><td>Gestionar organizaciones</td><td>Sí</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
           </tbody>
         </table></div>
-        <p class="end">Fin del manual · Scalist v1.0 · Las capturas usan datos ficticios.</p>
+        <p class="end">Fin del manual · Scalist v1.1 · Las capturas usan datos ficticios.</p>
       </section>
 
     </div>

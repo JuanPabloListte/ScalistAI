@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200">
+  <!-- Logo FICTICIO de la organización demo del manual ("Constructora Del Valle Demo S.R.L."). -->
+  <rect width="600" height="200" fill="#ffffff"/>
+  <path d="M30 92 L90 40 L150 92 L150 168 L30 168 Z" fill="#0f4c81"/>
+  <path d="M74 168 L74 124 L106 124 L106 168 Z" fill="#ffffff"/>
+  <path d="M18 98 L90 36 L162 98" fill="none" stroke="#e0a526" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"/>
+  <text x="186" y="112" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="58" font-weight="700" fill="#0f172a" letter-spacing="1">DEL VALLE</text>
+  <text x="189" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#64748b" letter-spacing="2">CONSTRUCTORA · DEMO</text>
+</svg>

@@ -11,8 +11,24 @@
     { "clave": "comitente", "email": "familia.rios@cliente.demo", "permiso": "member", "oficios": [] },
     { "clave": "computista", "email": "ana.benitez@delvalle.demo", "permiso": "member", "oficios": ["Arquitecto"] }
   ],
+  "membrete": {
+    "logo": "logo-demo.png",
+    "contacto": "Bv. Los Álamos 1200 · Villa Allende, Córdoba\nTel. (0351) 000-0000 · obras@delvalle.demo\nCUIT 30-00000002-0 (ficticio)"
+  },
+  "jornales": [
+    { "oficio": "Oficial especializado", "costo": 68000 },
+    { "oficio": "Oficial", "costo": 60000 },
+    { "oficio": "Medio oficial", "costo": 52000 },
+    { "oficio": "Ayudante", "costo": 45000 }
+  ],
+  "margenes": { "gastosGenerales": 0.15, "beneficio": 0.10 },
   "juegosDeReglas": [
-    { "nombre": "Obra económica", "descripcion": "Copia del estándar con desperdicios ajustados para obras chicas." }
+    {
+      "nombre": "Obra económica",
+      "descripcion": "Copia del estándar con desperdicios ajustados para obras chicas.",
+      "_manoDeObra": "Si no la tiene (copias anteriores a la mano de obra), se copia la del estándar; estas tareas pasan a cuadrilla propia.",
+      "cuadrillaPropia": ["Mano de obra: revoques (2 caras)"]
+    }
   ],
   "proyectos": [
     {
@@ -27,6 +43,14 @@
         { "email": "martin.acosta@delvalle.demo", "rol": "jefe_obra" },
         { "email": "ramon.sosa@delvalle.demo", "rol": "capataz" },
         { "email": "familia.rios@cliente.demo", "rol": "comitente" }
+      ],
+      "_manoDeObra": "Precios de contratista inventados, sin IVA, por unidad de la medida. modo: unit = tercerizado, daily = cuadrilla propia.",
+      "manoDeObra": [
+        { "tarea": "Mano de obra: mampostería", "modo": "unit", "precio": 21500 },
+        { "tarea": "Mano de obra: revoques (2 caras)", "modo": "daily" },
+        { "tarea": "Mano de obra: vigas de H°A°", "modo": "unit", "precio": 38000 },
+        { "tarea": "Mano de obra: losa de cubierta", "modo": "unit", "precio": 24000 },
+        { "tarea": "Mano de obra: contrapiso y carpeta", "modo": "unit", "precio": 9500 }
       ]
     },
     {
