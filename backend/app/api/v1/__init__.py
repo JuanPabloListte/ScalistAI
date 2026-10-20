@@ -6,6 +6,7 @@ from app.api.v1 import (
     auth,
     cost_intelligence,
     labor_rates,
+    letterhead,
     materials,
     plans,
     price_lists,
@@ -29,3 +30,4 @@ api_router.include_router(price_lists.router)
 api_router.include_router(price_lists.project_router)
 api_router.include_router(rule_sets.router)
 api_router.include_router(labor_rates.router)
+api_router.include_router(letterhead.router)

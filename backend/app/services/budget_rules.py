@@ -48,6 +48,18 @@ MODES = ("fixed", "brick_dims", "rebar")
 UNITS = ("kg", "m3", "m2", "m", "l", "u")
 KINDS = ("material", "labor")
 LABOR_MODES = ("unit", "daily")
+# Rubro por defecto de cada medida, para reglas que no traen el suyo.
+MEASURE_STAGE: dict[str, str] = {
+    "muro_m2": "Mampostería", "columna_m3": "Estructura", "viga_ml": "Estructura",
+    "riostra_ml": "Fundaciones", "techo_m2": "Cubierta", "sup_cubierta_m2": "Pisos",
+    "cielorraso_m2": "Cielorrasos", "armadura_kg": "Estructura",
+}
+
+
+def stage_of(rule) -> str:
+    return (rule.stage or "").strip() or MEASURE_STAGE.get(rule.measure, "Sin rubro")
+
+
 # Oficios de la tabla de jornales que se ofrecen por defecto.
 DEFAULT_TRADES = ("Oficial especializado", "Oficial", "Medio oficial", "Ayudante")
 
@@ -295,7 +307,7 @@ def compute_budget(
 
         for key, label, base, diameter in targets:
             item = {
-                "key": key, "rule_id": rule.id, "label": label,
+                "key": key, "rule_id": rule.id, "label": label, "stage": stage_of(rule),
                 "measure": rule.measure, "measure_label": m_label, "measure_unit": m_unit,
                 "measure_value": round(base, 3), "unit": rule.unit,
                 "waste_pct": rule.waste_pct, "notes": rule.notes,
@@ -412,7 +424,7 @@ def compute_labor(
         days = qty / y if y > 0 else None
         item = {
             "key": str(rid), "rule_id": rule.id, "label": rule.label,
-            "stage": rule.stage or "Sin rubro", "measure": rule.measure,
+            "stage": stage_of(rule), "measure": rule.measure,
             "measure_label": m_label, "measure_unit": m_unit, "quantity": round(qty, 3),
             "mode": mode, "daily_yield": rule.daily_yield, "crew": crew,
             "notes": rule.notes, "days": round(days, 2) if days is not None else None,
@@ -565,7 +577,8 @@ def _default_rules():
 
     rules = [
         Rule(position=i, measure=m, label=lbl, keywords=list(kw), unit=u, factor=f,
-             mode=mode, waste_pct=w, exclude_keywords=list(ex), notes=notes)
+             mode=mode, waste_pct=w, exclude_keywords=list(ex), notes=notes,
+             stage="Revoques" if "revoque" in lbl.lower() else MEASURE_STAGE[m])
         for i, (m, lbl, kw, u, f, mode, w, ex, notes) in enumerate(DEFAULT_RULES)
     ]
     start = len(rules)

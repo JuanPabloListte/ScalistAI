@@ -130,6 +130,7 @@ function toPayload(d: Draft, measureOrder: string[]) {
       mode: r.mode,
       waste_pct: Number(r.waste.replace(",", ".")) || 0,
       notes: r.notes.trim() || null,
+      stage: r.stage.trim() || null,
     }));
   return {
     name: d.name.trim(),
@@ -576,6 +577,17 @@ function RuleRow({
               <option key={m.key} value={m.key}>{m.label}</option>
             ))}
           </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          Rubro
+          <input
+            value={r.stage}
+            disabled={disabled}
+            list="rubros"
+            placeholder="según la medida"
+            onChange={(e) => onChange({ stage: e.target.value })}
+            className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          />
         </label>
         {showNotes ? (
           <input

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, isUnauthorized, type OrgUser, type User } from "@/lib/api";
 import { JobRolesPicker, ManageJobRolesModal } from "@/components/job-roles-picker";
 import { EditIcon, TrashIcon } from "@/components/icons";
+import { LetterheadCard } from "@/components/letterhead-card";
 import { ConfirmModal, Modal } from "@/components/modal";
 
 export default function TeamPage() {
@@ -75,6 +76,8 @@ export default function TeamPage() {
           {error}
         </p>
       )}
+
+      {isAdmin && <LetterheadCard canEdit />}
 
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {isAdmin && (

@@ -29,6 +29,8 @@ function SupplierBudget() {
   const [me, setMe] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [pdfMenu, setPdfMenu] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     api.getMe().then(setMe).catch(() => {});
@@ -50,6 +52,19 @@ function SupplierBudget() {
     }
   }
 
+  async function downloadPdf(audience: "comitente" | "interno") {
+    setPdfMenu(false);
+    setPdfBusy(true);
+    setError(null);
+    try {
+      await api.downloadProjectBudgetPdf(projectId, project?.name, audience);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo generar el PDF");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   const budget = view?.budget;
   const pl = view?.price_list;
   const price = view?.price;
@@ -65,6 +80,42 @@ function SupplierBudget() {
         <Link href="/projects" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
           ← Volver a proyectos
         </Link>
+        <div className="flex items-center gap-2">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setPdfMenu((o) => !o)}
+            disabled={!price || pdfBusy || project?.status !== "active"}
+            title={
+              project && project.status !== "active"
+                ? "El PDF se descarga cuando el proyecto está creado"
+                : price ? "" : "Todavía no hay importes"
+            }
+            aria-haspopup="menu"
+            aria-expanded={pdfMenu}
+            className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            {pdfBusy ? "Generando…" : "Descargar PDF"}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+          </button>
+          {pdfMenu && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setPdfMenu(false)} />
+              <div role="menu" className="absolute right-0 z-20 mt-1.5 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <button type="button" role="menuitem" onClick={() => void downloadPdf("comitente")}
+                        className="block w-full px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Para el comitente</span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">Precio por rubro, con tus márgenes incluidos</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => void downloadPdf("interno")}
+                        className="block w-full border-t border-slate-100 px-4 py-2.5 text-left hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Interno</span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">Costos, gastos generales y beneficio por separado</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => void download()}
@@ -79,6 +130,7 @@ function SupplierBudget() {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
           {downloading ? "Generando…" : "Descargar Excel"}
         </button>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white shadow-sm dark:border-slate-700">

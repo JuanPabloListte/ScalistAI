@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -23,6 +23,10 @@ class Organization(Base):
     ai_provider: Mapped[str] = mapped_column(String(64), default="scalist", nullable=False)
     ai_api_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     ai_model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Membrete del presupuesto en PDF.
+    logo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

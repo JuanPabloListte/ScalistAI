@@ -694,6 +694,7 @@ export type BudgetSettings = {
   labor: Record<string, LaborSetting>;
 };
 export type LaborRate = { trade: string; daily_cost: number; updated_on: string | null };
+export type Letterhead = { name: string; contact_info: string | null; has_logo: boolean };
 export type ProjectBudgetView = {
   rule_set: { id: number; name: string } | null;
   model_status: "ready" | "processing" | "error" | "missing";
@@ -1033,6 +1034,13 @@ export const api = {
     }),
   deleteProjectPriceList: (projectId: number) =>
     request<void>(`/api/v1/projects/${projectId}/price-list`, { method: "DELETE" }),
+  /** Presupuesto por rubros en PDF: "comitente" (márgenes repartidos) o "interno". */
+  downloadProjectBudgetPdf: async (projectId: number, projectName: string | undefined,
+                                   audience: "comitente" | "interno") => {
+    const blob = await requestBlob(`/api/v1/projects/${projectId}/price-list/export.pdf?audience=${audience}`);
+    const safe = (projectName || `proyecto_${projectId}`).replace(/[^\w\-]+/g, "_").slice(0, 60);
+    saveBlob(blob, `presupuesto_${safe}${audience === "interno" ? "_interno" : ""}.pdf`);
+  },
   downloadProjectBudgetXlsx: async (projectId: number, projectName?: string) => {
     const blob = await requestBlob(`/api/v1/projects/${projectId}/price-list/export.xlsx`);
     const safe = (projectName || `proyecto_${projectId}`).replace(/[^\w\-]+/g, "_").slice(0, 60);
@@ -1051,6 +1059,21 @@ export const api = {
   ) => request<RuleSet>(`/api/v1/rule-sets/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteRuleSet: (id: number) =>
     request<void>(`/api/v1/rule-sets/${id}`, { method: "DELETE" }),
+
+  // ---- Membrete del estudio (logo y datos de contacto del PDF) ----
+  getLetterhead: () => request<Letterhead>(`/api/v1/organization/letterhead`),
+  updateLetterhead: (contact_info: string | null) =>
+    request<Letterhead>(`/api/v1/organization/letterhead`, {
+      method: "PUT",
+      body: JSON.stringify({ contact_info }),
+    }),
+  fetchLogo: () => requestBlob(`/api/v1/organization/letterhead/logo`),
+  uploadLogo: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<Letterhead>(`/api/v1/organization/letterhead/logo`, { method: "PUT", body: fd });
+  },
+  deleteLogo: () => request<Letterhead>(`/api/v1/organization/letterhead/logo`, { method: "DELETE" }),
 
   // ---- Jornales de la empresa (mano de obra por cuadrilla propia) ----
   listLaborRates: () => request<LaborRate[]>(`/api/v1/labor-rates`),

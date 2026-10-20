@@ -230,3 +230,42 @@ def export_project_budget_xlsx(
         headers={"Content-Disposition":
                  f'attachment; filename="presupuesto_{safe or project.id}.xlsx"'},
     )
+
+
+@project_router.get("/{project_id}/price-list/export.pdf")
+def export_project_budget_pdf(
+    project_id: int,
+    audience: Literal["comitente", "interno"] = "comitente",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Presupuesto por rubros con el membrete del estudio. `comitente`: precios
+    con gastos generales y beneficio repartidos; `interno`: costos y márgenes."""
+    from app.models.organization import Organization
+    from app.services.budget_pdf import build_budget_pdf
+
+    project, _ = require_project(project_id, db, user, financials=True)
+    if project.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="El PDF se descarga cuando el proyecto está creado (terminá el asistente).")
+    view = pb.build_view(project, db)
+    if not view.get("price") or not (view["price"]["materials"] or view["price"]["labor"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Todavía no hay importes: cargá el presupuesto del proveedor o los precios "
+                   "de la mano de obra.")
+    org = db.get(Organization, project.organization_id)
+    pdf = build_budget_pdf(
+        {"id": project.id, "name": project.name, "address": project.address},
+        {"name": org.name if org else "", "contact_info": org.contact_info if org else None,
+         "logo_path": org.logo_path if org else None},
+        view, audience)
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in project.name)[:60]
+    suffix = "_interno" if audience == "interno" else ""
+    db.commit()
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="presupuesto_{safe or project.id}{suffix}.pdf"'},
+    )
