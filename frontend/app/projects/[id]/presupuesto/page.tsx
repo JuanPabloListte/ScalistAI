@@ -7,8 +7,9 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { LaborPanel, SalePricePanel, matchesLaborFilter } from "@/components/labor-budget";
 import { LegacyBudget } from "@/components/legacy-budget";
 import { matchesReviewFilter } from "@/components/price-review";
+import { ProjectNotFound } from "@/components/project-not-found";
 import { ProjectPricesPanel } from "@/components/wizard/step-3-prices";
-import { api, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
+import { api, ApiError, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 import { money } from "@/lib/format";
 
@@ -106,6 +107,7 @@ function SupplierBudget() {
   const [me, setMe] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [noAccess, setNoAccess] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [pdfMenu, setPdfMenu] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -114,6 +116,7 @@ function SupplierBudget() {
     api.getMe().then(setMe).catch(() => {});
     api.getProject(projectId).then(setProject).catch((e) => {
       if (isUnauthorized(e)) router.push("/login");
+      else if (e instanceof ApiError && e.status === 404) setNotFound(true);
       else setError(e instanceof Error ? e.message : String(e));
     });
   }, [projectId, router]);
@@ -160,6 +163,8 @@ function SupplierBudget() {
     setView(v);
     setLaborView(v);
   };
+
+  if (notFound) return <ProjectNotFound />;
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
