@@ -363,8 +363,8 @@ export default function LandingPage() {
               © {new Date().getFullYear()} Scalist. Todos los derechos reservados.
             </p>
             <div className="flex gap-6 text-sm text-slate-500">
-              <Link href="#" className="hover:text-slate-300">Términos</Link>
-              <Link href="#" className="hover:text-slate-300">Privacidad</Link>
+              <Link href="/legal/terms" className="hover:text-slate-300">Términos</Link>
+              <Link href="/legal/terms#privacidad" className="hover:text-slate-300">Privacidad</Link>
             </div>
           </div>
         </div>
