@@ -230,6 +230,21 @@ def test_api_juegos_de_reglas():
             "name": "x", "rules": [{"measure": "inventada", "label": "x", "keywords": ["x"],
                                     "unit": "kg", "factor": 1}]})
         assert bad.status_code == 422
+        assert bad.json()["detail"] == "Regla 1: Medida inválida: inventada", bad.text
+
+        # 422 legible: detail es UN string en castellano, no la lista de Pydantic.
+        regla = {"measure": "muro_m2", "label": "Cemento", "keywords": ["cemento"],
+                 "unit": "kg", "factor": 2.5}
+        bad = client.put(f"/api/v1/rule-sets/{copia['id']}", json={
+            "name": "x", "rules": [regla, {**regla, "waste_pct": 150, "factor": "mucho"}]})
+        assert bad.status_code == 422
+        detail = bad.json()["detail"]
+        assert isinstance(detail, str), detail
+        assert "Regla 2: Desperdicio tiene que ser menor o igual a 100" in detail, detail
+        assert "Regla 2: Cantidad tiene que ser un número" in detail, detail
+        assert "; " in detail and "Input should" not in detail and "body." not in detail
+        bad = client.put(f"/api/v1/rule-sets/{copia['id']}", json={"rules": []})
+        assert bad.status_code == 422 and bad.json()["detail"] == "Nombre es obligatorio", bad.text
 
         # Otra org no ve la copia (sí el estándar).
         otra = Organization(name=f"__test_org__{uuid.uuid4().hex[:8]}")

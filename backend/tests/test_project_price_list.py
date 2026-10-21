@@ -189,6 +189,113 @@ def test_borrar_proyecto_borra_archivo_del_proveedor():
         _cleanup(db, org.id, project_id)
 
 
+def _invalidos() -> list[tuple[str, bytes, str]]:
+    """(nombre, contenido, fragmento esperado del mensaje) de archivos que no se
+    pueden usar como presupuesto."""
+    from test_price_list_parse import _jpeg, _pdf
+
+    return [
+        ("sin_tabla.pdf", _pdf([[(40, "Hola, esto no es un presupuesto")]]),
+         "No encontramos renglones con precio en «sin_tabla.pdf»"),
+        ("basura.csv", b"nombre;color\nladrillo;rojo\n",
+         "No encontramos renglones con precio en «basura.csv»"),
+        ("foto.pdf", _jpeg(), "No se pudo leer el PDF"),
+        ("vacio.pdf", b"", "El archivo está vacío."),
+        ("roto.xlsx", b"PK\x03\x04 esto no es un excel", "No se pudo leer el Excel"),
+    ]
+
+
+def test_archivo_invalido_no_pisa_la_lista():
+    """Reemplazar por un archivo inválido → 400 y la lista anterior queda intacta
+    (renglones, correcciones de la revisión, archivo en disco y paso)."""
+    from app.core.database import SessionLocal
+    from app.models import Project, ProjectPriceList
+
+    db = SessionLocal()
+    org, user, project, _ = _setup(db)
+    client, reset = _client(user)
+    url = f"/api/v1/projects/{project.id}/price-list"
+    try:
+        r = client.post(url, files={"file": ("digimat.pdf", _digimat_like(), "application/pdf")})
+        assert r.status_code == 200, r.text
+        key = r.json()["budget"]["items"][0]["key"]
+        r = client.patch(url, json={"overrides": {key: None},
+                                    "line_patches": {"1": {"amount": 50, "unit": "kg"}}})
+        assert r.status_code == 200, r.text
+        antes = client.get(url).json()
+        stored = db.query(ProjectPriceList).filter_by(project_id=project.id).one()
+        old_path = stored.file_path
+        db.expire_all()
+        step = db.get(Project, project.id).wizard_step
+
+        for name, data, fragmento in _invalidos():
+            r = client.post(url, files={"file": (name, data, "application/octet-stream")})
+            assert r.status_code == 400, (name, r.status_code, r.text)
+            detail = r.json()["detail"]
+            assert isinstance(detail, str) and fragmento in detail, (name, detail)
+
+            v = client.get(url).json()
+            pl, pl0 = v["price_list"], antes["price_list"]
+            assert pl["filename"] == "digimat.pdf", name
+            assert pl["lines"] == pl0["lines"], name
+            assert pl["overrides"] == {key: None} and pl["line_patches"] == pl0["line_patches"], name
+            assert pl["updated_at"] == pl0["updated_at"], name
+            assert v["budget"] == antes["budget"], name
+            assert Path(old_path).exists(), name
+            db.expire_all()
+            assert db.get(Project, project.id).wizard_step == step, name
+
+        # Solo el archivo bueno queda en la carpeta del proyecto.
+        assert [p.name for p in Path(old_path).parent.iterdir()] == [Path(old_path).name]
+    finally:
+        reset()
+        _cleanup(db, org.id, project.id)
+
+
+def test_archivo_invalido_sin_lista_previa():
+    from app.core.database import SessionLocal
+    from app.models import Project, ProjectPriceList
+
+    db = SessionLocal()
+    org, user, project, _ = _setup(db)
+    client, reset = _client(user)
+    url = f"/api/v1/projects/{project.id}/price-list"
+    try:
+        for name, data, fragmento in _invalidos():
+            r = client.post(url, files={"file": (name, data, "application/octet-stream")})
+            assert r.status_code == 400, (name, r.status_code, r.text)
+            assert fragmento in r.json()["detail"], (name, r.text)
+        db.expire_all()
+        p = db.get(Project, project.id)
+        # Ni el paso ni el juego de reglas cambian (se elige al guardar una lista).
+        assert p.wizard_step == 2 and p.rule_set_id is None, (p.wizard_step, p.rule_set_id)
+        assert client.get(url).json()["price_list"] is None
+        assert db.query(ProjectPriceList).filter_by(project_id=project.id).count() == 0
+    finally:
+        reset()
+        _cleanup(db, org.id, project.id)
+
+
+def test_previsualizar_archivo_ilegible_da_400():
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    org, user, _, _ = _setup(db)
+    client, reset = _client(user)
+    try:
+        r = client.post("/api/v1/price-lists/parse",
+                        files={"file": ("roto.xlsx", b"no zip", "application/octet-stream")})
+        assert r.status_code == 400 and "No se pudo leer el Excel" in r.json()["detail"], r.text
+        # Sin renglones la previsualización no falla: devuelve el motivo.
+        from test_price_list_parse import _pdf
+        r = client.post("/api/v1/price-lists/parse", files={
+            "file": ("x.pdf", _pdf([[(40, "Hola")]]), "application/pdf")})
+        assert r.status_code == 200 and r.json()["lines"] == [] and r.json()["warnings"], r.text
+    finally:
+        reset()
+        _cleanup(db, org.id)
+
+
 def test_otra_org_no_accede():
     from app.core.database import SessionLocal
     from app.models import Organization, User

@@ -192,8 +192,18 @@ def _store_file(project_id: int, filename: str, data: bytes) -> str:
 def save_price_list(project: Project, filename: str, data: bytes, db: Session, *,
                     rule_set_id: int | None, iva_included: bool | None) -> ProjectPriceList:
     """Sube/reemplaza la lista del proyecto. Reemplazar borra las decisiones
-    de la revisión anterior (eran sobre otros renglones)."""
+    de la revisión anterior (eran sobre otros renglones).
+
+    Un archivo ilegible o sin renglones con precio se rechaza (ValueError →
+    400) ANTES de tocar nada: si ya había una lista, queda intacta (archivo,
+    renglones, correcciones de la revisión y paso del asistente)."""
     parsed = parse_price_list(filename, data, iva_included=iva_included)  # ValueError → 400
+    if not parsed["lines"]:
+        motivo = f" {parsed['warnings'][0]}" if parsed["warnings"] else ""
+        raise ValueError(
+            f"No encontramos renglones con precio en «{Path(filename).name}».{motivo} "
+            "Subí el presupuesto del proveedor con la tabla de artículos (PDF con texto, "
+            "Excel o CSV).")
     if rule_set_id is not None:
         project.rule_set_id = resolve_rule_set(project, db, rule_set_id).id
     elif project.rule_set_id is None:
