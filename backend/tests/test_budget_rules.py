@@ -11,8 +11,9 @@ from types import SimpleNamespace as NS
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
-def _el(type, length=None, area=None, height=None, **geom):
-    return NS(type=type, length_m=length, area_m2=area, height_m=height, geometry=geom)
+def _el(type, length=None, area=None, height=None, level=None, **geom):
+    return NS(type=type, length_m=length, area_m2=area, height_m=height, geometry=geom,
+              level=level)
 
 
 def _line(row, desc, net, amount=1.0, unit="u", **attrs):
@@ -43,6 +44,7 @@ def test_medidas_desde_elementos():
     assert abs(m.values["muro_m2"] - 28) < 1e-9
     assert abs(m.values["columna_m3"] - 0.12) < 1e-9
     assert m.values["viga_ml"] == 5 and m.values["techo_m2"] == 100
+    assert abs(m.values["viga_m3"] - 5 * 0.18 * 0.25) < 1e-9   # sin sección: 18×25
     assert set(m.rebar_kg) == {8.0, 10.0}
     assert any("Ø10" in w for w in m.warnings)
     assert any("sin largo" in w for w in m.warnings)
@@ -156,12 +158,152 @@ def test_juego_por_defecto_con_presupuestos_reales():
     rules = [RuleSpec(id=i, measure=r[0], label=r[1], keywords=r[2], unit=r[3], factor=r[4],
                       mode=r[5], waste_pct=r[6], exclude_keywords=r[7])
              for i, r in enumerate(DEFAULT_RULES)]
-    m = Measures(values={k: 10.0 for k in ("muro_m2", "columna_m3", "viga_ml", "riostra_ml",
-                                           "techo_m2", "armadura_kg")},
+    # vigueta_ml no: el corralón de obra gruesa no siempre cotiza viguetas.
+    m = Measures(values={k: 10.0 for k in ("muro_m2", "columna_m3", "viga_m3", "riostra_ml",
+                                           "techo_m2", "losa_m2", "armadura_kg")},
                  rebar_kg={6.0: 2.0, 8.0: 3.0, 10.0: 5.0})
     r = compute_budget(m, rules, lines)
     faltan = [i["label"] for i in r["items"] if i["status"] != "ok"]
     assert faltan == [], faltan
+
+
+def test_vigas_por_volumen_viguetas_y_losas():
+    from app.services.budget_rules import measures_from_elements
+
+    m = measures_from_elements([
+        _el("beam", length=10, volume_m3=0.9, width_m=0.2, depth_m=0.45),
+        _el("beam", length=4, volume_m3=None, width_m=None, depth_m=None),   # sin sección
+        _el("vigueta", length=120),
+        _el("vigueta", length=30),
+        _el("slab", area=80, thickness_m=0.17),
+        _el("slab", area=12, thickness_m=None),
+    ])
+    assert m.values["viga_ml"] == 14 and m.counts["viga_ml"] == 2
+    assert abs(m.values["viga_m3"] - (0.9 + 4 * 0.18 * 0.25)) < 1e-9
+    assert m.counts["viga_m3"] == 2
+    assert m.values["vigueta_ml"] == 150 and m.counts["vigueta_ml"] == 2
+    assert m.values["losa_m2"] == 92 and m.counts["losa_m2"] == 2
+    d = m.as_dict()
+    keys = [x["key"] for x in d["measures"]]
+    assert {"viga_ml", "viga_m3", "vigueta_ml", "losa_m2"} <= set(keys)
+    assert [a["message"] for a in d["alerts"]] == [
+        "1 viga sin sección en el modelo: se estimó 18×25 cm."]
+    assert d["alerts"][0]["level"] == "medio"
+    assert isinstance(d["warnings"], list)
+    # Todas con volumen: sin aviso de sección.
+    m = measures_from_elements([_el("beam", length=10, volume_m3=0.9)])
+    assert m.alerts == [] and m.values["viga_m3"] == 0.9
+
+
+def test_juego_estandar_vigas_m3_losas_y_viguetas():
+    from app.services.budget_rules import (DEFAULT_LABOR_RULES, DEFAULT_RULES, MEASURE_STAGE,
+                                           MEASURES)
+
+    by = {}
+    for r in DEFAULT_RULES:
+        by.setdefault(r[0], []).append(r)
+    assert "viga_ml" not in by, "el hormigón de vigas ya no va por metro lineal"
+    vigas = {r[1]: r for r in by["viga_m3"]}
+    assert vigas["Cemento (hormigón vigas)"][4] == 350.0
+    assert vigas["Arena gruesa (hormigón vigas)"][4] == 0.65
+    assert vigas["Piedra (hormigón vigas)"][4] == 0.75
+    columnas = [r for r in by["columna_m3"]]
+    assert [(r[4], r[6]) for r in by["viga_m3"]] == [(r[4], r[6]) for r in columnas]
+    losas = by["losa_m2"]
+    assert [r[4] for r in losas] == [5.5, 17.5, 0.0325, 0.0375]
+    assert all("entrepiso" in r[1] for r in losas)
+    assert [r[4] for r in losas] == [r[4] for r in by["techo_m2"]]
+    (vig,) = by["vigueta_ml"]
+    assert vig[1:7] == ("Vigueta pretensada", ["vigueta"], "m", 1.0, "fixed", 3)
+    labor = {r[0]: r for r in DEFAULT_LABOR_RULES if r[0] in ("viga_ml", "losa_m2")}
+    assert labor["viga_ml"][1] == "Mano de obra: vigas de H°A°"
+    assert labor["losa_m2"][2] == "Estructura" and labor["losa_m2"][3] == 10.0
+    for k in ("viga_m3", "vigueta_ml", "losa_m2"):
+        assert MEASURE_STAGE[k] == "Estructura" and k in MEASURES
+    assert MEASURES["viga_m3"] == ("Vigas de hormigón (volumen)", "m3")
+    assert MEASURES["vigueta_ml"] == ("Viguetas pretensadas (largo)", "m")
+    assert MEASURES["losa_m2"] == ("Losas de entrepiso (superficie)", "m2")
+
+
+def _alerts(elements):
+    from app.services.budget_rules import measures_from_elements
+    return measures_from_elements(elements).alerts
+
+
+def _msgs(alerts, texto):
+    return [a for a in alerts if texto in a["message"]]
+
+
+def test_alerta_vigas_vs_columnas():
+    cols = [_el("column", area=0.04, height=3) for _ in range(20)]       # 2,4 m³
+    # 12 m³ de vigas = 5 veces las columnas → alto
+    a = _msgs(_alerts(cols + [_el("beam", length=100, volume_m3=12.0)]), "hormigón de vigas")
+    assert len(a) == 1 and a[0]["level"] == "alto", a
+    assert "(12,0 m³) es 5 veces el de columnas" in a[0]["message"], a
+    # 9 m³ (bajo el mínimo de 10) → no
+    assert not _msgs(_alerts(cols + [_el("beam", length=100, volume_m3=9.0)]),
+                     "hormigón de vigas")
+    # 12 m³ con 4 m³ de columnas (3 veces) → no
+    cols4 = [_el("column", area=0.1, height=4) for _ in range(10)]
+    assert not _msgs(_alerts(cols4 + [_el("beam", length=100, volume_m3=12.0)]),
+                     "hormigón de vigas")
+    # Sin columnas: avisa igual, sin dividir por cero.
+    a = _msgs(_alerts([_el("beam", length=100, volume_m3=12.0)]), "hormigón de vigas")
+    assert len(a) == 1 and "mucho mayor" in a[0]["message"]
+
+
+def test_alerta_superficie_estimada():
+    a = _msgs(_alerts([_el("room", area=100, subtype="estimated_floor")]), "no trae ambientes")
+    assert len(a) == 1 and a[0]["level"] == "medio"
+    assert not _msgs(_alerts([_el("room", area=100, subtype="room")]), "no trae ambientes")
+
+
+def test_alerta_sin_losas_de_entrepiso():
+    dos_niveles = [_el("wall", length=10, height=3, level="PB"),
+                   _el("beam", length=5, volume_m3=0.5, level="P1")]
+    a = _msgs(_alerts(dos_niveles), "losas de entrepiso")
+    assert len(a) == 1 and a[0]["level"] == "medio"
+    assert not _msgs(_alerts(dos_niveles + [_el("slab", area=50)]), "losas de entrepiso")
+    un_nivel = [_el("wall", length=10, height=3, level="PB"),
+                _el("beam", length=5, volume_m3=0.5, level="PB")]
+    assert not _msgs(_alerts(un_nivel), "losas de entrepiso")
+    # Sin nivel (PDF/DXF): no se puede saber, no avisa.
+    assert not _msgs(_alerts([_el("wall", length=10, height=3)]), "losas de entrepiso")
+
+
+def test_alerta_cuantia_de_hierro():
+    def barra(kg):
+        return _el("armadura", length=kg / (0.006165 * 100), kg=kg)   # Ø10 exacto
+
+    room = _el("room", area=100)
+    a = _msgs(_alerts([room, barra(500)]), "kg por m² cubierto")      # 5 kg/m²
+    assert len(a) == 1 and a[0]["level"] == "medio" and "5,0 kg" in a[0]["message"], a
+    assert _msgs(_alerts([room, barra(9000)]), "kg por m² cubierto")  # 90 kg/m²
+    assert not _msgs(_alerts([room, barra(4000)]), "kg por m² cubierto")  # 40 kg/m²
+    # Sin superficie cubierta o sin armadura: no se puede calcular, no avisa.
+    assert not _msgs(_alerts([barra(500)]), "kg por m² cubierto")
+    assert not _msgs(_alerts([room]), "kg por m² cubierto")
+
+
+def test_proyecto_viejo_solo_largo_de_vigas():
+    """Un IFC importado antes de guardar el volumen (beam solo con length) sigue
+    dando presupuesto con el juego estándar: viga_m3 estimada a 18×25."""
+    from app.services.budget_rules import (DEFAULT_RULES, RuleSpec, compute_budget,
+                                           measures_from_elements)
+
+    m = measures_from_elements([_el("beam", length=40) for _ in range(5)]
+                               + [_el("column", area=0.04, height=3) for _ in range(10)])
+    assert abs(m.values["viga_m3"] - 200 * 0.045) < 1e-9
+    assert _msgs(m.alerts, "5 vigas sin sección")
+    rules = [RuleSpec(id=i, measure=r[0], label=r[1], keywords=r[2], unit=r[3], factor=r[4],
+                      mode=r[5], waste_pct=r[6], exclude_keywords=r[7])
+             for i, r in enumerate(DEFAULT_RULES)]
+    lines = [_line(1, "CEMENTO X 25 KG", 6000, 25, "kg")]
+    r = compute_budget(m, rules, lines)
+    cem = next(i for i in r["items"] if i["label"] == "Cemento (hormigón vigas)")
+    assert cem["status"] == "ok" and cem["measure"] == "viga_m3"
+    assert abs(cem["quantity"] - 9.0 * 350 * 1.05) < 1e-6
+    assert r["totals"]["net"] > 0
 
 
 # --- API ---------------------------------------------------------------------

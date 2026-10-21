@@ -1,7 +1,8 @@
 """Presupuesto por reglas: medidas del IFC × reglas → productos del proveedor.
 
 1. `measures_from_elements`: resume los DetectedElement del IFC en medidas
-   (m² de muro, m³ de columnas, ml de vigas, kg de armadura por diámetro...).
+   (m² de muro, m³ de columnas y vigas, m² de entrepiso, kg de armadura por
+   diámetro...) y arma avisos de cordura (`alerts`) sobre esas medidas.
 2. Cada regla del juego convierte una medida en cantidad de un producto
    (kg de cemento, m³ de arena, unidades de ladrillo, barras de hierro).
 3. El producto se busca en la lista del proveedor por palabras clave y se
@@ -37,6 +38,9 @@ MEASURES: dict[str, tuple[str, str]] = {
     "muro_m2": ("Muros (largo × alto, sin aberturas)", "m2"),
     "columna_m3": ("Columnas (volumen)", "m3"),
     "viga_ml": ("Vigas (largo)", "m"),
+    "viga_m3": ("Vigas de hormigón (volumen)", "m3"),
+    "vigueta_ml": ("Viguetas pretensadas (largo)", "m"),
+    "losa_m2": ("Losas de entrepiso (superficie)", "m2"),
     "riostra_ml": ("Vigas de fundación / riostras (largo)", "m"),
     "techo_m2": ("Techo / losa de cubierta (superficie)", "m2"),
     "sup_cubierta_m2": ("Superficie cubierta (pisos)", "m2"),
@@ -51,6 +55,7 @@ LABOR_MODES = ("unit", "daily")
 # Rubro por defecto de cada medida, para reglas que no traen el suyo.
 MEASURE_STAGE: dict[str, str] = {
     "muro_m2": "Mampostería", "columna_m3": "Estructura", "viga_ml": "Estructura",
+    "viga_m3": "Estructura", "vigueta_ml": "Estructura", "losa_m2": "Estructura",
     "riostra_ml": "Fundaciones", "techo_m2": "Cubierta", "sup_cubierta_m2": "Pisos",
     "cielorraso_m2": "Cielorrasos", "armadura_kg": "Estructura",
 }
@@ -70,6 +75,28 @@ KG_PER_M_PER_MM2 = 0.006165  # 7850 kg/m³ × π/4 × 1e-6
 DEFAULT_BAR_LENGTH_M = 12.0
 MORTAR_JOINT_M = 0.015
 
+# Sección que se supone para las vigas que el modelo trae sin sección
+# (volume_m3 = null, o proyectos importados antes de guardar el volumen): 18 × 25
+# cm es la viga de encadenado/dintel más común en vivienda; mejor estimar corto
+# y avisar que inflar el hormigón como hacía el 20 × 30 fijo.
+BEAM_DEFAULT_WIDTH_M = 0.18
+BEAM_DEFAULT_DEPTH_M = 0.25
+
+# --- Avisos de cordura (alerts) ---
+# En una estructura de hormigón armado convencional el hormigón de vigas anda
+# en 1 a 2 veces el de columnas; más de 4 veces casi siempre es un modelo con
+# viguetas pretensadas o tabiques cargados como IfcBeam (el caso real que dio
+# el 69% del cemento en "vigas").
+ALERT_BEAM_TO_COLUMN_RATIO = 4.0
+# Por debajo de 10 m³ de vigas la proporción no pesa en el presupuesto (obras
+# chicas, galerías con pocas columnas): no se avisa.
+ALERT_BEAM_MIN_M3 = 10.0
+# Cuantía de hierro por m² cubierto en vivienda de H°A° tradicional: ~15 a 80
+# kg/m². Menos suele ser armadura que falta en el modelo; más, barras
+# duplicadas o una superficie cubierta incompleta.
+REBAR_KG_PER_M2_MIN = 15.0
+REBAR_KG_PER_M2_MAX = 80.0
+
 
 def snap_diameter(d: float) -> float:
     return min(COMMERCIAL_DIAMETERS, key=lambda c: abs(c - d))
@@ -81,6 +108,8 @@ class Measures:
     counts: dict[str, int] = field(default_factory=dict)
     rebar_kg: dict[float, float] = field(default_factory=dict)  # diámetro → kg
     warnings: list[str] = field(default_factory=list)
+    # Avisos de cordura: [{"level": "alto" | "medio", "message": "..."}].
+    alerts: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -95,6 +124,7 @@ class Measures:
                 for d, kg in sorted(self.rebar_kg.items())
             ],
             "warnings": self.warnings,
+            "alerts": self.alerts,
         }
 
 
@@ -106,8 +136,13 @@ def measures_from_elements(elements: Iterable) -> Measures:
     snapped: dict[float, float] = {}
     bars_without_kg = 0
     openings_m2 = 0.0
+    beams_estimated = 0
+    floor_estimated = False
+    structure_levels: set = set()
     for e in elements:
         t = e.type
+        if t in ("wall", "beam") and getattr(e, "level", None):
+            structure_levels.add(e.level)
         L, A, H = e.length_m or 0.0, e.area_m2 or 0.0, e.height_m or 0.0
         if t == "wall" and L and H:
             add("muro_m2", L * H)
@@ -117,12 +152,23 @@ def measures_from_elements(elements: Iterable) -> Measures:
             add("columna_m3", A * H)
         elif t == "beam" and L:
             add("viga_ml", L)
+            vol = (e.geometry or {}).get("volume_m3")
+            if not vol or vol <= 0:
+                vol = L * BEAM_DEFAULT_WIDTH_M * BEAM_DEFAULT_DEPTH_M
+                beams_estimated += 1
+            add("viga_m3", vol)
+        elif t == "vigueta" and L:
+            add("vigueta_ml", L)
+        elif t == "slab" and A:
+            add("losa_m2", A)
         elif t == "riostra" and L:
             add("riostra_ml", L)
         elif t == "roof" and A:
             add("techo_m2", A)
         elif t == "room" and A:
             add("sup_cubierta_m2", A)
+            if (e.geometry or {}).get("subtype") == "estimated_floor":
+                floor_estimated = True
         elif t == "cielorraso" and A:
             add("cielorraso_m2", A)
         elif t == "armadura":
@@ -148,7 +194,50 @@ def measures_from_elements(elements: Iterable) -> Measures:
     if bars_without_kg:
         m.warnings.append(
             f"{bars_without_kg} barras de armadura sin largo/sección en el IFC no se computan.")
+    m.alerts = sanity_alerts(m, beams_estimated=beams_estimated,
+                             floor_estimated=floor_estimated,
+                             structure_levels=len(structure_levels))
     return m
+
+
+def _fmt(x: float, dec: int = 1) -> str:
+    """Número a la argentina: 1.234,5."""
+    return f"{x:,.{dec}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def sanity_alerts(m: Measures, *, beams_estimated: int = 0, floor_estimated: bool = False,
+                  structure_levels: int = 0) -> list[dict]:
+    """Avisos para el usuario cuando las medidas del modelo no son creíbles.
+    `structure_levels`: cantidad de niveles distintos con muros o vigas."""
+    v = m.values
+    alerts: list[dict] = []
+
+    def add(level: str, message: str) -> None:
+        alerts.append({"level": level, "message": message})
+
+    vigas, columnas = v.get("viga_m3", 0.0), v.get("columna_m3", 0.0)
+    if vigas > ALERT_BEAM_MIN_M3 and vigas > ALERT_BEAM_TO_COLUMN_RATIO * columnas:
+        veces = (f"{_fmt(vigas / columnas, 0)} veces el" if columnas > 0
+                 else "mucho mayor que el")
+        add("alto", f"El hormigón de vigas ({_fmt(vigas)} m³) es {veces} de columnas: "
+                    "revisá que el modelo no tenga viguetas o tabiques cargados como vigas.")
+    if beams_estimated:
+        uno = beams_estimated == 1
+        add("medio", f"{beams_estimated} {'viga' if uno else 'vigas'} sin sección en el "
+                     f"modelo: se {'estimó' if uno else 'estimaron'} "
+                     f"{BEAM_DEFAULT_WIDTH_M * 100:g}×{BEAM_DEFAULT_DEPTH_M * 100:g} cm.")
+    if floor_estimated:
+        add("medio", "El modelo no trae ambientes: la superficie cubierta es una estimación.")
+    if v.get("losa_m2", 0.0) <= 0 and structure_levels > 1:
+        add("medio", "No se encontraron losas de entrepiso en el modelo.")
+    sup, hierro = v.get("sup_cubierta_m2", 0.0), v.get("armadura_kg", 0.0)
+    if sup > 0 and hierro > 0:
+        cuantia = hierro / sup
+        if not REBAR_KG_PER_M2_MIN <= cuantia <= REBAR_KG_PER_M2_MAX:
+            add("medio", f"La armadura da {_fmt(cuantia)} kg por m² cubierto (lo habitual es "
+                         f"{REBAR_KG_PER_M2_MIN:g} a {REBAR_KG_PER_M2_MAX:g}): revisá las "
+                         "barras del modelo y la superficie cubierta.")
+    return alerts
 
 
 # ---------------------------------------------------------------------------
@@ -528,12 +617,13 @@ DEFAULT_RULES: list[tuple] = [
     ("columna_m3", "Arena gruesa (hormigón columnas)", ["arena gruesa"], "m3", 0.65, "fixed", 10,
      [], None),
     ("columna_m3", "Piedra (hormigón columnas)", _AGGREG, "m3", 0.75, "fixed", 10, [], None),
-    ("viga_ml", "Cemento (hormigón vigas)", ["cemento"], "kg", 21.0, "fixed", 5,
-     ["pegamento", "albanileria"],
-     "Sección supuesta 20 × 30 cm = 0,06 m³ por metro (el IFC no trae la sección)."),
-    ("viga_ml", "Arena gruesa (hormigón vigas)", ["arena gruesa"], "m3", 0.039, "fixed", 10,
+    ("viga_m3", "Cemento (hormigón vigas)", ["cemento"], "kg", 350.0, "fixed", 5,
+     ["pegamento", "albanileria"], _HORMIGON_NOTE),
+    ("viga_m3", "Arena gruesa (hormigón vigas)", ["arena gruesa"], "m3", 0.65, "fixed", 10,
      [], None),
-    ("viga_ml", "Piedra (hormigón vigas)", _AGGREG, "m3", 0.045, "fixed", 10, [], None),
+    ("viga_m3", "Piedra (hormigón vigas)", _AGGREG, "m3", 0.75, "fixed", 10, [], None),
+    ("vigueta_ml", "Vigueta pretensada", ["vigueta"], "m", 1.0, "fixed", 3, [],
+     "Metros de vigueta del modelo."),
     ("riostra_ml", "Cemento (hormigón riostras)", ["cemento"], "kg", 21.0, "fixed", 5,
      ["pegamento", "albanileria"], "Sección supuesta 20 × 30 cm = 0,06 m³ por metro."),
     ("riostra_ml", "Arena gruesa (hormigón riostras)", ["arena gruesa"], "m3", 0.039, "fixed", 10,
@@ -546,6 +636,14 @@ DEFAULT_RULES: list[tuple] = [
     ("techo_m2", "Arena gruesa (capa de compresión)", ["arena gruesa"], "m3", 0.0325, "fixed",
      10, [], None),
     ("techo_m2", "Piedra (capa de compresión)", _AGGREG, "m3", 0.0375, "fixed", 10, [], None),
+    ("losa_m2", "Ladrillo de losa (entrepiso)", ["losa"], "u", 5.5, "fixed", 5,
+     ["pegamento"], "Losa de viguetas cada 50 cm con ladrillo cerámico de 25 × 38/40."),
+    ("losa_m2", "Cemento (capa de compresión, entrepiso)", ["cemento"], "kg", 17.5, "fixed", 5,
+     ["pegamento", "albanileria"], "Capa de compresión de 5 cm (0,05 m³/m²)."),
+    ("losa_m2", "Arena gruesa (capa de compresión, entrepiso)", ["arena gruesa"], "m3", 0.0325,
+     "fixed", 10, [], None),
+    ("losa_m2", "Piedra (capa de compresión, entrepiso)", _AGGREG, "m3", 0.0375, "fixed", 10,
+     [], None),
     ("armadura_kg", "Hierro", ["hierro", "acero"], "kg", 1.0, "rebar", 8, ["alambre", "malla"],
      "Un ítem por diámetro; kg exactos del modelo convertidos a barras de 12 m."),
     ("armadura_kg", "Alambre de atar", ["alambre"], "kg", 0.02, "fixed", 0, [],
@@ -559,7 +657,7 @@ _LABOR_NOTE = "Rendimiento de referencia: ajustalo a tu gente."
 
 # (measure, label, rubro, rendimiento por día de la cuadrilla, cuadrilla).
 # Modo por defecto: tercerizado (precio por unidad, que carga cada proyecto).
-# Hay copia en la migración o4c5d6e7f8a9 para juegos ya sembrados.
+# Hay copia en las migraciones o4c5d6e7f8a9 y q6e7f8a9b0c1 para juegos ya sembrados.
 DEFAULT_LABOR_RULES: list[tuple] = [
     ("muro_m2", "Mano de obra: mampostería", "Mampostería", 8.0, _CUADRILLA_2),
     ("muro_m2", "Mano de obra: revoques (2 caras)", "Revoques", 6.0, _CUADRILLA_2),
@@ -567,6 +665,7 @@ DEFAULT_LABOR_RULES: list[tuple] = [
     ("viga_ml", "Mano de obra: vigas de H°A°", "Estructura", 4.0, _CUADRILLA_3),
     ("riostra_ml", "Mano de obra: vigas de fundación", "Fundaciones", 5.0, _CUADRILLA_3),
     ("techo_m2", "Mano de obra: losa de cubierta", "Cubierta", 10.0, _CUADRILLA_3),
+    ("losa_m2", "Mano de obra: losa de entrepiso", "Estructura", 10.0, _CUADRILLA_3),
     ("sup_cubierta_m2", "Mano de obra: contrapiso y carpeta", "Pisos", 12.0, _CUADRILLA_2),
     ("cielorraso_m2", "Mano de obra: cielorrasos", "Terminaciones", 10.0, _CUADRILLA_2),
 ]

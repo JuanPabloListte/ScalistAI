@@ -28,6 +28,8 @@ STAGE_ORDER = ("Fundaciones", "Estructura", "Mampostería", "Cubierta", "Revoque
                "Pisos", "Cielorrasos", "Terminaciones")
 
 _SHORT = {"muro_m2": "muros", "columna_m3": "columnas", "viga_ml": "vigas",
+          "viga_m3": "hormigón de vigas",
+          "vigueta_ml": "viguetas", "losa_m2": "entrepisos",
           "riostra_ml": "riostras", "techo_m2": "techo", "sup_cubierta_m2": "pisos",
           "cielorraso_m2": "cielorrasos", "armadura_kg": "armadura"}
 _UNIT = {"m2": "m²", "m3": "m³", "m": "ml", "kg": "kg"}
