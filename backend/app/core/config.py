@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
 
+    # Motor de presupuesto viejo (catálogo de insumos/sistemas + paramétricos)
+    # para Costos, Gantt y Cambios. Por defecto todo sale del presupuesto del
+    # proveedor × reglas de cómputo. Par del frontend: NEXT_PUBLIC_FEATURE_LEGACY_BUDGET.
+    LEGACY_BUDGET: bool = False
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT.strip().lower() in ("production", "prod")

@@ -1,8 +1,10 @@
 """Plan de obra persistido: generar borrador, congelar baseline, versionar.
 
 El diferencial: las tareas NO nacen de una hoja en blanco (Project/Primavera)
-sino del cómputo del plano — `compute_schedule` convierte elementos × recetas
-en tareas con cantidad, duración (qty/daily_yield) y costo. Acá ese cálculo
+sino del cómputo del plano — `compute_schedule` convierte el presupuesto del
+proyecto (medidas del IFC × reglas de materiales y mano de obra) en tareas con
+cantidad, duración (medida / rendimiento) y costo (con LEGACY_BUDGET:
+elementos × recetas del catálogo). Acá ese cálculo
 se materializa como borrador editable y luego baseline inmutable.
 
 Regla de verdad única: si hay WorkPlan activo, manda el plan persistido; el
@@ -19,6 +21,7 @@ import datetime as dt
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
+from app.core.config import settings
 from app.models.material import Assembly, AssemblyMaterial, Material
 from app.models.work_plan import (
     ActualCost, ProgressEntry, WorkPlan, WorkPlanMaterialPrice, WorkTask, WorkTaskEvent,
@@ -205,7 +208,11 @@ def generate_draft(project_id: int, db: Session, *,
     if not sched["tasks"]:
         raise ValueError(
             "El proyecto no tiene tareas computables: cargá un plano con "
-            "elementos y recetas asignadas antes de generar el plan de obra.")
+            "elementos y recetas asignadas antes de generar el plan de obra."
+            if settings.LEGACY_BUDGET else
+            "El proyecto no tiene tareas computables: hace falta el modelo IFC "
+            "procesado y reglas de mano de obra con rendimiento (o el "
+            "presupuesto del proveedor) antes de generar el plan de obra.")
 
     plan = WorkPlan(
         project_id=project_id,
@@ -260,7 +267,9 @@ def generate_draft(project_id: int, db: Session, *,
 def _refresh_auto_costs_at_freeze(plan: WorkPlan, db: Session) -> None:
     """Recalcula cost_planned de tareas auto con precios vivos al momento del
     freeze (misma fórmula que compute_schedule). Así el BAC no queda con
-    precios de cuando se generó el borrador días antes."""
+    precios de cuando se generó el borrador días antes. Con el presupuesto
+    nuevo, el costo congelado ES la foto de precios (no hay insumos que
+    capturar: snapshot_material_prices queda vacío)."""
     try:
         sched = compute_schedule(
             plan.project_id, db,
@@ -275,7 +284,8 @@ def _refresh_auto_costs_at_freeze(plan: WorkPlan, db: Session) -> None:
         for t in sched["tasks"]
     }
     for task in plan.tasks:
-        if task.source != "auto" or not task.assembly_id:
+        # Las tareas del presupuesto nuevo no tienen receta: matchean por nombre.
+        if task.source != "auto":
             continue
         cost = by_key.get((task.assembly_id, task.name))
         if cost is not None:

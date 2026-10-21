@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.uploads import read_upload
@@ -248,18 +249,25 @@ def project_changes(
 
     budget_direct: float | None = None
     try:
-        from app.models.plan import Plan
-        from app.api.v1.cost_intelligence import _compute_budget_summary
+        if settings.LEGACY_BUDGET:
+            from app.models.plan import Plan
+            from app.api.v1.cost_intelligence import _compute_budget_summary
 
-        ifc_plan = db.scalars(
-            select(Plan).where(
-                Plan.project_id == project_id,
-                Plan.status == "ready",
-            ).order_by(Plan.id.desc())
-        ).first()
-        if ifc_plan is not None:
-            summary = _compute_budget_summary(db, ifc_plan.id, user.organization_id)
-            budget_direct = float(summary.direct_cost)
+            ifc_plan = db.scalars(
+                select(Plan).where(
+                    Plan.project_id == project_id,
+                    Plan.status == "ready",
+                ).order_by(Plan.id.desc())
+            ).first()
+            if ifc_plan is not None:
+                summary = _compute_budget_summary(db, ifc_plan.id, user.organization_id)
+                budget_direct = float(summary.direct_cost)
+        else:
+            # Costo directo del presupuesto: materiales del proveedor + mano de obra.
+            from app.services.project_budget import build_view
+
+            price = build_view(db.get(Project, project_id), db).get("price")
+            budget_direct = float(price["direct"]) if price else None
     except Exception:  # noqa: BLE001 — presupuesto opcional; no bloquea Cambios
         budget_direct = None
 

@@ -9,6 +9,7 @@ import {
   type Project,
   type ProjectChanges,
 } from "@/lib/api";
+import { FEATURES } from "@/lib/features";
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -104,7 +105,7 @@ export default function ChangesPage() {
 
       {!loading && data && summary && (
         <>
-          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className={`mb-6 grid gap-3 sm:grid-cols-2 ${FEATURES.legacyBudget ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
             <Kpi
               label="Presupuesto (directo)"
               value={summary.budget_direct != null ? `$${fmtARS(summary.budget_direct)}` : "—"}
@@ -114,7 +115,7 @@ export default function ChangesPage() {
               value={summary.plan_total != null ? `$${fmtARS(summary.plan_total)}` : "—"}
             />
             <Kpi
-              label="Cómputo IFC"
+              label={FEATURES.legacyBudget ? "Cómputo IFC" : "Presupuesto actual (tareas)"}
               value={summary.compute_total != null ? `$${fmtARS(summary.compute_total)}` : "—"}
             />
             <Kpi
@@ -122,17 +123,23 @@ export default function ChangesPage() {
               value={String(summary.n_compute_changed)}
               accent={summary.n_compute_changed > 0 ? "amber" : "emerald"}
             />
-            <Kpi
-              label="Cambios precio"
-              value={String(summary.n_price_changed)}
-              accent={summary.n_price_changed > 0 ? "amber" : "emerald"}
-            />
+            {FEATURES.legacyBudget && (
+              <Kpi
+                label="Cambios precio"
+                value={String(summary.n_price_changed)}
+                accent={summary.n_price_changed > 0 ? "amber" : "emerald"}
+              />
+            )}
           </div>
 
           {/* Cómputo */}
           <Section
-            title="Cómputo (IFC)"
-            subtitle="Plan vigente vs cómputo actual del modelo"
+            title={FEATURES.legacyBudget ? "Cómputo (IFC)" : "Presupuesto"}
+            subtitle={
+              FEATURES.legacyBudget
+                ? "Plan vigente vs cómputo actual del modelo"
+                : "Plan vigente vs presupuesto actual: medidas del modelo, precios del proveedor y mano de obra"
+            }
             open={openCompute}
             onToggle={() => setOpenCompute((v) => !v)}
             badge={
@@ -206,93 +213,96 @@ export default function ChangesPage() {
             )}
           </Section>
 
-          {/* Precios */}
-          <Section
-            title="Precios (desde baseline)"
-            subtitle={
-              hasBaseline
-                ? `Snapshot v${data.prices.baseline_version ?? "?"} vs catálogo vivo`
-                : "Sin baseline congelado"
-            }
-            open={openPrices}
-            onToggle={() => setOpenPrices((v) => !v)}
-            badge={
-              !hasBaseline
-                ? "sin baseline"
-                : summary.n_price_changed > 0
-                  ? `${summary.n_price_changed} cambio(s)`
-                  : "sin drift"
-            }
-            badgeTone={
-              !hasBaseline ? "slate" : summary.n_price_changed > 0 ? "amber" : "emerald"
-            }
-          >
-            {!hasBaseline ? (
-              <p className="text-xs text-slate-500">
-                Congelá un plan de obra para anclar precios. Hasta entonces no hay drift
-                de catálogo medible contra baseline.
-              </p>
-            ) : priceRows.length === 0 ? (
-              <p className="text-xs text-slate-500">
-                Precios del catálogo alineados al snapshot del baseline.
-              </p>
-            ) : (
-              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-left text-slate-500 dark:bg-slate-800/60">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Material</th>
-                      <th className="px-3 py-2 font-medium text-right">Baseline</th>
-                      <th className="px-3 py-2 font-medium text-right">Vivo</th>
-                      <th className="px-3 py-2 font-medium text-right">Δ</th>
-                      <th className="px-3 py-2 font-medium text-right">Δ%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {priceRows.map((r) => (
-                      <tr
-                        key={r.material_id}
-                        className="border-t border-slate-100 dark:border-slate-800"
-                      >
-                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">
-                          {r.name}
-                          {r.unit ? (
-                            <span className="ml-1 text-slate-400">/ {r.unit}</span>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          ${fmtARS(r.price_baseline)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.price_live != null ? `$${fmtARS(r.price_live)}` : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.delta != null ? (
-                            <span className={r.delta > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}>
-                              {r.delta > 0 ? "+" : ""}{fmtARS(r.delta)}
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.delta_pct != null ? (
-                            <span className={r.delta_pct > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}>
-                              {fmtPct(r.delta_pct)}
-                            </span>
-                          ) : r.status === "missing_live" ? (
-                            <span className="text-slate-400">fuera de catálogo</span>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
+          {/* Precios de insumos vs snapshot del baseline: solo motor viejo. Con el
+              presupuesto nuevo un cambio de precio se ve como cambio de costo de la tarea. */}
+          {FEATURES.legacyBudget && (
+            <Section
+              title="Precios (desde baseline)"
+              subtitle={
+                hasBaseline
+                  ? `Snapshot v${data.prices.baseline_version ?? "?"} vs catálogo vivo`
+                  : "Sin baseline congelado"
+              }
+              open={openPrices}
+              onToggle={() => setOpenPrices((v) => !v)}
+              badge={
+                !hasBaseline
+                  ? "sin baseline"
+                  : summary.n_price_changed > 0
+                    ? `${summary.n_price_changed} cambio(s)`
+                    : "sin drift"
+              }
+              badgeTone={
+                !hasBaseline ? "slate" : summary.n_price_changed > 0 ? "amber" : "emerald"
+              }
+            >
+              {!hasBaseline ? (
+                <p className="text-xs text-slate-500">
+                  Congelá un plan de obra para anclar precios. Hasta entonces no hay drift
+                  de catálogo medible contra baseline.
+                </p>
+              ) : priceRows.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  Precios del catálogo alineados al snapshot del baseline.
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-left text-slate-500 dark:bg-slate-800/60">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Material</th>
+                        <th className="px-3 py-2 font-medium text-right">Baseline</th>
+                        <th className="px-3 py-2 font-medium text-right">Vivo</th>
+                        <th className="px-3 py-2 font-medium text-right">Δ</th>
+                        <th className="px-3 py-2 font-medium text-right">Δ%</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Section>
+                    </thead>
+                    <tbody>
+                      {priceRows.map((r) => (
+                        <tr
+                          key={r.material_id}
+                          className="border-t border-slate-100 dark:border-slate-800"
+                        >
+                          <td className="px-3 py-2 text-slate-800 dark:text-slate-200">
+                            {r.name}
+                            {r.unit ? (
+                              <span className="ml-1 text-slate-400">/ {r.unit}</span>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            ${fmtARS(r.price_baseline)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.price_live != null ? `$${fmtARS(r.price_live)}` : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.delta != null ? (
+                              <span className={r.delta > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}>
+                                {r.delta > 0 ? "+" : ""}{fmtARS(r.delta)}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.delta_pct != null ? (
+                              <span className={r.delta_pct > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}>
+                                {fmtPct(r.delta_pct)}
+                              </span>
+                            ) : r.status === "missing_live" ? (
+                              <span className="text-slate-400">fuera de catálogo</span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+          )}
 
           {/* Plan versions */}
           <Section

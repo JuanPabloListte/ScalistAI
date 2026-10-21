@@ -23,6 +23,7 @@ import {
   Maximize2, Minimize2, Users,
 } from "lucide-react";
 import { ProjectTeam } from "@/components/project-team";
+import { FEATURES } from "@/lib/features";
 
 const STAGE_COLORS: Record<string, string> = {
   "Fundación": "#0ea5e9",
@@ -87,6 +88,8 @@ export default function ProjectGanttPage() {
   const [myRole, setMyRole] = useState<string>("jefe_obra");
   const [progress, setProgress] = useState<WorkProgress | null>(null);
   const [budgetSummary, setBudgetSummary] = useState<ProjectBudgetSummary | null>(null);
+  /** Costo directo del presupuesto nuevo (materiales del proveedor + mano de obra). */
+  const [budgetDirect, setBudgetDirect] = useState<number | null>(null);
   const [computeDiff, setComputeDiff] = useState<WorkPlanComputeDiff | null>(null);
   const [showComputeDiff, setShowComputeDiff] = useState(false);
   const [ganttMaximized, setGanttMaximized] = useState(false);
@@ -219,12 +222,18 @@ export default function ProjectGanttPage() {
         }
 
         // Alineación medición ↔ plan: presupuesto completo + diff vs cómputo.
-        const plans = await api.listPlans(projectId).catch(() => []);
-        const ready = plans.find((p) => p.status === "ready");
-        if (ready) {
-          api.getBudgetSummary(ready.id).then(setBudgetSummary).catch(() => setBudgetSummary(null));
+        if (FEATURES.legacyBudget) {
+          const plans = await api.listPlans(projectId).catch(() => []);
+          const ready = plans.find((p) => p.status === "ready");
+          if (ready) {
+            api.getBudgetSummary(ready.id).then(setBudgetSummary).catch(() => setBudgetSummary(null));
+          } else {
+            setBudgetSummary(null);
+          }
         } else {
-          setBudgetSummary(null);
+          api.getProjectPriceList(projectId)
+            .then((v) => setBudgetDirect(v.price?.direct ?? null))
+            .catch(() => setBudgetDirect(null));
         }
         if (wpState.plan) {
           api.getWorkPlanComputeDiff(projectId).then(setComputeDiff).catch(() => setComputeDiff(null));
@@ -1049,7 +1058,7 @@ export default function ProjectGanttPage() {
 
       {/* Alineación medición (presupuesto) ↔ plan de obra — trae importes,
           oculto a capataz/comitente. */}
-      {!plan?.hide_money && (budgetSummary || computeDiff) && (
+      {!plan?.hide_money && (budgetSummary || budgetDirect != null || computeDiff) && (
         <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1057,8 +1066,9 @@ export default function ProjectGanttPage() {
                 Medición ↔ Plan
               </h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
-                Plan = materiales por receta (tareas del Gantt). Presupuesto = obra gris
-                (+ mano de obra en categorías) + rubros paramétricos.
+                {FEATURES.legacyBudget
+                  ? "Plan = materiales por receta (tareas del Gantt). Presupuesto = obra gris (+ mano de obra en categorías) + rubros paramétricos."
+                  : "Plan = tareas del Gantt (materiales del proveedor + mano de obra, por rubro y piso). Presupuesto = costo directo de Presupuesto."}
               </p>
               <Link
                 href={`/projects/${projectId}/changes`}
@@ -1083,6 +1093,14 @@ export default function ProjectGanttPage() {
             )}
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+            {budgetDirect != null && (
+              <div>
+                <div className="text-xs text-slate-500">Presupuesto (directo)</div>
+                <div className="font-semibold text-slate-900 dark:text-white">
+                  ${fmtARS(budgetDirect)}
+                </div>
+              </div>
+            )}
             {budgetSummary && (
               <>
                 <div>

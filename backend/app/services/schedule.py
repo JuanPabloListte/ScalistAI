@@ -19,10 +19,10 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.v1.plans._export import _opening_overlaps_wall
 from app.models.detected_element import DetectedElement
 from app.models.material import Assembly, AssemblyMaterial
 from app.models.plan import Plan
+from app.core.config import settings
 from app.models.project import Project
 
 
@@ -31,6 +31,9 @@ def _area_for_cost(el: DetectedElement, applies_to: str,
     """Medida del elemento en la unidad de la receta, para costo (muro resta
     aberturas, igual que el cómputo de materiales)."""
     if applies_to == "wall" and el.type == "wall":
+        # Diferido: plans._export → … → work_plan → schedule (import circular).
+        from app.api.v1.plans._export import _opening_overlaps_wall
+
         area = (el.length_m or 0.0) * (el.height_m or 2.8)
         scale = page_scales.get(str(el.page))
         if scale and scale > 0:
@@ -81,13 +84,28 @@ def _unit_for(applies_to: str) -> str:
 def compute_schedule(project_id: int, db: Session,
                      start_date: dt.date | None = None,
                      crews: int = 1, overlap_pct: float = 0.0) -> dict:
-    """Devuelve {start_date, end_date, total_days, total_cost, tasks, stages}."""
+    """Devuelve {start_date, end_date, total_days, total_cost, tasks, stages}.
+
+    Las tareas salen del presupuesto del proyecto (proveedor × reglas × IFC,
+    services/budget_schedule). Con LEGACY_BUDGET, del motor viejo: elementos ×
+    recetas del catálogo de insumos."""
     project = db.get(Project, project_id)
     if project is None:
         return {"tasks": [], "stages": [], "total_cost": 0.0, "total_days": 0}
 
     start = start_date or (project.start_date.date() if project.start_date else dt.date.today())
     crews = max(1, crews)
+    if settings.LEGACY_BUDGET:
+        tasks = _legacy_tasks(project, db, crews)
+    else:
+        from app.services.budget_schedule import compute_budget_tasks
+        tasks = compute_budget_tasks(project_id, db, crews)
+    return lay_out(tasks, start, overlap_pct)
+
+
+def _legacy_tasks(project: Project, db: Session, crews: int) -> list[dict]:
+    """Tareas del motor viejo: una por receta (assembly) y por nivel."""
+    project_id = project.id
 
     plan_ids = [p.id for p in db.scalars(select(Plan).where(Plan.project_id == project_id)).all()]
     page_scales: dict[str, float] = {}
@@ -175,7 +193,11 @@ def compute_schedule(project_id: int, db: Session,
             "duration_days": max(1, duration), "cost": round(info["cost"], 2),
             "daily_cost": round(info["cost"] / max(1, duration), 2),
         })
+    return tasks
 
+
+def lay_out(tasks: list[dict], start: dt.date, overlap_pct: float = 0.0) -> dict:
+    """Pone fechas a las tareas (etapa tras etapa) y arma el resumen."""
     # Programar por etapa (en orden). Dentro de una etapa: las tareas SIN nivel
     # corren en paralelo desde el inicio (comportamiento histórico); las tareas
     # POR NIVEL corren en secuencia de pisos (no hacés la mampostería de P1

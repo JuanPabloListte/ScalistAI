@@ -592,6 +592,8 @@ export type BudgetItem = {
   rule_id: number | null;
   label: string;
   measure: string;
+  /** Rubro (de la regla o, si no trae, el de la medida). */
+  stage?: string;
   measure_label: string;
   measure_unit: string;
   measure_value: number;
