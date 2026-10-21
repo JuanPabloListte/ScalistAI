@@ -92,3 +92,8 @@ backups/
 
 # Planillas de clientes (datos reales): quedan en disco, fuera del repo
 backend/data/imports/
+
+# QA local (skill qa-local): reportes y capturas no van a git; qa/casos sí
+qa/reportes/
+# Worktrees de los agentes especialistas (skill jefe-de-equipo)
+.claude/worktrees/
