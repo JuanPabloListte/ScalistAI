@@ -162,6 +162,33 @@ def test_modelo_procesandose_guarda_sin_presupuesto():
         _cleanup(db, org.id, project.id)
 
 
+def test_borrar_proyecto_borra_archivo_del_proveedor():
+    from app.core.config import settings
+    from app.core.database import SessionLocal
+    from app.models import ProjectPriceList
+
+    db = SessionLocal()
+    org, user, project, _ = _setup(db)
+    project_id = project.id
+    client, reset = _client(user)
+    try:
+        r = client.post(f"/api/v1/projects/{project_id}/price-list",
+                        files={"file": ("digimat.pdf", _digimat_like(), "application/pdf")})
+        assert r.status_code == 200, r.text
+        stored = db.query(ProjectPriceList).filter_by(project_id=project_id).one()
+        assert Path(stored.file_path).exists()
+        folder = Path(settings.STORAGE_DIR) / "price_lists" / str(project_id)
+        assert folder.exists()
+
+        d = client.delete(f"/api/v1/projects/{project_id}")
+        assert d.status_code == 204, d.text
+        assert not folder.exists()
+        assert not Path(stored.file_path).exists()
+    finally:
+        reset()
+        _cleanup(db, org.id, project_id)
+
+
 def test_otra_org_no_accede():
     from app.core.database import SessionLocal
     from app.models import Organization, User

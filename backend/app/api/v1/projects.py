@@ -211,6 +211,12 @@ def delete_project(
     if plan_dir.exists():
         shutil.rmtree(plan_dir, ignore_errors=True)
 
+    # Presupuesto del proveedor: es un documento del cliente; la cascada borra la
+    # fila pero no el archivo, que quedaría huérfano en disco.
+    price_list_dir = Path(settings.STORAGE_DIR) / "price_lists" / str(project_id)
+    if price_list_dir.exists():
+        shutil.rmtree(price_list_dir, ignore_errors=True)
+
     # Limpia las variaciones sintéticas de cada plano (corpus de training).
     synthetic_root = Path(settings.STORAGE_DIR) / "synthetic"
     for pid in plan_ids:
