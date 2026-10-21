@@ -48,7 +48,7 @@ Config de la skill global `qa-local`. Producto: modelo IFC → presupuesto del p
 ## Flujos
 ### Acceso
 - **Ruta**: /login, /. **Código**: frontend/app/login, frontend/app/page.tsx, backend/app/api/v1/auth.py
-- **Verificar**: landing sin cotizador ni textos de IA; sin sesión, una ruta privada lleva a
+- **Verificar**: landing sin cotizador ni textos de IA (en local `/` redirige a /login: para ver la landing, frontend con `SHOW_LANDING=true`); sin sesión, una ruta privada lleva a
   /login?next=…; token inválido → login, no pantalla rota.
 
 ### Proyectos

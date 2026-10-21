@@ -24,6 +24,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/projects", request.url));
   }
 
+  // La landing es para producción: en local (`next dev`) la raíz va directo al login.
+  // SHOW_LANDING=true la muestra igual (para trabajar sobre la landing en local).
+  if (
+    pathname === "/" &&
+    process.env.NODE_ENV !== "production" &&
+    process.env.SHOW_LANDING !== "true"
+  ) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   if (process.env.LANDING_ONLY !== "true") return NextResponse.next();
 
   const blocked = APP_PATHS.some(
