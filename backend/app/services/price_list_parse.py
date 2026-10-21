@@ -9,6 +9,11 @@ IVA por aritmética contra los totales del pie (subtotal × 1,21 = total).
 Salida: renglones con código, descripción, cantidad, precio unitario
 efectivo (total / cantidad, así absorbe descuentos por renglón) y precio
 NETO sin IVA, más la presentación de venta (25 KG, 6 M3, 12 MTS...).
+
+Errores: un archivo vacío, dañado o de otro tipo (imagen renombrada a .pdf,
+.xlsx corrupto, CSV binario) lanza ValueError con un mensaje para el usuario.
+Un archivo que se lee bien pero no trae la tabla NO lanza: devuelve 0
+renglones y el motivo en `warnings` (quien guarda decide si lo rechaza).
 """
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ import csv
 import io
 import re
 import unicodedata
+import zipfile
 from dataclasses import dataclass, field
 
 IVA_RATE = 0.21
@@ -53,6 +59,12 @@ def _detect_decimal_sep(tokens: list[str]) -> str:
         elif re.fullmatch(r"\d+\.\d{2}", t):
             votes["."] += 1
     return "," if votes[","] > votes["."] else "."
+
+
+def _money(v: float) -> str:
+    """Importe en formato es-AR para los avisos: $ 1.234.567,89."""
+    s = f"{abs(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"$ {'-' if v < 0 else ''}{s}"
 
 
 def _to_float(tok: str, dec: str) -> float | None:
@@ -215,17 +227,32 @@ def _find_header(rows: list[list]) -> tuple[int, dict[str, tuple[float, float]]]
     return None
 
 
+_EMPTY_FILE = "El archivo está vacío."
+_PDF_UNREADABLE = "No se pudo leer el PDF: está dañado o no es un PDF."
+_XLSX_UNREADABLE = "No se pudo leer el Excel: está dañado o no es un .xlsx."
+_CSV_UNREADABLE = ("No se pudo leer el CSV: no parece un archivo de texto con columnas "
+                   "separadas por coma, punto y coma o tabulación.")
+
+
 def _parse_pdf(data: bytes) -> _Doc:
     import fitz  # PyMuPDF
 
     doc = _Doc(source="pdf")
-    pdf = fitz.open(stream=data, filetype="pdf")
     all_text: list[str] = []
     pages_rows: list[list[list]] = []
-    for page in pdf:
-        words = page.get_text("words")
-        all_text.append(page.get_text())
-        pages_rows.append(_group_rows(words))
+    # Solo la lectura del documento: PyMuPDF abre imágenes aunque se le pida
+    # "pdf" (por eso is_pdf) y un archivo dañado puede fallar recién al leer
+    # una página (FzErrorBase).
+    try:
+        pdf = fitz.open(stream=data, filetype="pdf")
+        if not pdf.is_pdf:
+            raise ValueError(_PDF_UNREADABLE)
+        for page in pdf:
+            words = page.get_text("words")
+            all_text.append(page.get_text())
+            pages_rows.append(_group_rows(words))
+    except (fitz.FileDataError, fitz.mupdf.FzErrorBase) as exc:
+        raise ValueError(_PDF_UNREADABLE) from exc
     doc.text = "\n".join(all_text)
     if not doc.text.strip():
         doc.warnings.append(
@@ -395,8 +422,14 @@ def _parse_table(rows: list[list], doc: _Doc) -> None:
 def _parse_excel(data: bytes) -> _Doc:
     import openpyxl
 
+    from openpyxl.utils.exceptions import InvalidFileException
+
     doc = _Doc(source="excel")
-    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    except (zipfile.BadZipFile, InvalidFileException, KeyError) as exc:
+        # KeyError: es un zip pero le faltan las partes de un libro de Excel.
+        raise ValueError(_XLSX_UNREADABLE) from exc
     for ws in wb.worksheets:
         rows = [list(r) for r in ws.iter_rows(values_only=True)]
         before = len(doc.lines)
@@ -414,10 +447,25 @@ def _parse_excel(data: bytes) -> _Doc:
 
 def _parse_csv(data: bytes) -> _Doc:
     doc = _Doc(source="excel")
-    text = data.decode("utf-8-sig", errors="replace")
-    dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t") if text.strip() else csv.excel
-    rows = [r for r in csv.reader(io.StringIO(text), dialect)]
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("cp1252", errors="replace")  # Excel en Windows exporta así
+    if not text.strip():
+        raise ValueError(_EMPTY_FILE)
+    if "\x00" in text:
+        raise ValueError(_CSV_UNREADABLE)  # binario (imagen, .xlsx renombrado...)
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel  # una sola columna: no hay separador que detectar
+    try:
+        rows = [r for r in csv.reader(io.StringIO(text), dialect)]
+    except csv.Error as exc:
+        raise ValueError(_CSV_UNREADABLE) from exc
     _parse_table(rows, doc)
+    if not doc.lines and not doc.warnings:
+        doc.warnings.append("No se encontraron renglones con descripción y precio en el CSV.")
     return doc
 
 
@@ -461,17 +509,24 @@ _DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 
 def parse_price_list(filename: str, data: bytes, iva_included: bool | None = None) -> dict:
     """Parsea una lista de precios. `iva_included` fuerza la base de IVA
-    (si None se detecta). Nunca lanza por contenido: los problemas van a
-    `warnings` y `lines` puede quedar vacío."""
+    (si None se detecta).
+
+    Lanza ValueError (mensaje para el usuario) si el formato no está
+    soportado o el archivo está vacío / dañado / no es lo que dice su
+    extensión. Si se lee pero no trae la tabla, no lanza: `lines` queda vacío
+    y el motivo va a `warnings`."""
     name = (filename or "").lower()
     if name.endswith(".pdf"):
-        doc = _parse_pdf(data)
+        reader = _parse_pdf
     elif name.endswith((".xlsx", ".xlsm")):
-        doc = _parse_excel(data)
+        reader = _parse_excel
     elif name.endswith(".csv"):
-        doc = _parse_csv(data)
+        reader = _parse_csv
     else:
         raise ValueError("Formato no soportado: subí un PDF, Excel (.xlsx) o CSV.")
+    if not data:
+        raise ValueError(_EMPTY_FILE)
+    doc = reader(data)
 
     lines_sum = round(sum((ln.total if ln.total is not None
                            else (ln.unit_price or 0) * ln.quantity) for ln in doc.lines), 2)
@@ -480,8 +535,9 @@ def parse_price_list(filename: str, data: bytes, iva_included: bool | None = Non
         included, method = iva_included, "indicado por el usuario"
     elif detected is None:
         included = False
-        doc.warnings.append(
-            "No se pudo determinar si los precios incluyen IVA: se asumen SIN IVA.")
+        if doc.lines:  # sin renglones el aviso de IVA no aporta nada
+            doc.warnings.append(
+                "No se pudo determinar si los precios incluyen IVA: se asumen SIN IVA.")
     else:
         included = detected
     divisor = 1 + IVA_RATE if included else 1.0
@@ -505,9 +561,14 @@ def parse_price_list(filename: str, data: bytes, iva_included: bool | None = Non
         expected = lines_sum * (1 if included else 1 + IVA_RATE)
         check = "ok" if _close(doc_total, expected, 0.01) else "mismatch"
         if check == "mismatch":
+            # Mostrar lo que de verdad se comparó: con precios netos, el total
+            # del documento tendría que ser la suma + 21%.
+            base = ("la suma de renglones con IVA incluido" if included
+                    else f"la suma de renglones más el {IVA_RATE:.0%} de IVA")
             doc.warnings.append(
-                f"La suma de renglones ({lines_sum:,.2f}) no cierra con el total del "
-                f"documento ({doc_total:,.2f}). Revisá que no falten renglones.")
+                f"El total del documento ({_money(doc_total)}) no coincide con {base} "
+                f"({_money(expected)}). Revisá si los precios incluyen IVA o si faltan "
+                "renglones.")
 
     supplier = None
     m = _EMAIL_DOMAIN.search(doc.text) or _WEB_DOMAIN.search(doc.text)

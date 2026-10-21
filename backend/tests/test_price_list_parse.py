@@ -159,6 +159,95 @@ def test_pdf_sin_tabla_avisa():
     assert r["warnings"], "debería avisar que no encontró la tabla"
 
 
+def _jpeg() -> bytes:
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (40, 40), "red").save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def _zip_sin_libro() -> bytes:
+    import zipfile
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("hola.txt", "no soy un Excel")
+    return buf.getvalue()
+
+
+def _rechaza(filename: str, data: bytes, fragmento: str) -> None:
+    from app.services.price_list_parse import parse_price_list
+
+    try:
+        parse_price_list(filename, data)
+    except ValueError as exc:
+        assert fragmento in str(exc), (filename, str(exc))
+        return
+    raise AssertionError(f"{filename} debería rechazarse con ValueError")
+
+
+def test_archivo_vacio_rechaza():
+    for name in ("p.pdf", "p.xlsx", "p.csv"):
+        _rechaza(name, b"", "El archivo está vacío.")
+    _rechaza("p.csv", b"  \r\n \n", "El archivo está vacío.")
+
+
+def test_archivo_danado_o_de_otro_tipo_rechaza():
+    pdf_msg = "No se pudo leer el PDF: está dañado o no es un PDF."
+    xlsx_msg = "No se pudo leer el Excel: está dañado o no es un .xlsx."
+    _rechaza("foto.pdf", _jpeg(), pdf_msg)                 # imagen renombrada
+    _rechaza("roto.pdf", b"%PDF-1.4 basura sin objetos", pdf_msg)
+    _rechaza("roto.pdf", _digimat_like()[:300], pdf_msg)   # PDF cortado
+    _rechaza("roto.xlsx", b"esto no es un zip", xlsx_msg)
+    _rechaza("roto.xlsx", _zip_sin_libro(), xlsx_msg)
+    _rechaza("foto.xlsx", _jpeg(), xlsx_msg)
+    _rechaza("foto.csv", _jpeg() + b"\x00\x00", "No se pudo leer el CSV")
+
+
+def test_csv_sin_columnas_de_precio_avisa():
+    from app.services.price_list_parse import parse_price_list
+
+    # Una sola columna (el Sniffer no encuentra separador): no revienta.
+    r = parse_price_list("x.csv", b"hola\nesto no es\nun presupuesto\n")
+    assert r["lines"] == [] and r["warnings"], r
+    r = parse_price_list("x.csv", "nombre;color\nladrillo;rojo\n".encode())
+    assert r["lines"] == [] and "encabezado" in r["warnings"][0], r["warnings"]
+    # Encabezado bien pero sin precios válidos.
+    r = parse_price_list("x.csv", "descripcion;precio\ncemento;consultar\n".encode())
+    assert r["lines"] == [] and r["warnings"] == [
+        "No se encontraron renglones con descripción y precio en el CSV."], r["warnings"]
+    # Latin-1 (Excel en Windows) se lee sin caracteres rotos.
+    r = parse_price_list("x.csv", "descripción;precio\nCaño ½;1.234,50\n".encode("cp1252"))
+    assert r["lines"][0]["description"] == "Caño ½" and r["lines"][0]["unit_price"] == 1234.5
+
+
+def test_aviso_de_totales_es_ar_y_sin_contradiccion():
+    from app.services.price_list_parse import _money, parse_price_list
+
+    assert _money(876530) == "$ 876.530,00"
+    assert _money(1234567.891) == "$ 1.234.567,89"
+    assert _money(-5.5) == "$ -5,50"
+
+    # Zárate trae precios con IVA; forzado "sin IVA" el total del documento
+    # (25.612,10) se compara contra la suma + 21% (30.990,64).
+    r = parse_price_list("p.pdf", _zarate_like(), iva_included=False)
+    assert r["totals"]["check"] == "mismatch"
+    aviso = [w for w in r["warnings"] if "total del documento" in w]
+    assert aviso == [
+        "El total del documento ($ 25.612,10) no coincide con la suma de renglones más "
+        "el 21% de IVA ($ 30.990,64). Revisá si los precios incluyen IVA o si faltan "
+        "renglones."], r["warnings"]
+
+    # Digimat es neto; forzado "con IVA" se compara contra la suma tal cual.
+    r = parse_price_list("p.pdf", _digimat_like(), iva_included=True)
+    aviso = [w for w in r["warnings"] if "total del documento" in w]
+    assert aviso == [
+        "El total del documento ($ 217.437,47) no coincide con la suma de renglones con "
+        "IVA incluido ($ 179.700,39). Revisá si los precios incluyen IVA o si "
+        "faltan renglones."], r["warnings"]
+
+
 def test_fixtures_reales():
     """Presupuestos reales (si están en disco)."""
     from app.services.price_list_parse import parse_price_list
