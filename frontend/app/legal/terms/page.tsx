@@ -11,7 +11,7 @@ export default function TermsAndConditions() {
             Última actualización: {new Date().toLocaleDateString('es-AR')}
           </p>
 
-          <section>
+          <section id="privacidad" className="scroll-mt-24">
             <h2 className="mb-3 text-xl font-semibold text-slate-800 dark:text-slate-100">
               1. Privacidad y Propiedad Intelectual
             </h2>
