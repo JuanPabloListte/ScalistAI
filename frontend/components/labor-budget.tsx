@@ -336,7 +336,7 @@ export function SalePricePanel({
       <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
         Gastos generales sobre el costo directo; beneficio sobre el costo con gastos generales.
       </p>
-      <dl className="mt-4 max-w-xl divide-y divide-slate-100 text-sm dark:divide-slate-800">
+      <dl className="mt-4 divide-y divide-slate-100 text-sm dark:divide-slate-800">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center justify-between gap-4 py-2">
             <dt className={`flex items-center gap-2 ${r.strong ? "font-semibold text-slate-800 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"}`}>

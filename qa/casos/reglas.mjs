@@ -223,8 +223,8 @@ export default {
       // ------------------------------------------------------------ editor (juego QA)
       {
         id: 'reglas-13-pestanas-filtro',
-        titulo: 'Pestañas por medida y "Filtrar..."',
-        esperado: 'Pestaña "Muros" muestra solo muros; "Filtrar..." con "cemento" muestra "N de 30 reglas" y solo las que coinciden; ' +
+        titulo: 'Pestañas por medida y el buscador',
+        esperado: 'Pestaña "Muros" muestra solo muros; el buscador con "cemento" muestra "N de 30 reglas" y solo las que coinciden; ' +
           'un texto sin coincidencias no deja la pantalla muda.',
         rol: 'admin', url: ed,
         pasos: async (page, h) => {
@@ -233,9 +233,9 @@ export default {
           await page.getByRole('button', { name: /^Muros/ }).click(); await h.settle(page, 400);
           await h.foto(page, 'muros');
           await page.getByRole('button', { name: /^Todas/ }).click();
-          await h.llenar(page, 'css=input[placeholder="Filtrar..."]', 'cemento'); await h.settle(page, 400);
+          await h.llenar(page, 'css=input[placeholder="Buscar producto, palabra clave o nota…"]', 'cemento'); await h.settle(page, 400);
           await h.foto(page, 'filtro-cemento');
-          await h.llenar(page, 'css=input[placeholder="Filtrar..."]', 'zzzz'); await h.settle(page, 400);
+          await h.llenar(page, 'css=input[placeholder="Buscar producto, palabra clave o nota…"]', 'zzzz'); await h.settle(page, 400);
           await h.foto(page, 'filtro-sin-resultados');
         },
       },

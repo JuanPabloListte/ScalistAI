@@ -36,6 +36,7 @@ function FilterBar({
   groupLabel,
   shown,
   total,
+  placeholder,
 }: {
   value: { text: string; group: string };
   onChange: (v: { text: string; group: string }) => void;
@@ -44,14 +45,15 @@ function FilterBar({
   groupLabel: string;
   shown: number;
   total: number;
+  placeholder: string;
 }) {
   const filtering = !!value.text.trim() || !!value.group;
   return (
     <div className="mb-4 flex flex-wrap items-center gap-3">
       <input
         type="search"
-        placeholder="Filtrar..."
-        aria-label="Filtrar por texto"
+        placeholder={placeholder}
+        aria-label={placeholder}
         value={value.text}
         onChange={(e) => onChange({ ...value, text: e.target.value })}
         className={`w-full max-w-sm ${FIELD_CLS}`}
@@ -272,7 +274,8 @@ function SupplierBudget() {
                className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
         {matItems.length > 0 && (
           <FilterBar value={matFilter} onChange={setMatFilter} groups={matGroups} allLabel="Todas"
-                     groupLabel="Medida" shown={matShown} total={matItems.length} />
+                     groupLabel="Medida" shown={matShown} total={matItems.length}
+                     placeholder="Buscar producto o renglón del proveedor…" />
         )}
         <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView}
                             viewOverride={laborView} filter={matFilter} />
@@ -283,7 +286,8 @@ function SupplierBudget() {
           <>
             {laborItems.length > 0 && (
               <FilterBar value={laborFilter} onChange={setLaborFilter} groups={laborGroups} allLabel="Todos"
-                         groupLabel="Rubro" shown={laborShown} total={laborItems.length} />
+                         groupLabel="Rubro" shown={laborShown} total={laborItems.length}
+                         placeholder="Buscar tarea de mano de obra…" />
             )}
             <LaborPanel projectId={projectId} view={view} canEdit filter={laborFilter} hideTitle
                         isAdmin={!!(me?.is_superadmin || me?.role === "admin")} onView={onLaborView} />
