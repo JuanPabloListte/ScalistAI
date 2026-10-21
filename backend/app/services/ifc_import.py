@@ -123,6 +123,13 @@ _THICK_MIN_M, _THICK_MAX_M = 0.03, 1.00
 # Viguetas pretensadas (se compran hechas, no se hormigonan): "Viga tipo T",
 # "tipo T doble", "vigueta", "pretensada". Sobre texto normalizado (_norm).
 _VIGUETA_RE = re.compile(r"\bTIPO T\b|\bT DOBLE\b|VIGUETA|PRETENSAD")
+# Vigas de fundación (van a "riostra", rubro Fundaciones): "VF 25 x 35", "VF0",
+# "VFe" (esquina), "V.F.", "viga de fundación". Criterio: la sigla VF como
+# palabra propia en el nombre/tipo (seguida de nada, un número o la "E"), así
+# "VL", "V1" o "Ve" no entran. No se usa el nivel: en el modelo real las VF
+# están en "Nivel 6" (-0,30 m) y el nivel más bajo es el de pilotes, así que
+# por nivel se perderían las VF o entrarían vigas comunes de otros modelos.
+_VF_RE = re.compile(r"\bV\.?F\.?(?:\d+|E)?(?![A-Z0-9])|FUNDACI")
 # Losas estructurales: "losa" como palabra (no "baldosa"), descartando pisos,
 # contrapisos, veredas, etc., que son FLOOR pero no hormigón estructural.
 # "\bPISO" excluye "piso cerámico" pero NO "losa de entrepiso".
@@ -155,9 +162,117 @@ def _is_vigueta(el) -> bool:
     return any(_VIGUETA_RE.search(_norm(s)) for s in _names(el))
 
 
+def _is_viga_fundacion(el) -> bool:
+    return any(_VF_RE.search(_norm(s)) for s in _names(el))
+
+
+def _beam_kind(el) -> str:
+    """Tipo de DetectedElement de un IfcBeam: riostra (zapata o viga de
+    fundación), vigueta (pretensada) o beam (viga de H°)."""
+    if _is_foundation(el) or _is_viga_fundacion(el):
+        return "riostra"
+    if _is_vigueta(el):
+        return "vigueta"
+    return "beam"
+
+
 def _is_structural_slab(el) -> bool:
     text = _norm(" ".join(_names(el)))
     return bool(_LOSA_RE.search(text)) and not _NOT_LOSA_RE.search(text)
+
+
+def _rebar_count(rb) -> int:
+    """Barras que representa un IfcReinforcingBar. Revit exporta un CONJUNTO
+    de barras (ej. 95 estribos) como UNA entidad con un IfcSweptDiskSolid por
+    barra, y BarLength es el largo de UNA barra: hay que multiplicar."""
+    n = 0
+    try:
+        for r in (rb.Representation.Representations if rb.Representation else []):
+            if (r.RepresentationIdentifier or "") != "Body":
+                continue
+            for it in r.Items or []:
+                subs = (it.MappingSource.MappedRepresentation.Items or []
+                        if it.is_a("IfcMappedItem") else [it])
+                n += sum(1 for s in subs if s.is_a("IfcSweptDiskSolid"))
+    except Exception:  # noqa: BLE001 — sin geometría legible, se toma 1 barra
+        return 1
+    return max(n, 1)
+
+
+# Tolerancia (m) para decidir que una barra cae dentro de un elemento.
+_REBAR_HOST_TOL_M = 0.05
+
+
+def _concrete_kind(el) -> Optional[str]:
+    """Tipo de elemento de hormigón que puede alojar armadura (o None)."""
+    if el.is_a("IfcColumn"):
+        return "pozo" if _is_foundation(el) else "column"
+    if el.is_a("IfcBeam"):
+        k = _beam_kind(el)
+        return None if k == "vigueta" else k  # la vigueta pretensada no lleva barras
+    if el.is_a("IfcSlab"):
+        ok = str(el.PredefinedType) == "FLOOR" and _is_structural_slab(el)
+        return "slab" if ok else None
+    if el.is_a("IfcFooting") or el.is_a("IfcPile"):
+        return "pozo"
+    return None
+
+
+def _rebar_hosts(f, bars: list) -> dict[int, str]:
+    """{id de barra: tipo del elemento que la contiene}. Los exports de Revit no
+    relacionan la barra con su anfitrión (solo la contienen en un nivel, y el
+    nivel no es fiable): se ubica por geometría, el centro de la caja de la
+    barra dentro de la caja (coordenadas globales) del elemento de hormigón más
+    chico que la contenga. Es para diagnóstico (avisos), no computa. Nunca
+    lanza: si la geometría falla devuelve {}."""
+    if not bars:
+        return {}
+    try:
+        import multiprocessing
+
+        import ifcopenshell.geom
+
+        hosts = {}
+        for cls in ("IfcColumn", "IfcBeam", "IfcSlab", "IfcFooting", "IfcPile"):
+            for el in f.by_type(cls):
+                k = _concrete_kind(el)
+                if k is not None:
+                    hosts[el.id()] = k
+        if not hosts:
+            return {}
+        settings = ifcopenshell.geom.settings()
+        settings.set(settings.USE_WORLD_COORDS, True)
+        include = [f.by_id(i) for i in hosts] + list(bars)
+        boxes: dict[int, tuple] = {}
+        it = ifcopenshell.geom.iterator(settings, f, max(1, multiprocessing.cpu_count()),
+                                        include=include)
+        if it.initialize():
+            while True:
+                sh = it.get()
+                v = sh.geometry.verts
+                if v:
+                    xs, ys, zs = v[0::3], v[1::3], v[2::3]
+                    boxes[sh.id] = (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
+                if not it.next():
+                    break
+        tol = _REBAR_HOST_TOL_M  # la geometría de ifcopenshell sale en metros
+        host_boxes = sorted(
+            ((hid, b) for hid, b in boxes.items() if hid in hosts),
+            key=lambda hb: (hb[1][3] - hb[1][0]) * (hb[1][4] - hb[1][1]) * (hb[1][5] - hb[1][2]))
+        out: dict[int, str] = {}
+        for rb in bars:
+            b = boxes.get(rb.id())
+            if b is None:
+                continue
+            c = ((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2)
+            for hid, hb in host_boxes:  # de menor a mayor volumen: el más chico gana
+                if all(hb[i] - tol <= c[i] <= hb[i + 3] + tol for i in range(3)):
+                    out[rb.id()] = hosts[hid]
+                    break
+        return out
+    except Exception:  # noqa: BLE001 — diagnóstico opcional, nunca rompe el parse
+        logger.warning("No se pudo ubicar el anfitrión de las armaduras", exc_info=True)
+        return {}
 
 
 def _round_or_none(x: Optional[float], nd: int) -> Optional[float]:
@@ -759,24 +874,23 @@ def parse_ifc(path: str, on_progress=None) -> tuple[list[dict], dict]:
             length = max(bb[0], bb[1])
         if not 0 < length <= 30:
             continue
-        if _is_foundation(b):
-            out.append(_with_mat(b, {"type": "riostra", "length_m": length}))
-            raw["riostra"] += 1
-        elif _is_vigueta(b):
+        kind = _beam_kind(b)
+        if kind == "vigueta":
             # Vigueta pretensada: se compra hecha (por ml), no se hormigona.
             out.append(_with_mat(b, {"type": "vigueta", "length_m": length,
                                      "perfil": _type_label(b)}))
             raw["vigueta"] += 1
         else:
-            # Viga de H°: sección del perfil extruido o, si no, del nombre.
+            # Viga de H° o de fundación (riostra: zapata/VF, computa por ml en
+            # Fundaciones). Sección del perfil extruido o, si no, del nombre.
             sec = _beam_section_from_geometry(b, scale) or _section_from_name(b)
-            d = {"type": "beam", "length_m": length,
+            d = {"type": kind, "length_m": length, "perfil": _type_label(b),
                  "width_m": None, "depth_m": None, "volume_m3": None}
             if sec is not None:
                 d["width_m"], d["depth_m"] = sec
                 d["volume_m3"] = sec[0] * sec[1] * length
             out.append(_with_mat(b, d))
-            raw["beam"] += 1
+            raw[kind] += 1
     # Fundaciones EXPLÍCITAS (archivos bien exportados): zapatas y pilotes.
     for ft in list(f.by_type("IfcFooting")) + list(f.by_type("IfcPile")):
         area = qty(ft, "GrossArea", "NetArea")
@@ -818,16 +932,26 @@ def parse_ifc(path: str, on_progress=None) -> tuple[list[dict], dict]:
             raw["boca_electrica"] += 1
 
     # --- Armaduras (IfcReinforcingBar): acero EXACTO por atributos ---
-    # BarLength × CrossSectionArea × 7850 kg/m³ = kilos reales de hierro.
+    # n barras × BarLength × CrossSectionArea × 7850 kg/m³ = kilos reales de
+    # hierro (n > 1 en los conjuntos de Revit, ver _rebar_count). length_m es
+    # el largo TOTAL (n × BarLength), así kg/length_m sigue dando el diámetro.
     # Sin atributos, la barra se cuenta igual (sin kg, no se inventa).
-    for rb in f.by_type("IfcReinforcingBar"):
+    # host: tipo del elemento de hormigón que la contiene (para los avisos).
+    bars = list(f.by_type("IfcReinforcingBar"))
+    bar_hosts = _rebar_hosts(f, bars)
+    for rb in bars:
         L = _num(getattr(rb, "BarLength", None)) * scale
         A = _num(getattr(rb, "CrossSectionArea", None)) * scale * scale
         d = {"type": "armadura"}
         if 0 < L <= 100:
-            d["length_m"] = L
+            n = _rebar_count(rb)
+            d["length_m"] = n * L
+            if n > 1:
+                d["n_barras"] = n
             if A > 0:
-                d["kg"] = L * A * 7850.0
+                d["kg"] = n * L * A * 7850.0
+        if rb.id() in bar_hosts:
+            d["host"] = bar_hosts[rb.id()]
         out.append(_with_mat(rb, d))
         raw["armadura"] += 1
 
@@ -1038,9 +1162,13 @@ def process_ifc(plan_id: int) -> None:
                 if e.get("kg"):
                     geom["kg"] = round(e["kg"], 2)  # acero exacto (armaduras)
                 if e.get("perfil"):
-                    geom["perfil"] = e["perfil"]  # nombre del tipo (vigueta/losa)
+                    geom["perfil"] = e["perfil"]  # nombre del tipo (viga/vigueta/losa)
+                if e.get("n_barras"):
+                    geom["n_barras"] = e["n_barras"]  # conjunto de barras (armaduras)
+                if e.get("host"):
+                    geom["host"] = e["host"]  # elemento que aloja la barra (armaduras)
                 # Contrato con el presupuesto: las claves van SIEMPRE (null si no hay dato).
-                if e["type"] == "beam":
+                if e["type"] in ("beam", "riostra"):
                     for k in ("width_m", "depth_m", "volume_m3"):
                         geom[k] = _round_or_none(e.get(k), 4)
                 elif e["type"] == "slab":

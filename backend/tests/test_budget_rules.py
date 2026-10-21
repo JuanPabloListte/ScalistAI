@@ -288,6 +288,40 @@ def test_alerta_cuantia_de_hierro():
     assert not _msgs(_alerts([room]), "kg por m² cubierto")
 
 
+def test_alerta_cuantia_dice_que_falta():
+    def barra(kg, host):
+        return _el("armadura", length=kg / (0.006165 * 100), kg=kg, host=host)
+
+    estructura = [_el("room", area=100), _el("column", area=0.04, height=3),
+                  _el("beam", length=5, volume_m3=0.5), _el("slab", area=50),
+                  _el("riostra", length=10)]
+    # Barras solo en vigas (5 kg/m²): dice qué falta, en el orden de la lista.
+    (a,) = _msgs(_alerts(estructura + [barra(300, "beam"), barra(200, "beam")]),
+                 "kg por m² cubierto")
+    assert a["message"] == ("La armadura da 5,0 kg por m² cubierto (lo habitual es 15 a 80). "
+                            "El modelo trae hierro solo en vigas: faltan columnas, losas y "
+                            "vigas de fundación."), a
+    # Columnas y VF con barras: faltan vigas y losas.
+    (a,) = _msgs(_alerts(estructura + [barra(300, "column"), barra(200, "riostra")]),
+                 "kg por m² cubierto")
+    assert a["message"].endswith("solo en columnas y vigas de fundación: faltan vigas y losas."), a
+    # Barras con host pero ninguna en un elemento (host desconocido para el modelo).
+    (a,) = _msgs(_alerts(estructura + [barra(500, "otro")]), "kg por m² cubierto")
+    assert "Ninguna barra del modelo cae en columnas, vigas, losas y vigas de fundación." \
+        in a["message"], a
+    # Todos los tipos tienen barras pero son pocas: aviso genérico.
+    todas = [barra(100, h) for h in ("column", "beam", "slab", "riostra", "beam")]
+    (a,) = _msgs(_alerts(estructura + todas), "kg por m² cubierto")
+    assert "revisá las barras del modelo" in a["message"], a
+    # IFC viejo (barras sin host): aviso genérico, sin decir qué falta.
+    viejo = [_el("armadura", length=500 / (0.006165 * 100), kg=500)]
+    (a,) = _msgs(_alerts(estructura + viejo), "kg por m² cubierto")
+    assert "revisá las barras del modelo" in a["message"] and "faltan" not in a["message"], a
+    # Cuantía alta: nunca dice "faltan".
+    (a,) = _msgs(_alerts(estructura + [barra(9000, "beam")]), "kg por m² cubierto")
+    assert "faltan" not in a["message"], a
+
+
 def test_proyecto_viejo_solo_largo_de_vigas():
     """Un IFC importado antes de guardar el volumen (beam solo con length) sigue
     dando presupuesto con el juego estándar: viga_m3 estimada a 18×25."""
