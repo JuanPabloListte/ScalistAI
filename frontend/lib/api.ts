@@ -479,7 +479,14 @@ async function send(path: string, init: RequestInit = {}): Promise<Response> {
   if (typeof init.body === "string") {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  } catch (e) {
+    // Cancelaciones (AbortController) se propagan tal cual; el resto es red caída.
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new Error("No se pudo conectar con el servidor. Probá de nuevo.");
+  }
   if (!res.ok) {
     const raw = await res.text();
     const message = parseFastApiDetail(raw, res.status);

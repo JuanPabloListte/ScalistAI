@@ -7,8 +7,9 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { LaborPanel, SalePricePanel, matchesLaborFilter } from "@/components/labor-budget";
 import { LegacyBudget } from "@/components/legacy-budget";
 import { matchesReviewFilter } from "@/components/price-review";
+import { ProjectNotFound } from "@/components/project-not-found";
 import { ProjectPricesPanel } from "@/components/wizard/step-3-prices";
-import { api, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
+import { api, ApiError, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 import { money } from "@/lib/format";
 
@@ -105,6 +106,8 @@ function SupplierBudget() {
   const [laborView, setLaborView] = useState<ProjectBudgetView | null>(null);
   const [me, setMe] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [pdfMenu, setPdfMenu] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -113,6 +116,7 @@ function SupplierBudget() {
     api.getMe().then(setMe).catch(() => {});
     api.getProject(projectId).then(setProject).catch((e) => {
       if (isUnauthorized(e)) router.push("/login");
+      else if (e instanceof ApiError && e.status === 404) setNotFound(true);
       else setError(e instanceof Error ? e.message : String(e));
     });
   }, [projectId, router]);
@@ -159,6 +163,8 @@ function SupplierBudget() {
     setView(v);
     setLaborView(v);
   };
+
+  if (notFound) return <ProjectNotFound />;
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
@@ -229,7 +235,7 @@ function SupplierBudget() {
               {pl
                 ? [pl.supplier ?? pl.filename, view?.rule_set?.name && `reglas: ${view.rule_set.name}`]
                     .filter(Boolean).join(" · ")
-                : "Falta el presupuesto del proveedor"}
+                : noAccess ? "" : "Falta el presupuesto del proveedor"}
             </p>
           </div>
           <div className="flex gap-8 text-right">
@@ -277,7 +283,7 @@ function SupplierBudget() {
                      groupLabel="Medida" shown={matShown} total={matItems.length}
                      placeholder="Buscar producto o renglón del proveedor…" />
         )}
-        <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView}
+        <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView} onNoAccess={() => setNoAccess(true)}
                             viewOverride={laborView} filter={matFilter} />
       </section>
 

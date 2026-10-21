@@ -134,7 +134,7 @@ export function PriceReview({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {g.items.map((it) => (
-                  <ItemRow key={it.key} item={it} lines={lines} onOverride={onOverride} />
+                  <ItemRow key={it.key} item={it} lines={lines} overrides={view.price_list?.overrides} onOverride={onOverride} />
                 ))}
               </tbody>
             </table>
@@ -253,16 +253,23 @@ export function ShoppingList({ budget }: { budget: RuleBudget }) {
 function ItemRow({
   item: it,
   lines,
+  overrides,
   onOverride,
 }: {
   item: BudgetItem;
   lines: PriceLine[];
+  overrides?: Record<string, number | null>;
   onOverride: (key: string, row: number | null | "auto") => void;
 }) {
   const st = STATUS[it.status] ?? STATUS.sin_precio;
+  // Si hay un renglón elegido (aunque la unidad no sea compatible y quede sin precio) se muestra ese.
+  const manualRow = it.manual ? overrides?.[it.key] ?? null : null;
   const candidates = [it.line, ...it.alternatives].filter(Boolean).map((l) => l!.row);
+  if (!it.line && manualRow != null) candidates.push(manualRow);
   const others = lines.filter((l) => !candidates.includes(l.row));
-  const value = it.line ? String(it.line.row) : "none";
+  const chosenRow = it.line?.row ?? manualRow;
+  const chosenLine = it.line ?? (manualRow != null ? lines.find((l) => l.row === manualRow) ?? null : null);
+  const value = chosenRow != null ? String(chosenRow) : "none";
   const formula =
     it.measure === "armadura_kg"
       ? `${fmtNum(it.measure_value, 1)} kg del modelo`
@@ -294,9 +301,9 @@ function ItemRow({
               className="w-full max-w-md rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
               {it.manual && <option value="auto">↺ Volver a la elección automática</option>}
-              {it.line && (
-                <option value={it.line.row}>
-                  {it.line.description} · {money(it.line.unit_price_net)}
+              {chosenLine && (
+                <option value={chosenLine.row}>
+                  {chosenLine.description} · {money(chosenLine.unit_price_net)}
                 </option>
               )}
               {it.alternatives.length > 0 && (
@@ -347,6 +354,7 @@ function LineRow({
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState(String(ln.presentation.amount));
   const [unit, setUnit] = useState(ln.presentation.unit);
+  const [amountErr, setAmountErr] = useState<string | null>(null);
 
   return (
     <tr className={used ? "" : "text-slate-400"}>
@@ -359,8 +367,13 @@ function LineRow({
             className="flex items-center gap-1"
             onSubmit={(e) => {
               e.preventDefault();
-              const a = Number(amount.replace(",", "."));
-              if (a > 0) onPatch(ln.row, { amount: a, unit });
+              const a = Number(amount.trim().replace(",", "."));
+              if (!(a > 0) || !Number.isFinite(a)) {
+                setAmountErr("Ingresá un número mayor a 0.");
+                return;
+              }
+              setAmountErr(null);
+              onPatch(ln.row, { amount: a, unit });
               setEditing(false);
             }}
           >
@@ -368,7 +381,12 @@ function LineRow({
             <input
               autoFocus
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => {
+                setAmount(e.target.value);
+                setAmountErr(null);
+              }}
+              aria-label="Cantidad por presentación"
+              aria-invalid={amountErr ? true : undefined}
               className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-right text-xs dark:border-slate-700 dark:bg-slate-950"
             />
             <select
@@ -379,6 +397,7 @@ function LineRow({
               {SALE_UNITS.map((u) => <option key={u} value={u}>{UNIT[u]}</option>)}
             </select>
             <button type="submit" className="text-xs font-semibold text-brand-600">OK</button>
+            {amountErr && <span role="alert" className="text-[11px] text-red-600 dark:text-red-400">{amountErr}</span>}
           </form>
         ) : (
           <button

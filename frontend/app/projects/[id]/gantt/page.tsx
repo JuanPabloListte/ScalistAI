@@ -23,6 +23,7 @@ import {
   Maximize2, Minimize2, Users,
 } from "lucide-react";
 import { ProjectTeam } from "@/components/project-team";
+import { ProjectNotFound } from "@/components/project-not-found";
 import { FEATURES } from "@/lib/features";
 
 const STAGE_COLORS: Record<string, string> = {
@@ -938,7 +939,7 @@ export default function ProjectGanttPage() {
   };
 
   if (loading) return <div className="p-10 text-center text-slate-500">Cargando cronograma…</div>;
-  if (!project) return <div className="p-10 text-center">Proyecto no encontrado</div>;
+  if (!project) return <ProjectNotFound />;
 
   const hasData = allTasks.length > 0;
 

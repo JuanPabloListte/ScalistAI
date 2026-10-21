@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PriceReview, type ReviewFilter } from "@/components/price-review";
 import {
   api,
+  ApiError,
   type IvaMode,
   type Project,
   type ProjectBudgetView,
@@ -28,7 +29,7 @@ export function Step3Prices({
     <ProjectPricesPanel
       projectId={project.id}
       showShoppingList={false}
-      renderFooter={({ hasList, working }) => (
+      renderFooter={({ hasList, working, noAccess }) => (
         <div className="mt-2 flex items-center justify-between">
           <button
             type="button"
@@ -39,7 +40,7 @@ export function Step3Prices({
             ← Volver
           </button>
           <div className="flex items-center gap-4">
-            {!hasList && (
+            {!hasList && !noAccess && (
               <button
                 type="button"
                 onClick={onSaved}
@@ -51,8 +52,8 @@ export function Step3Prices({
             <button
               type="button"
               onClick={onSaved}
-              disabled={!hasList || working}
-              title={hasList ? "" : "Subí el presupuesto del proveedor para continuar"}
+              disabled={(!hasList && !noAccess) || working}
+              title={hasList || noAccess ? "" : "Subí el presupuesto del proveedor para continuar"}
               className="rounded-md bg-brand px-5 py-2 font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
             >
               Siguiente →
@@ -73,6 +74,7 @@ export function ProjectPricesPanel({
   showShoppingList = true,
   renderFooter,
   onViewChange,
+  onNoAccess,
   viewOverride,
   filter,
 }: {
@@ -81,8 +83,10 @@ export function ProjectPricesPanel({
   /** false cuando la página ya muestra los totales (Presupuesto). */
   showTotals?: boolean;
   showShoppingList?: boolean;
-  renderFooter?: (s: { hasList: boolean; working: boolean }) => React.ReactNode;
+  renderFooter?: (s: { hasList: boolean; working: boolean; noAccess: boolean }) => React.ReactNode;
   onViewChange?: (v: ProjectBudgetView) => void;
+  /** Se llama si el rol del proyecto no ve la información económica (403). */
+  onNoAccess?: () => void;
   /** Vista actualizada desde afuera (p. ej. al cambiar la mano de obra). */
   viewOverride?: ProjectBudgetView | null;
   /** Filtro de la revisión (solo Presupuesto). */
@@ -98,6 +102,8 @@ export function ProjectPricesPanel({
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rol sin acceso a lo económico (capataz/comitente): no es un error, solo no hay nada que cargar.
+  const [noAccess, setNoAccess] = useState(false);
 
   useEffect(() => {
     if (view) onViewChange?.(view);
@@ -105,12 +111,19 @@ export function ProjectPricesPanel({
   }, [view]);
 
   useEffect(() => {
-    Promise.all([api.getProjectPriceList(projectId), api.listRuleSets()])
+    Promise.all([api.getProjectPriceList(projectId), api.listRuleSets().catch(() => [] as RuleSet[])])
       .then(([v, rs]) => {
         setView(v);
         setRuleSets(rs);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 403) {
+          setNoAccess(true);
+          onNoAccess?.();
+        } else {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      })
       .finally(() => setLoading(false));
   }, [projectId]);
 
@@ -162,6 +175,17 @@ export function ProjectPricesPanel({
   }
 
   if (loading) return <p className="text-sm text-slate-500">Cargando…</p>;
+
+  if (noAccess) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Tu rol en este proyecto no ve la información económica.
+        </p>
+        {renderFooter?.({ hasList: false, working: false, noAccess: true })}
+      </div>
+    );
+  }
 
   const pl = view?.price_list;
   const overrides = pl?.overrides ?? {};
@@ -277,7 +301,7 @@ export function ProjectPricesPanel({
         />
       )}
 
-      {renderFooter?.({ hasList: !!pl, working: uploading || busy })}
+      {renderFooter?.({ hasList: !!pl, working: uploading || busy, noAccess: false })}
     </div>
   );
 }
