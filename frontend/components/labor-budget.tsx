@@ -50,6 +50,7 @@ export function LaborPanel({
   onView,
   filter,
   hideTitle,
+  toolbar,
 }: {
   projectId: number;
   view: ProjectBudgetView;
@@ -60,6 +61,8 @@ export function LaborPanel({
   filter?: LaborFilter;
   /** Sin el título "Mano de obra" (lo da la pestaña). */
   hideTitle?: boolean;
+  /** Barra de filtros que va dentro de la tarjeta, arriba (como en Materiales). */
+  toolbar?: React.ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +99,7 @@ export function LaborPanel({
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+      {toolbar}
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           {!hideTitle && <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Mano de obra</h2>}

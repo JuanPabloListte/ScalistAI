@@ -283,15 +283,13 @@ function SupplierBudget() {
 
       <div role="tabpanel" hidden={tab !== "mano-de-obra"} className="space-y-4">
         {view && (
-          <>
-            {laborItems.length > 0 && (
-              <FilterBar value={laborFilter} onChange={setLaborFilter} groups={laborGroups} allLabel="Todos"
-                         groupLabel="Rubro" shown={laborShown} total={laborItems.length}
-                         placeholder="Buscar tarea de mano de obra…" />
-            )}
-            <LaborPanel projectId={projectId} view={view} canEdit filter={laborFilter} hideTitle
-                        isAdmin={!!(me?.is_superadmin || me?.role === "admin")} onView={onLaborView} />
-          </>
+          <LaborPanel projectId={projectId} view={view} canEdit filter={laborFilter} hideTitle
+                      isAdmin={!!(me?.is_superadmin || me?.role === "admin")} onView={onLaborView}
+                      toolbar={laborItems.length > 0 ? (
+                        <FilterBar value={laborFilter} onChange={setLaborFilter} groups={laborGroups}
+                                   allLabel="Todos" groupLabel="Rubro" shown={laborShown}
+                                   total={laborItems.length} placeholder="Buscar tarea de mano de obra…" />
+                      ) : undefined} />
         )}
       </div>
 
