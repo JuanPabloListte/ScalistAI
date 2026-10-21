@@ -27,6 +27,23 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   regla_invalida: { label: "Regla inválida", cls: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" },
 };
 
+/** Avisos de cordura del modelo (datos poco creíbles). Sin avisos no muestra nada. */
+function ModelAlerts({ alerts }: { alerts?: { level: "alto" | "medio"; message: string }[] }) {
+  if (!alerts || alerts.length === 0) return null;
+  const tone = {
+    alto: "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300",
+    medio: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
+  };
+  return (
+    <div role="alert" className="flex flex-col gap-2">
+      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Revisá el modelo</p>
+      {alerts.map((a, i) => (
+        <p key={i} className={`rounded-md border px-3 py-2 text-sm ${tone[a.level] ?? tone.medio}`}>{a.message}</p>
+      ))}
+    </div>
+  );
+}
+
 /** Tabla de revisión: medidas del IFC × reglas × renglones del proveedor.
  *  Los cambios (elegir otro renglón, corregir una presentación) se avisan por
  *  callbacks y el padre los persiste. */
@@ -66,6 +83,7 @@ export function PriceReview({
 
   return (
     <div className={`flex flex-col gap-5 ${busy ? "pointer-events-none opacity-60" : ""}`}>
+      <ModelAlerts alerts={view.measures?.alerts} />
       {showTotals && <div className="grid gap-3 sm:grid-cols-4">
         <Kpi label="Materiales (neto)" value={money(budget.totals.net)} />
         <Kpi label={`IVA ${Math.round(budget.totals.iva_rate * 100)}%`} value={money(budget.totals.iva)} />
