@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import Counter
 from typing import Optional
 
@@ -107,6 +108,190 @@ _FOUNDATION_KW = ("SOE-", "SOE ", "PILOT", "ZAPATA", "FOOTING", "FUNDAC", "CIMIE
 
 def _is_foundation(el) -> bool:
     return any(k in _norm(getattr(el, "Name", "") or "") for k in _FOUNDATION_KW)
+
+
+# --- Sección de vigas, viguetas y losas -------------------------------------
+# El export real (Revit IFC2X3) no trae base quantities: la sección de la viga
+# sale del PERFIL del sólido extruido (IfcRectangleProfileDef XDim/YDim) y, si
+# el cuerpo es un Brep, del nombre del tipo ("V1 (18 x 25)" → 18×25 cm).
+_SECTION_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*x\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE)
+_THICKNESS_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*cm\b", re.IGNORECASE)
+# Lado de sección razonable para una viga (m). Fuera de esto, el dato es basura.
+_SIDE_MIN_M, _SIDE_MAX_M = 0.05, 1.50
+# Espesor razonable de una losa (m).
+_THICK_MIN_M, _THICK_MAX_M = 0.03, 1.00
+# Viguetas pretensadas (se compran hechas, no se hormigonan): "Viga tipo T",
+# "tipo T doble", "vigueta", "pretensada". Sobre texto normalizado (_norm).
+_VIGUETA_RE = re.compile(r"\bTIPO T\b|\bT DOBLE\b|VIGUETA|PRETENSAD")
+# Losas estructurales: "losa" como palabra (no "baldosa"), descartando pisos,
+# contrapisos, veredas, etc., que son FLOOR pero no hormigón estructural.
+# "\bPISO" excluye "piso cerámico" pero NO "losa de entrepiso".
+_LOSA_RE = re.compile(r"\bLOSA")
+_NOT_LOSA_RE = re.compile(r"VEREDA|BANQUINA|\bPISO|CONTRAPISO|TERRENO|ASADOR|DESCANS|LANDING")
+
+
+def _names(el) -> list[str]:
+    """Textos que describen al elemento: nombre del tipo, ObjectType y Name."""
+    import ifcopenshell.util.element as UE
+
+    out: list[str] = []
+    try:
+        t = UE.get_type(el)
+    except Exception:  # noqa: BLE001
+        t = None
+    for s in (getattr(t, "Name", None), getattr(el, "ObjectType", None), getattr(el, "Name", None)):
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def _type_label(el) -> Optional[str]:
+    """Nombre del tipo (o, si no hay tipo, el ObjectType/Name)."""
+    names = _names(el)
+    return names[0] if names else None
+
+
+def _is_vigueta(el) -> bool:
+    return any(_VIGUETA_RE.search(_norm(s)) for s in _names(el))
+
+
+def _is_structural_slab(el) -> bool:
+    text = _norm(" ".join(_names(el)))
+    return bool(_LOSA_RE.search(text)) and not _NOT_LOSA_RE.search(text)
+
+
+def _round_or_none(x: Optional[float], nd: int) -> Optional[float]:
+    return round(float(x), nd) if x is not None else None
+
+
+def _to_float(s: str) -> float:
+    return float(s.replace(",", "."))
+
+
+def _section_from_name(el) -> Optional[tuple[float, float]]:
+    """(ancho, alto) en m desde el nombre "NN x MM" (en cm). None si no hay o es absurdo."""
+    for s in _names(el):
+        for a, b in _SECTION_RE.findall(s):
+            w, d = _to_float(a) / 100.0, _to_float(b) / 100.0
+            if _SIDE_MIN_M <= w <= _SIDE_MAX_M and _SIDE_MIN_M <= d <= _SIDE_MAX_M:
+                return w, d
+    return None
+
+
+def _thickness_from_name(el) -> Optional[float]:
+    for s in _names(el):
+        for a in _THICKNESS_RE.findall(s):
+            t = _to_float(a) / 100.0
+            if _THICK_MIN_M <= t <= _THICK_MAX_M:
+                return t
+    return None
+
+
+def _extrusions(el) -> list:
+    """IfcExtrudedAreaSolid del cuerpo del elemento.
+
+    Sigue mapped items (tipo con RepresentationMaps) y booleanos de recorte
+    (FirstOperand). Si el elemento no tiene representación propia, mira las
+    del tipo. Nunca lanza."""
+    import ifcopenshell.util.element as UE
+
+    found: list = []
+
+    def walk(it, depth=0):
+        if it is None or depth > 6:
+            return
+        if it.is_a("IfcExtrudedAreaSolid"):
+            found.append(it)
+        elif it.is_a("IfcBooleanResult"):  # incluye IfcBooleanClippingResult
+            walk(it.FirstOperand, depth + 1)
+        elif it.is_a("IfcMappedItem"):
+            for sub in it.MappingSource.MappedRepresentation.Items or []:
+                walk(sub, depth + 1)
+
+    def reps_of(rep_list):
+        bodies = [r for r in rep_list if (r.RepresentationIdentifier or "") == "Body"]
+        return bodies or [r for r in rep_list
+                          if (r.RepresentationIdentifier or "") not in ("Axis", "Box", "FootPrint")]
+
+    try:
+        rep = getattr(el, "Representation", None)
+        reps = reps_of(list(rep.Representations or [])) if rep is not None else []
+        if not reps:
+            t = UE.get_type(el)
+            maps = (getattr(t, "RepresentationMaps", None) or []) if t is not None else []
+            reps = reps_of([m.MappedRepresentation for m in maps])
+        for r in reps:
+            for it in r.Items or []:
+                walk(it)
+    except Exception:  # noqa: BLE001 — la geometría es un extra, nunca rompe el parse
+        return []
+    return found
+
+
+def _rect_dims(profile) -> Optional[tuple[float, float]]:
+    """(XDim, YDim) de un perfil rectangular MACIZO (el hueco no da volumen lleno)."""
+    if profile is not None and profile.is_a() in ("IfcRectangleProfileDef", "IfcRoundedRectangleProfileDef"):
+        return _num(profile.XDim), _num(profile.YDim)
+    return None
+
+
+def _beam_section_from_geometry(el, scale: float) -> Optional[tuple[float, float]]:
+    """(ancho, alto) en m del primer perfil rectangular del cuerpo. Ancho = lado menor."""
+    for ex in _extrusions(el):
+        dims = _rect_dims(ex.SweptArea)
+        if dims is None:
+            continue
+        a, b = sorted((dims[0] * scale, dims[1] * scale))
+        if _SIDE_MIN_M <= a and b <= _SIDE_MAX_M:
+            return a, b
+    return None
+
+
+def _polyline_area(curve) -> Optional[float]:
+    """Área (unidades del modelo²) de una IfcPolyline cerrada, por shoelace."""
+    if curve is None or not curve.is_a("IfcPolyline"):
+        return None
+    pts = [tuple(p.Coordinates[:2]) for p in curve.Points or []]
+    if len(pts) < 3:
+        return None
+    s = sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]))
+    return abs(s) / 2.0
+
+
+def _profile_area(profile) -> Optional[float]:
+    """Área de un perfil (unidades del modelo²): rectángulo o polilínea, menos huecos."""
+    if profile is None:
+        return None
+    dims = _rect_dims(profile)
+    if dims is not None:
+        return dims[0] * dims[1]
+    if profile.is_a("IfcArbitraryClosedProfileDef"):
+        area = _polyline_area(profile.OuterCurve)
+        if area is None:
+            return None
+        for inner in getattr(profile, "InnerCurves", None) or []:  # ...WithVoids
+            hole = _polyline_area(inner)
+            if hole is None:
+                return None
+            area -= hole
+        return area if area > 0 else None
+    return None
+
+
+def _slab_from_geometry(el, scale: float) -> tuple[Optional[float], Optional[float]]:
+    """(área m², espesor m) de una losa por su extrusión. None donde no se pueda.
+
+    El área es la del PERFIL (exacta para losas en L o con huecos dibujados en
+    el contorno), no la del bounding box."""
+    exts = _extrusions(el)
+    if not exts:
+        return None, None
+    areas = [_profile_area(ex.SweptArea) for ex in exts]
+    area = sum(areas) * scale * scale if all(a is not None for a in areas) else None
+    thick = _num(exts[0].Depth) * scale
+    if not (_THICK_MIN_M <= thick <= _THICK_MAX_M):
+        thick = None
+    return area, thick
 
 
 # Artefactos MEP por nombre (los IfcFlowTerminal de Revit 2x3 no traen
@@ -303,6 +488,9 @@ def parse_ifc(path: str, on_progress=None) -> tuple[list[dict], dict]:
     """Devuelve (elementos, meta). Cada elemento: type + length_m/area_m2/height_m
     + subtype. meta: schema, contadores crudos.
 
+    Extras por tipo: beam → width_m/depth_m/volume_m3 (None si no hay sección);
+    vigueta → perfil; slab (losa estructural) → thickness_m (o None) y perfil.
+
     on_progress: callable opcional (pct: int, stage: str) → None.
     """
     def _prog(pct: int, stage: str) -> None:
@@ -465,6 +653,30 @@ def parse_ifc(path: str, on_progress=None) -> tuple[list[dict], dict]:
         pt = str(sl.PredefinedType)
         if pt not in ("FLOOR", "ROOF"):
             continue
+        if pt == "FLOOR" and _is_structural_slab(sl):
+            # Losa estructural (entrepiso/techo de H°A°) como elemento propio:
+            # área por quantity o perfil de la extrusión (bbox como último
+            # recurso) y espesor por la extrusión o el nombre ("12 cm").
+            # Independiente de la estimación de área cubierta de más abajo.
+            s_area = qty(sl, "NetArea", "GrossArea")
+            s_area = s_area * scale * scale if s_area is not None else None
+            g_area, thick = _slab_from_geometry(sl, scale)
+            if s_area is None:
+                s_area = g_area
+            if s_area is None:
+                bb = bbox(sl)
+                if bb and bb[2] <= 1.5 and max(bb[0], bb[1]) <= SLAB_MAX_M:
+                    s_area = bb[0] * bb[1]
+            if thick is None:
+                q_depth = qty(sl, "Depth", "Width")
+                if q_depth is not None and _THICK_MIN_M <= q_depth * scale <= _THICK_MAX_M:
+                    thick = q_depth * scale
+                else:
+                    thick = _thickness_from_name(sl)
+            if s_area and math.isfinite(s_area) and 0 < s_area <= SLAB_MAX_M ** 2:
+                out.append(_with_mat(sl, {"type": "slab", "area_m2": s_area,
+                                          "thickness_m": thick, "perfil": _type_label(sl)}))
+                raw["slab"] += 1
         area = qty(sl, "GrossArea", "NetArea", "GrossFloorArea")
         if area is not None:
             area = area * scale * scale
@@ -545,10 +757,26 @@ def parse_ifc(path: str, on_progress=None) -> tuple[list[dict], dict]:
             if not bb or min(bb[0], bb[1]) > 1.5:
                 continue
             length = max(bb[0], bb[1])
-        if 0 < length <= 30:
-            el_type = "riostra" if _is_foundation(b) else "beam"
-            out.append(_with_mat(b, {"type": el_type, "length_m": length}))
-            raw[el_type] += 1
+        if not 0 < length <= 30:
+            continue
+        if _is_foundation(b):
+            out.append(_with_mat(b, {"type": "riostra", "length_m": length}))
+            raw["riostra"] += 1
+        elif _is_vigueta(b):
+            # Vigueta pretensada: se compra hecha (por ml), no se hormigona.
+            out.append(_with_mat(b, {"type": "vigueta", "length_m": length,
+                                     "perfil": _type_label(b)}))
+            raw["vigueta"] += 1
+        else:
+            # Viga de H°: sección del perfil extruido o, si no, del nombre.
+            sec = _beam_section_from_geometry(b, scale) or _section_from_name(b)
+            d = {"type": "beam", "length_m": length,
+                 "width_m": None, "depth_m": None, "volume_m3": None}
+            if sec is not None:
+                d["width_m"], d["depth_m"] = sec
+                d["volume_m3"] = sec[0] * sec[1] * length
+            out.append(_with_mat(b, d))
+            raw["beam"] += 1
     # Fundaciones EXPLÍCITAS (archivos bien exportados): zapatas y pilotes.
     for ft in list(f.by_type("IfcFooting")) + list(f.by_type("IfcPile")):
         area = qty(ft, "GrossArea", "NetArea")
@@ -664,10 +892,16 @@ def parse_ifc_robust(path: str, attempts: int = 3, on_progress=None) -> tuple[li
     def _yield(meta: dict) -> float:
         ent, raw = meta.get("entities", {}), meta.get("raw", {})
         ratios = []
-        for k in ("wall", "beam"):  # tipos que dependen de geometría solida
+        # Tipos que dependen de geometría sólida. Un IfcBeam puede salir como
+        # beam, vigueta o riostra: se comparan contra el total de IfcBeam.
+        out_by_ent = {
+            "wall": raw.get("wall", 0),
+            "beam": raw.get("beam", 0) + raw.get("vigueta", 0) + raw.get("riostra", 0),
+        }
+        for k, got in out_by_ent.items():
             n = ent.get(k, 0)
             if n:
-                ratios.append(raw.get(k, 0) / n)
+                ratios.append(got / n)
         return min(ratios) if ratios else 1.0
 
     for attempt in range(max(1, attempts)):
@@ -785,6 +1019,15 @@ def process_ifc(plan_id: int) -> None:
             if plan is None:
                 return
 
+            # Reproceso sin duplicar: se borran los elementos previos del plan en
+            # la MISMA transacción que la inserción (si algo falla, rollback y
+            # quedan los anteriores). element_assemblies cae por ON DELETE CASCADE.
+            n_prev = (db.query(DetectedElement)
+                      .filter(DetectedElement.plan_id == plan_id)
+                      .delete(synchronize_session=False))
+            if n_prev:
+                logger.info("process_ifc plan=%s: %s elementos previos reemplazados", plan_id, n_prev)
+
             matched = Counter()
             for e in elements:
                 geom = {"source": "ifc"}
@@ -794,6 +1037,14 @@ def process_ifc(plan_id: int) -> None:
                     geom["material"] = e["material"]  # visible en el visor/debug
                 if e.get("kg"):
                     geom["kg"] = round(e["kg"], 2)  # acero exacto (armaduras)
+                if e.get("perfil"):
+                    geom["perfil"] = e["perfil"]  # nombre del tipo (vigueta/losa)
+                # Contrato con el presupuesto: las claves van SIEMPRE (null si no hay dato).
+                if e["type"] == "beam":
+                    for k in ("width_m", "depth_m", "volume_m3"):
+                        geom[k] = _round_or_none(e.get(k), 4)
+                elif e["type"] == "slab":
+                    geom["thickness_m"] = _round_or_none(e.get("thickness_m"), 4)
                 de = DetectedElement(
                     plan_id=plan_id, page=1, type=e["type"], geometry=geom,
                     length_m=e.get("length_m"), area_m2=e.get("area_m2"),
@@ -849,6 +1100,11 @@ if __name__ == "__main__":
             qty_by[e["type"] + "_m2"] += e.get("area_m2", 0)
         elif e["type"] == "beam":
             qty_by["viga_ml"] += e["length_m"]
+            qty_by["viga_m3"] += e.get("volume_m3") or 0
+        elif e["type"] == "vigueta":
+            qty_by["vigueta_ml"] += e["length_m"]
+        elif e["type"] == "slab":
+            qty_by["losa_m2"] += e["area_m2"]
         elif e["type"] == "opening":
             qty_by[e["subtype"] + "_m2"] += e["length_m"] * e["height_m"]
     print("\nelementos por tipo:", dict(agg))
