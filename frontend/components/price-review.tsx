@@ -44,6 +44,18 @@ function ModelAlerts({ alerts }: { alerts?: { level: "alto" | "medio"; message: 
   );
 }
 
+/** Filtro opcional de la revisión (solo la página Presupuesto lo usa). */
+export type ReviewFilter = { text: string; group: string };
+
+/** ¿El ítem cumple el filtro? Texto: producto o renglón elegido del proveedor. */
+export function matchesReviewFilter(it: BudgetItem, f?: ReviewFilter): boolean {
+  if (!f) return true;
+  if (f.group && it.measure_label !== f.group) return false;
+  const q = f.text.trim().toLowerCase();
+  if (!q) return true;
+  return it.label.toLowerCase().includes(q) || (it.line?.description ?? "").toLowerCase().includes(q);
+}
+
 /** Tabla de revisión: medidas del IFC × reglas × renglones del proveedor.
  *  Los cambios (elegir otro renglón, corregir una presentación) se avisan por
  *  callbacks y el padre los persiste. */
@@ -52,6 +64,7 @@ export function PriceReview({
   busy,
   showTotals = true,
   showShoppingList = true,
+  filter,
   onOverride,
   onPatchLine,
 }: {
@@ -60,6 +73,8 @@ export function PriceReview({
   showTotals?: boolean;
   /** false en el wizard: la lista de compras se muestra en Revisión. */
   showShoppingList?: boolean;
+  /** Opcional: oculta los ítems (y grupos) que no coinciden. */
+  filter?: ReviewFilter;
   onOverride: (key: string, row: number | null | "auto") => void;
   onPatchLine: (row: number, patch: { amount: number; unit: string } | null) => void;
 }) {
@@ -71,12 +86,13 @@ export function PriceReview({
   const groups = useMemo(() => {
     const g: { label: string; items: BudgetItem[] }[] = [];
     for (const it of budget?.items ?? []) {
+      if (!matchesReviewFilter(it, filter)) continue;
       let grp = g.find((x) => x.label === it.measure_label);
       if (!grp) g.push((grp = { label: it.measure_label, items: [] }));
       grp.items.push(it);
     }
     return g;
-  }, [budget]);
+  }, [budget, filter]);
 
   if (!budget) return null;
   const usedRows = new Set(budget.shopping_list.map((s) => s.row));
@@ -97,6 +113,10 @@ export function PriceReview({
           ].filter(Boolean).join(" · ") || undefined}
         />
       </div>}
+
+      {filter && groups.length === 0 && (
+        <p className="text-xs text-slate-500 dark:text-slate-400">Ningún ítem coincide con el filtro.</p>
+      )}
 
       {groups.map((g) => (
         <section key={g.label}>

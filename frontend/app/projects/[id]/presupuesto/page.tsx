@@ -1,18 +1,84 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
-import { LaborPanel, SalePricePanel } from "@/components/labor-budget";
+import { LaborPanel, SalePricePanel, matchesLaborFilter } from "@/components/labor-budget";
 import { LegacyBudget } from "@/components/legacy-budget";
+import { matchesReviewFilter } from "@/components/price-review";
 import { ProjectPricesPanel } from "@/components/wizard/step-3-prices";
 import { api, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 import { money } from "@/lib/format";
 
 export default function PresupuestoPage() {
-  return FEATURES.legacyBudget ? <LegacyBudget /> : <SupplierBudget />;
+  return FEATURES.legacyBudget ? (
+    <LegacyBudget />
+  ) : (
+    <Suspense fallback={null}>
+      <SupplierBudget />
+    </Suspense>
+  );
+}
+
+type Tab = "materiales" | "mano-de-obra";
+
+const FIELD_CLS =
+  "rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-brand-400 dark:focus:ring-brand-400/20";
+
+/** Buscador + select de grupo + "N de M" + Limpiar (mismo estilo que Reglas). */
+function FilterBar({
+  value,
+  onChange,
+  groups,
+  allLabel,
+  groupLabel,
+  shown,
+  total,
+}: {
+  value: { text: string; group: string };
+  onChange: (v: { text: string; group: string }) => void;
+  groups: string[];
+  allLabel: string;
+  groupLabel: string;
+  shown: number;
+  total: number;
+}) {
+  const filtering = !!value.text.trim() || !!value.group;
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+      <input
+        type="search"
+        placeholder="Filtrar..."
+        aria-label="Filtrar por texto"
+        value={value.text}
+        onChange={(e) => onChange({ ...value, text: e.target.value })}
+        className={`w-full max-w-sm ${FIELD_CLS}`}
+      />
+      <select
+        aria-label={groupLabel}
+        value={value.group}
+        onChange={(e) => onChange({ ...value, group: e.target.value })}
+        className={`max-w-[16rem] ${FIELD_CLS}`}
+      >
+        <option value="">{allLabel}</option>
+        {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+      </select>
+      {filtering && (
+        <>
+          <span className="text-xs text-slate-500 dark:text-slate-400">{shown} de {total} ítems</span>
+          <button
+            type="button"
+            onClick={() => onChange({ text: "", group: "" })}
+            className="text-xs font-medium text-brand-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:text-brand-400"
+          >
+            Limpiar
+          </button>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** Presupuesto de obra: materiales (proveedor × reglas × IFC), mano de obra
@@ -20,7 +86,16 @@ export default function PresupuestoPage() {
 function SupplierBudget() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = Number(params.id);
+  const tab: Tab = searchParams.get("tab") === "mano-de-obra" ? "mano-de-obra" : "materiales";
+  const [matFilter, setMatFilter] = useState({ text: "", group: "" });
+  const [laborFilter, setLaborFilter] = useState({ text: "", group: "" });
+
+  function selectTab(t: Tab) {
+    router.replace(t === "materiales" ? `/projects/${projectId}/presupuesto` : `/projects/${projectId}/presupuesto?tab=${t}`,
+                   { scroll: false });
+  }
 
   const [project, setProject] = useState<Project | null>(null);
   const [view, setView] = useState<ProjectBudgetView | null>(null);
@@ -69,6 +144,15 @@ function SupplierBudget() {
   const pl = view?.price_list;
   const price = view?.price;
   const pending = (budget?.counts.sin_precio ?? 0) + (view?.labor?.counts.pendientes ?? 0);
+  const matItems = useMemo(() => view?.budget?.items ?? [], [view]);
+  const matGroups = useMemo(() => Array.from(new Set(matItems.map((i) => i.measure_label))), [matItems]);
+  const matShown = matItems.filter((i) => matchesReviewFilter(i, matFilter)).length;
+  const laborItems = useMemo(
+    () => (view?.model_status === "ready" ? (view.labor?.items ?? []).filter((i) => i.status !== "sin_medida") : []),
+    [view],
+  );
+  const laborGroups = useMemo(() => Array.from(new Set(laborItems.map((i) => i.stage))), [laborItems]);
+  const laborShown = laborItems.filter((i) => matchesLaborFilter(i, laborFilter)).length;
   const onLaborView = (v: ProjectBudgetView) => {
     setView(v);
     setLaborView(v);
@@ -166,16 +250,47 @@ function SupplierBudget() {
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">Materiales</h2>
+      <div role="tablist" aria-label="Presupuesto" className="flex gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+        {([
+          { key: "materiales", label: "Materiales", n: matItems.length },
+          { key: "mano-de-obra", label: "Mano de obra", n: laborItems.length },
+        ] as { key: Tab; label: string; n: number }[]).map((t) => (
+          <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+                  onClick={() => selectTab(t.key)}
+                  className={`whitespace-nowrap border-b-2 px-1 pb-2 text-sm font-medium transition ${
+            tab === t.key
+              ? "border-brand-500 text-brand-600 dark:border-brand-400 dark:text-brand-400"
+              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+          }`}>
+            {t.label} <span className="text-xs text-slate-400">{t.n}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Ambos paneles quedan montados (ocultos) para no perder la carga ni los filtros al cambiar de pestaña. */}
+      <section role="tabpanel" hidden={tab !== "materiales"}
+               className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        {matItems.length > 0 && (
+          <FilterBar value={matFilter} onChange={setMatFilter} groups={matGroups} allLabel="Todas"
+                     groupLabel="Medida" shown={matShown} total={matItems.length} />
+        )}
         <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView}
-                            viewOverride={laborView} />
+                            viewOverride={laborView} filter={matFilter} />
       </section>
 
-      {view && (
-        <LaborPanel projectId={projectId} view={view} canEdit
-                    isAdmin={!!(me?.is_superadmin || me?.role === "admin")} onView={onLaborView} />
-      )}
+      <div role="tabpanel" hidden={tab !== "mano-de-obra"} className="space-y-4">
+        {view && (
+          <>
+            {laborItems.length > 0 && (
+              <FilterBar value={laborFilter} onChange={setLaborFilter} groups={laborGroups} allLabel="Todos"
+                         groupLabel="Rubro" shown={laborShown} total={laborItems.length} />
+            )}
+            <LaborPanel projectId={projectId} view={view} canEdit filter={laborFilter} hideTitle
+                        isAdmin={!!(me?.is_superadmin || me?.role === "admin")} onView={onLaborView} />
+          </>
+        )}
+      </div>
+
       {view && <SalePricePanel projectId={projectId} view={view} canEdit onView={onLaborView} />}
     </main>
   );
