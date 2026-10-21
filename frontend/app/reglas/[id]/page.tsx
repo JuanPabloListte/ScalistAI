@@ -17,6 +17,8 @@ import {
   type RuleUnit,
   type User,
 } from "@/lib/api";
+import { Modal } from "@/components/modal";
+import { MSG_NUM_AMBIGUO, fmtInputAR, parseNumAR } from "@/lib/format";
 
 const UNIT_LABEL: Record<string, string> = {
   kg: "kg", m3: "m³", m2: "m²", m: "m", l: "litros", u: "unidades",
@@ -57,7 +59,27 @@ type DraftRule = {
   crew: CrewMember[];
 };
 
-const num = (s: string) => Number(s.replace(",", "."));
+// Valor numérico para el payload. Si el texto no es válido devuelve el texto tal cual
+// (así `dirty` sigue viendo el cambio); `validate` lo frena antes de guardar.
+const num = (s: string): number => {
+  const p = parseNumAR(s);
+  return p.ok ? p.value : (s as unknown as number);
+};
+
+// Lee un campo numérico: valor o mensaje de error en castellano.
+function readNum(
+  s: string,
+  { label, obligatorio = true }: { label: string; obligatorio?: boolean },
+): string | null {
+  const p = parseNumAR(s);
+  if (!p.ok) {
+    if (p.error === "vacio") return obligatorio ? `${label} es obligatorio.` : null;
+    if (p.error === "ambiguo") return `${label}: ${MSG_NUM_AMBIGUO}.`;
+    return `${label} tiene que ser un número.`;
+  }
+  if (p.value < 0) return `${label} no puede ser negativo.`;
+  return null;
+}
 
 type Draft = { name: string; description: string; is_default: boolean; rules: DraftRule[] };
 
@@ -76,18 +98,18 @@ function toDraft(rs: RuleSet): Draft {
       uid: nextUid(),
       kind: r.kind ?? "material",
       stage: r.stage ?? "",
-      dailyYield: r.daily_yield != null ? String(r.daily_yield) : "",
+      dailyYield: r.daily_yield != null ? fmtInputAR(r.daily_yield) : "",
       laborMode: r.labor_mode ?? "unit",
-      unitPrice: r.unit_price != null ? String(r.unit_price) : "",
+      unitPrice: r.unit_price != null ? fmtInputAR(r.unit_price) : "",
       crew: (r.crew ?? []).map((c) => ({ ...c })),
       measure: r.measure,
       label: r.label,
       keywords: r.keywords.join(", "),
       exclude: r.exclude_keywords.join(", "),
       unit: r.unit,
-      factor: String(r.factor),
+      factor: fmtInputAR(r.factor),
       mode: r.mode,
-      waste: String(r.waste_pct),
+      waste: fmtInputAR(r.waste_pct),
       notes: r.notes ?? "",
     })),
   };
@@ -115,9 +137,9 @@ function toPayload(d: Draft, measureOrder: string[]) {
       waste_pct: 0,
       notes: r.notes.trim() || null,
       stage: r.stage.trim() || null,
-      daily_yield: r.dailyYield.trim() ? num(r.dailyYield) || 0 : null,
+      daily_yield: r.dailyYield.trim() ? num(r.dailyYield) : null,
       labor_mode: r.laborMode,
-      unit_price: r.unitPrice.trim() ? num(r.unitPrice) || 0 : null,
+      unit_price: r.unitPrice.trim() ? num(r.unitPrice) : null,
       crew: r.crew.filter((c) => c.trade && c.count > 0),
     } : ({
       kind: "material",
@@ -126,9 +148,9 @@ function toPayload(d: Draft, measureOrder: string[]) {
       keywords: splitList(r.keywords),
       exclude_keywords: splitList(r.exclude),
       unit: r.mode === "rebar" ? "kg" : r.unit,
-      factor: r.mode === "rebar" ? 1 : Number(r.factor.replace(",", ".")) || 0,
+      factor: r.mode === "rebar" ? 1 : num(r.factor),
       mode: r.mode,
-      waste_pct: Number(r.waste.replace(",", ".")) || 0,
+      waste_pct: num(r.waste),
       notes: r.notes.trim() || null,
       stage: r.stage.trim() || null,
     }));
@@ -145,17 +167,23 @@ function validate(d: Draft): string | null {
   for (const r of d.rules) {
     if (r.kind === "labor") {
       if (!r.label.trim()) return "Hay una tarea de mano de obra sin nombre.";
-      if (r.dailyYield.trim() && !(num(r.dailyYield) >= 0))
-        return `"${r.label}": el rendimiento tiene que ser un número.`;
-      if (r.unitPrice.trim() && !(num(r.unitPrice) >= 0))
-        return `"${r.label}": el precio tiene que ser un número.`;
+      const ey = readNum(r.dailyYield, { label: "El rendimiento", obligatorio: false });
+      if (ey) return `"${r.label}": ${ey}`;
+      const ep = readNum(r.unitPrice, { label: "El precio", obligatorio: false });
+      if (ep) return `"${r.label}": ${ep}`;
       continue;
     }
     if (!r.label.trim()) return "Hay una regla sin nombre de producto.";
     if (splitList(r.keywords).length === 0)
       return `"${r.label || "Regla"}": falta al menos una palabra para buscar en el PDF.`;
-    if (r.mode !== "rebar" && !(Number(r.factor.replace(",", ".")) >= 0))
-      return `"${r.label}": la cantidad tiene que ser un número.`;
+    if (r.mode !== "rebar") {
+      const ef = readNum(r.factor, { label: "La cantidad" });
+      if (ef) return `"${r.label}": ${ef.replace("es obligatorio", "es obligatoria").replace("negativo", "negativa")}`;
+    }
+    const w = parseNumAR(r.waste);
+    if (!w.ok && w.error === "ambiguo") return `"${r.label}": ${MSG_NUM_AMBIGUO}.`;
+    if (!w.ok && w.error === "vacio") return `"${r.label}": el desperdicio es obligatorio (0 si no hay).`;
+    if (!w.ok || w.value < 0 || w.value > 100) return `"${r.label}": El desperdicio va de 0 a 100 %.`;
   }
   return null;
 }
@@ -214,6 +242,26 @@ export default function RuleSetEditorPage() {
     const h = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", h);
     return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
+
+  // Navegación interna con cambios sin guardar: se intercepta el clic en cualquier link
+  // interno (incluida la barra lateral) y se pregunta antes de salir.
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPendingHref(url.pathname + url.search + url.hash);
+    };
+    document.addEventListener("click", h, true);
+    return () => document.removeEventListener("click", h, true);
   }, [dirty]);
 
   function patchRule(uid: string, patch: Partial<DraftRule>) {
@@ -277,6 +325,33 @@ export default function RuleSetEditorPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 pb-28 pt-10">
+      {pendingHref && (
+        <Modal onClose={() => setPendingHref(null)}>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Cambios sin guardar</h2>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Tenés cambios sin guardar. ¿Salir igual?</p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setPendingHref(null)}
+              className="rounded-md border border-slate-300/50 bg-white/50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white/80 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800/80"
+            >
+              Seguir editando
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const href = pendingHref;
+                setPendingHref(null);
+                router.push(href);
+              }}
+              className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+            >
+              Salir sin guardar
+            </button>
+          </div>
+        </Modal>
+      )}
       <Link href="/reglas" className="text-sm text-brand hover:underline dark:text-sky-400">
         ← Reglas de cómputo
       </Link>
@@ -697,10 +772,15 @@ function LaborRow({
               <span key={i} className="flex items-center gap-1">
                 <input
                   inputMode="decimal"
-                  value={String(c.count)}
+                  value={c.count ? fmtInputAR(c.count) : ""}
                   disabled={disabled}
                   aria-label="Cantidad"
-                  onChange={(e) => setCrew(i, { count: num(e.target.value) || 0 })}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    const p = parseNumAR(t);
+                    if (!t.trim()) setCrew(i, { count: 0 });
+                    else if (p.ok && p.value >= 0) setCrew(i, { count: p.value });
+                  }}
                   className={`${inputCls} w-10 px-1 text-right`}
                 />
                 <input
