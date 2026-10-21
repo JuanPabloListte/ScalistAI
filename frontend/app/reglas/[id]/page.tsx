@@ -26,7 +26,8 @@ const UNIT_LABEL: Record<string, string> = {
 
 // Nombre corto de cada medida para las pestañas.
 const TAB_LABEL: Record<string, string> = {
-  muro_m2: "Muros", columna_m3: "Columnas", viga_ml: "Vigas", riostra_ml: "Riostras",
+  muro_m2: "Muros", columna_m3: "Columnas", viga_ml: "Vigas (ml)", viga_m3: "Vigas (m³)", vigueta_ml: "Viguetas", losa_m2: "Entrepisos",
+  riostra_ml: "Riostras",
   techo_m2: "Techo", sup_cubierta_m2: "Pisos", cielorraso_m2: "Cielorrasos", armadura_kg: "Armadura",
 };
 

@@ -623,6 +623,7 @@ export type ModelMeasures = {
   measures: { key: string; label: string; unit: string; value: number; count: number }[];
   rebar_by_diameter: { diameter_mm: number; kg: number }[];
   warnings: string[];
+  alerts?: { level: "alto" | "medio"; message: string }[];
 };
 export type IvaMode = "auto" | "included" | "excluded";
 export type ProjectPriceList = {
