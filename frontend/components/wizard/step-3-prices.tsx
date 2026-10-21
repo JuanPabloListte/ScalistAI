@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { PriceReview } from "@/components/price-review";
+import { PriceReview, type ReviewFilter } from "@/components/price-review";
 import {
   api,
   type IvaMode,
@@ -74,6 +74,7 @@ export function ProjectPricesPanel({
   renderFooter,
   onViewChange,
   viewOverride,
+  filter,
 }: {
   projectId: number;
   showIntro?: boolean;
@@ -84,6 +85,8 @@ export function ProjectPricesPanel({
   onViewChange?: (v: ProjectBudgetView) => void;
   /** Vista actualizada desde afuera (p. ej. al cambiar la mano de obra). */
   viewOverride?: ProjectBudgetView | null;
+  /** Filtro de la revisión (solo Presupuesto). */
+  filter?: ReviewFilter;
 }) {
   const [view, setView] = useState<ProjectBudgetView | null>(null);
 
@@ -258,6 +261,7 @@ export function ProjectPricesPanel({
           busy={busy}
           showTotals={showTotals}
           showShoppingList={showShoppingList}
+          filter={filter}
           onOverride={(key, row) => {
             const next = { ...overrides };
             if (row === "auto") delete next[key];

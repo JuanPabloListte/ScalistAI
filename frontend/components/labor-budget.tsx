@@ -30,6 +30,16 @@ const STATUS: Record<LaborItem["status"], { label: string; cls: string }> = {
   sin_medida: { label: "El modelo no lo trae", cls: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
 };
 
+/** Filtro opcional de la mano de obra (solo la página Presupuesto lo usa). */
+export type LaborFilter = { text: string; group: string };
+
+export function matchesLaborFilter(it: { label: string; stage: string }, f?: LaborFilter): boolean {
+  if (!f) return true;
+  if (f.group && it.stage !== f.group) return false;
+  const q = f.text.trim().toLowerCase();
+  return !q || it.label.toLowerCase().includes(q);
+}
+
 /** Mano de obra por rubro: en cada tarea se elige si va tercerizada (precio
  *  del contratista por unidad) o con cuadrilla propia (rendimiento × jornales). */
 export function LaborPanel({
@@ -38,12 +48,18 @@ export function LaborPanel({
   canEdit,
   isAdmin,
   onView,
+  filter,
+  hideTitle,
 }: {
   projectId: number;
   view: ProjectBudgetView;
   canEdit: boolean;
   isAdmin: boolean;
   onView: (v: ProjectBudgetView) => void;
+  /** Opcional: oculta las tareas (y rubros) que no coinciden. */
+  filter?: LaborFilter;
+  /** Sin el título "Mano de obra" (lo da la pestaña). */
+  hideTitle?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,14 +91,15 @@ export function LaborPanel({
 
   const visible = labor.items.filter((i) => i.status !== "sin_medida");
   const hidden = labor.items.length - visible.length;
-  const stages = Array.from(new Set(visible.map((i) => i.stage)));
+  const shown = visible.filter((i) => matchesLaborFilter(i, filter));
+  const stages = Array.from(new Set(shown.map((i) => i.stage)));
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Mano de obra</h2>
-          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+          {!hideTitle && <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Mano de obra</h2>}
+          <p className={`${hideTitle ? "" : "mt-0.5 "}text-sm text-slate-500 dark:text-slate-400`}>
             En cada tarea elegí si la tercerizás (precio del contratista, sin IVA) o la hace tu cuadrilla
             (rendimiento × jornales). Los rendimientos y cuadrillas salen de las{" "}
             <a href="/reglas" target="_blank" className="text-brand hover:underline dark:text-sky-400">reglas de cómputo</a>.
@@ -104,6 +121,8 @@ export function LaborPanel({
           El juego de reglas «{view.rule_set?.name}» no tiene mano de obra para lo que trae el modelo.
           Agregala desde <a href="/reglas" target="_blank" className="text-brand hover:underline dark:text-sky-400">Reglas de cómputo</a>.
         </p>
+      ) : shown.length === 0 ? (
+        <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Ningún ítem coincide con el filtro.</p>
       ) : (
         <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
           <table className="w-full min-w-[56rem] text-sm">
@@ -118,7 +137,7 @@ export function LaborPanel({
               </tr>
             </thead>
             {stages.map((stage) => {
-              const items = visible.filter((i) => i.stage === stage);
+              const items = shown.filter((i) => i.stage === stage);
               const total = items.reduce((s, i) => s + (i.cost ?? 0), 0);
               return (
                 <tbody key={stage} className="border-t border-slate-200 dark:border-slate-800">
