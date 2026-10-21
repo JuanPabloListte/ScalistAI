@@ -175,7 +175,7 @@ export default {
           if (await page.getByRole('button', { name: 'Cancelar' }).isVisible()) await h.click(page, 'Cancelar');
           await h.click(page, '+ Nuevo juego');
           await h.llenar(page, 'css=input[placeholder="Ej. Obra económica"]', nombre);
-          await page.mouse.click(10, 450); await h.settle(page, 500);
+          await page.mouse.click(1300, 800); await h.settle(page, 500);
           await h.foto(page, 'tras-clic-afuera');
           const n = (await juegosConNombre(d.adminId, nombre)).length;
           await cartel(page, `Juegos creados con "${nombre}": ${n}`);

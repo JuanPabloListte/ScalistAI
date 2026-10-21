@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { ProjectNotFound } from "@/components/project-not-found";
 import { IFC_WIZARD_STEPS, Stepper } from "@/components/wizard/stepper";
 import { Step1Basics } from "@/components/wizard/step-1-basics";
 import { Step2Plan } from "@/components/wizard/step-2-plan";
@@ -11,7 +12,7 @@ import { Step3Location } from "@/components/wizard/step-3-location";
 import { Step3Prices } from "@/components/wizard/step-3-prices";
 import { Step4Building } from "@/components/wizard/step-4-building";
 import { Step5Review } from "@/components/wizard/step-5-review";
-import { api, isUnauthorized, type Project } from "@/lib/api";
+import { api, ApiError, isUnauthorized, type Project } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 
 // Paso interno "Construcción" (5) oculto → se salta a Revisión (6).
@@ -27,6 +28,7 @@ function NewProjectWizardInner() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(!!resumeId);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!resumeId) return;
@@ -48,7 +50,8 @@ function NewProjectWizardInner() {
           router.push("/login");
           return;
         }
-        setLoadError(err instanceof Error ? err.message : "No se pudo cargar el proyecto");
+        if (err instanceof ApiError && err.status === 404) setNotFound(true);
+        else setLoadError(err instanceof Error ? err.message : "No se pudo cargar el proyecto");
       })
       .finally(() => setLoading(false));
   }, [resumeId, router, editMode]);
@@ -72,6 +75,8 @@ function NewProjectWizardInner() {
       </main>
     );
   }
+
+  if (notFound) return <ProjectNotFound />;
 
   if (loadError) {
     return (
