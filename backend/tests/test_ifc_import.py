@@ -463,6 +463,92 @@ def test_losas_estructurales():
     assert meta["raw"]["slab"] == 3
 
 
+def _build_ifc_fundaciones(tmp: Path) -> Path:
+    """Vigas de fundación con los nombres del export real ("VF 25 x 35", "VF0",
+    "VFe") y variantes, vigas comunes parecidas ("VL", "Ve", "V1") y una
+    columna con un CONJUNTO de 3 barras (3 IfcSweptDiskSolid) adentro."""
+    from ifcopenshell.api import run
+
+    f, body, st1, st2, staux = _new_ifc()
+
+    def beam(name, length, storey=st1):
+        b = run("root.create_entity", f, ifc_class="IfcBeam", name=name)
+        run("spatial.assign_container", f, products=[b], relating_structure=storey)
+        _add_qto(f, b, "Qto_BeamBaseQuantities", {"Length": length})
+        return b
+
+    beam("Hormigón-Viga rectangular:VF 25 x 35:785654", 6.0)
+    beam("Hormigón-Viga rectangular:VF0 25 x 25:787328", 4.0)
+    beam("Hormigón-Viga rectangular:VFe 35 x 35:787452", 2.0)
+    beam("V.F. 20 x 40", 3.0)
+    beam("Viga de fundación", 5.0)
+    # Por TIPO: el nombre de la instancia no dice nada.
+    vft = run("root.create_entity", f, ifc_class="IfcBeamType", name="Hormigón-Viga rectangular:VF 25 x 35")
+    run("type.assign_type", f, related_objects=[beam("Viga", 1.5)], relating_type=vft)
+    # Vigas comunes con siglas parecidas: siguen siendo beam.
+    beam("Hormigón-Viga rectangular:VL 25X50:979725", 7.0, storey=st2)
+    beam("Hormigón-Viga rectangular:Ve 13 x 25:821779", 8.0, storey=st2)
+    beam("Hormigón-Viga rectangular:V1 (18 x 25):820589", 9.0, storey=st2)
+
+    # Columna 0.3×0.3×2.8 con un conjunto de 3 barras verticales Ø10 de 2.6 m.
+    col = run("root.create_entity", f, ifc_class="IfcColumn", name="C1")
+    run("spatial.assign_container", f, products=[col], relating_structure=st1)
+    run("geometry.edit_object_placement", f, product=col)
+    rep = run("geometry.add_profile_representation", f, context=body,
+              profile=f.createIfcRectangleProfileDef("AREA", None, None, 0.3, 0.3), depth=2.8)
+    run("geometry.assign_representation", f, product=col, representation=rep)
+    rb = run("root.create_entity", f, ifc_class="IfcReinforcingBar", name="Rebar Bar:10M")
+    rb.BarLength, rb.CrossSectionArea, rb.NominalDiameter = 2.6, 7.85e-5, 0.01
+    run("spatial.assign_container", f, products=[rb], relating_structure=st1)
+    run("geometry.edit_object_placement", f, product=rb)
+    solids = []
+    for x in (-0.1, 0.0, 0.1):
+        pts = [f.createIfcCartesianPoint((x, 0.0, 0.1)), f.createIfcCartesianPoint((x, 0.0, 2.7))]
+        solids.append(f.createIfcSweptDiskSolid(f.createIfcPolyline(pts), 0.005, None, None, None))
+    srep = f.createIfcShapeRepresentation(body, "Body", "AdvancedSweptSolid", solids)
+    run("geometry.assign_representation", f, product=rb, representation=srep)
+
+    out = tmp / "fundaciones.ifc"
+    f.write(str(out))
+    return out
+
+
+def _parse_fundaciones():
+    ifc = _load_ifc_import()
+    tmp = Path(tempfile.mkdtemp())
+    els, meta = ifc.parse_ifc(str(_build_ifc_fundaciones(tmp)))
+    return _by_type(els), meta
+
+
+def test_vigas_de_fundacion_van_a_riostra():
+    g, meta = _parse_fundaciones()
+    ri = {round(e["length_m"], 2): e for e in g.get("riostra", [])}
+    # VF, VF0, VFe, V.F., "viga de fundación" y la tipada como VF.
+    assert sorted(ri) == [1.5, 2.0, 3.0, 4.0, 5.0, 6.0], f"riostras: {sorted(ri)}"
+    # Conserva la sección del nombre y el volumen; guarda el perfil.
+    vf = ri[6.0]
+    assert abs(vf["width_m"] - 0.25) < 1e-6 and abs(vf["depth_m"] - 0.35) < 1e-6, vf
+    assert abs(vf["volume_m3"] - 0.25 * 0.35 * 6.0) < 1e-6, vf
+    assert vf["perfil"].startswith("Hormigón-Viga rectangular:VF 25 x 35"), vf
+    assert ri[1.5]["perfil"] == "Hormigón-Viga rectangular:VF 25 x 35"   # por el tipo
+    assert ri[5.0]["volume_m3"] is None   # "viga de fundación" sin sección
+    # VL / Ve / V1 no son de fundación: siguen como beam, con perfil.
+    beams = {round(e["length_m"], 2): e for e in g.get("beam", [])}
+    assert sorted(beams) == [7.0, 8.0, 9.0], f"vigas: {sorted(beams)}"
+    assert "VL 25X50" in beams[7.0]["perfil"]
+    assert meta["raw"]["riostra"] == 6 and meta["raw"]["beam"] == 3
+
+
+def test_conjunto_de_barras_y_anfitrion():
+    g, _ = _parse_fundaciones()
+    (arm,) = g["armadura"]
+    # 3 barras × 2.6 m × 7.85e-5 m² × 7850 kg/m³; largo total para el diámetro.
+    assert arm["n_barras"] == 3, arm
+    assert abs(arm["length_m"] - 7.8) < 1e-6, arm
+    assert abs(arm["kg"] - 3 * 2.6 * 7.85e-5 * 7850) < 1e-6, arm
+    assert arm["host"] == "column", arm
+
+
 def test_losa_sin_espesor_queda_null():
     """Losa estructural sin extrusión ni "NN cm" en el nombre: thickness_m None."""
     from ifcopenshell.api import run

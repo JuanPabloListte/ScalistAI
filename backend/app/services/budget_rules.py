@@ -96,6 +96,12 @@ ALERT_BEAM_MIN_M3 = 10.0
 # duplicadas o una superficie cubierta incompleta.
 REBAR_KG_PER_M2_MIN = 15.0
 REBAR_KG_PER_M2_MAX = 80.0
+# Elementos de hormigón que llevan armadura, en el orden en que se nombran en
+# el aviso de cuantía baja (geometry["host"] de las barras importadas del IFC).
+REBAR_HOST_LABELS: dict[str, str] = {
+    "column": "columnas", "beam": "vigas", "slab": "losas",
+    "riostra": "vigas de fundación", "pozo": "pilotes",
+}
 
 
 def snap_diameter(d: float) -> float:
@@ -139,8 +145,13 @@ def measures_from_elements(elements: Iterable) -> Measures:
     beams_estimated = 0
     floor_estimated = False
     structure_levels: set = set()
+    concrete: set[str] = set()          # tipos de hormigón presentes en el modelo
+    rebar_hosts: set[str] = set()       # tipos que tienen al menos una barra
+    bars_with_host_info = False
     for e in elements:
         t = e.type
+        if t in REBAR_HOST_LABELS:
+            concrete.add(t)
         if t in ("wall", "beam") and getattr(e, "level", None):
             structure_levels.add(e.level)
         L, A, H = e.length_m or 0.0, e.area_m2 or 0.0, e.height_m or 0.0
@@ -172,6 +183,10 @@ def measures_from_elements(elements: Iterable) -> Measures:
         elif t == "cielorraso" and A:
             add("cielorraso_m2", A)
         elif t == "armadura":
+            # host: sale del import nuevo; los IFC viejos no lo traen (no se avisa qué falta).
+            if "host" in (e.geometry or {}):
+                bars_with_host_info = True
+                rebar_hosts.add(e.geometry["host"])
             kg = (e.geometry or {}).get("kg")
             if not kg or not L:
                 bars_without_kg += 1
@@ -196,7 +211,9 @@ def measures_from_elements(elements: Iterable) -> Measures:
             f"{bars_without_kg} barras de armadura sin largo/sección en el IFC no se computan.")
     m.alerts = sanity_alerts(m, beams_estimated=beams_estimated,
                              floor_estimated=floor_estimated,
-                             structure_levels=len(structure_levels))
+                             structure_levels=len(structure_levels),
+                             rebar_hosts=rebar_hosts if bars_with_host_info else None,
+                             concrete=concrete)
     return m
 
 
@@ -205,10 +222,33 @@ def _fmt(x: float, dec: int = 1) -> str:
     return f"{x:,.{dec}f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
+def _join(items: list[str]) -> str:
+    """["a", "b", "c"] → "a, b y c"."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " y " + items[-1]
+
+
+def _rebar_missing_text(rebar_hosts: set[str] | None, concrete: set[str]) -> str | None:
+    """"El modelo trae hierro solo en vigas: faltan columnas y losas." o None
+    si no se sabe dónde están las barras o no falta ningún tipo."""
+    if rebar_hosts is None:
+        return None
+    con = [lbl for k, lbl in REBAR_HOST_LABELS.items() if k in rebar_hosts]
+    faltan = [lbl for k, lbl in REBAR_HOST_LABELS.items()
+              if k in concrete and k not in rebar_hosts]
+    if not faltan:
+        return None
+    if not con:
+        return f"Ninguna barra del modelo cae en {_join(faltan)}."
+    return f"El modelo trae hierro solo en {_join(con)}: faltan {_join(faltan)}."
+
+
 def sanity_alerts(m: Measures, *, beams_estimated: int = 0, floor_estimated: bool = False,
-                  structure_levels: int = 0) -> list[dict]:
+                  structure_levels: int = 0, rebar_hosts: set[str] | None = None,
+                  concrete: set[str] | None = None) -> list[dict]:
     """Avisos para el usuario cuando las medidas del modelo no son creíbles.
-    `structure_levels`: cantidad de niveles distintos con muros o vigas."""
+    `structure_levels`: cantidad de niveles distintos con muros o vigas.
+    `rebar_hosts`: tipos de elemento con barras (None = el import no lo dice);
+    `concrete`: tipos de elemento de hormigón presentes."""
     v = m.values
     alerts: list[dict] = []
 
@@ -233,7 +273,12 @@ def sanity_alerts(m: Measures, *, beams_estimated: int = 0, floor_estimated: boo
     sup, hierro = v.get("sup_cubierta_m2", 0.0), v.get("armadura_kg", 0.0)
     if sup > 0 and hierro > 0:
         cuantia = hierro / sup
-        if not REBAR_KG_PER_M2_MIN <= cuantia <= REBAR_KG_PER_M2_MAX:
+        faltan = (_rebar_missing_text(rebar_hosts, concrete or set())
+                  if cuantia < REBAR_KG_PER_M2_MIN else None)
+        if faltan:
+            add("medio", f"La armadura da {_fmt(cuantia)} kg por m² cubierto (lo habitual es "
+                         f"{REBAR_KG_PER_M2_MIN:g} a {REBAR_KG_PER_M2_MAX:g}). {faltan}")
+        elif not REBAR_KG_PER_M2_MIN <= cuantia <= REBAR_KG_PER_M2_MAX:
             add("medio", f"La armadura da {_fmt(cuantia)} kg por m² cubierto (lo habitual es "
                          f"{REBAR_KG_PER_M2_MIN:g} a {REBAR_KG_PER_M2_MAX:g}): revisá las "
                          "barras del modelo y la superficie cubierta.")
