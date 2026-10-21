@@ -105,6 +105,7 @@ function SupplierBudget() {
   const [laborView, setLaborView] = useState<ProjectBudgetView | null>(null);
   const [me, setMe] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [pdfMenu, setPdfMenu] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -229,7 +230,7 @@ function SupplierBudget() {
               {pl
                 ? [pl.supplier ?? pl.filename, view?.rule_set?.name && `reglas: ${view.rule_set.name}`]
                     .filter(Boolean).join(" · ")
-                : "Falta el presupuesto del proveedor"}
+                : noAccess ? "" : "Falta el presupuesto del proveedor"}
             </p>
           </div>
           <div className="flex gap-8 text-right">
@@ -277,7 +278,7 @@ function SupplierBudget() {
                      groupLabel="Medida" shown={matShown} total={matItems.length}
                      placeholder="Buscar producto o renglón del proveedor…" />
         )}
-        <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView}
+        <ProjectPricesPanel projectId={projectId} showIntro={!pl} showTotals={false} onViewChange={setView} onNoAccess={() => setNoAccess(true)}
                             viewOverride={laborView} filter={matFilter} />
       </section>
 

@@ -379,6 +379,20 @@ export default function RuleSetEditorPage() {
         </label>
       </section>
 
+      {!canEdit && (
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          Solo lectura
+          {isAdmin && (
+            <>
+              {" · "}
+              <Link href={`/reglas?duplicar=${id}`} className="text-brand hover:underline dark:text-sky-400">
+                duplicalo para ajustarlo
+              </Link>
+            </>
+          )}
+        </p>
+      )}
+
       {/* TABS por medida */}
       <div className="mt-6 flex gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
         {[{ key: "", label: "Todas", n: draft.rules.length },
@@ -426,6 +440,10 @@ export default function RuleSetEditorPage() {
       <datalist id="oficios">
         {trades.map((s) => <option key={s} value={s} />)}
       </datalist>
+
+      {filtering && draft.rules.filter(matches).length === 0 && (
+        <p className="mt-6 text-xs text-slate-500 dark:text-slate-400">Ninguna regla coincide con el filtro.</p>
+      )}
 
       {meta.measures.map((m) => {
         const all = draft.rules.filter((r) => r.measure === m.key);

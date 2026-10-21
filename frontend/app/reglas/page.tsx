@@ -30,6 +30,18 @@ export default function RuleSetsPage() {
       .finally(() => setLoading(false));
   }, [router]);
 
+  // /reglas?duplicar=<id> (desde un juego en solo lectura) abre el diálogo de copia.
+  useEffect(() => {
+    if (!me || sets.length === 0) return;
+    const url = new URL(window.location.href);
+    const dup = url.searchParams.get("duplicar");
+    if (!dup) return;
+    url.searchParams.delete("duplicar");
+    window.history.replaceState(null, "", url.pathname + url.search);
+    const src = sets.find((s) => String(s.id) === dup);
+    if (src && (me.is_superadmin || me.role === "admin")) setCreating({ copyFrom: src });
+  }, [me, sets]);
+
   const isAdmin = me?.is_superadmin || me?.role === "admin";
   const canEdit = (s: RuleSet) => (s.is_system ? !!me?.is_superadmin : !!isAdmin);
   const q = query.trim().toLowerCase();
@@ -83,6 +95,10 @@ export default function RuleSetsPage() {
           placeholder="Buscar juego o producto…"
           className="mb-4 w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
         />
+      )}
+
+      {q && visible.length === 0 && (
+        <p className="text-xs text-slate-500 dark:text-slate-400">Ningún juego coincide con el filtro.</p>
       )}
 
       <ul className="grid gap-3 sm:grid-cols-2">
