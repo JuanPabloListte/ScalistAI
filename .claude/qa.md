@@ -14,6 +14,8 @@ Config de la skill global `qa-local`. Producto: modelo IFC → presupuesto del p
 - **Listo cuando**: `http://localhost:8100/docs` y `http://localhost:3100/login` → 200.
 - **Bajar**: `.\manual\tools\entorno-demo.ps1 down`. **Borrar todo**: `... destroy`.
 - **Trampas conocidas**:
+  - `--filtro` es UNA subcadena: para varios casos, varias corridas con `--anexar`. Los casos
+    precios-12 a 19 dependen de precios-11 (sube la lista buena): re-correrlos con `--filtro precios-1`.
   - Docker Desktop a veces queda colgado (error 500 de la API de Docker): `docker desktop restart`.
   - En Windows el backend no siempre recarga solo: tras cambiar código, `docker compose -p
     scalist-manual restart backend worker`.
