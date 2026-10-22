@@ -1044,7 +1044,7 @@ export default function ProjectGanttPage() {
 
       {/* Equipo del proyecto (roles de permiso). Colapsable; se auto-gatea:
           solo jefe/admin ven los controles, el resto lo ve de solo lectura. */}
-      <details className="mb-4 group">
+      {FEATURES.projectRoles && <details className="mb-4 group">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
           <Users className="h-4 w-4 text-brand-600" />
           Equipo del proyecto
@@ -1053,7 +1053,7 @@ export default function ProjectGanttPage() {
         <div className="mt-2">
           <ProjectTeam projectId={projectId} />
         </div>
-      </details>
+      </details>}
 
       {/* Alineación medición (presupuesto) ↔ plan de obra — trae importes,
           oculto a capataz/comitente. */}

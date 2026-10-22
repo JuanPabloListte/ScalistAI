@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api, type ProjectRole } from "@/lib/api";
+import { FEATURES } from "@/lib/features";
 
 type Tab = { key: string; label: string; financial: boolean };
 
@@ -31,12 +32,15 @@ export function ProjectNav({
 }) {
   const pathname = usePathname();
   const [name, setName] = useState<string | null>(null);
-  const [role, setRole] = useState<ProjectRole | null | undefined>(undefined);
+  // Sin roles de obra (flag apagado) no hay nada que esperar: se ven todas.
+  const [role, setRole] = useState<ProjectRole | null | undefined>(
+    FEATURES.projectRoles ? undefined : null,
+  );
 
   useEffect(() => {
     let cancelled = false;
     api.getProject(projectId).then((p) => !cancelled && setName(p.name)).catch(() => {});
-    api
+    if (FEATURES.projectRoles) api
       .getProjectMembers(projectId)
       .then((m) => !cancelled && setRole(m.my_role))
       .catch(() => !cancelled && setRole(null)); // si falla, el backend decide en cada página

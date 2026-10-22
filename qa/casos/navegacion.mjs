@@ -40,8 +40,8 @@ export default {
       },
       {
         id: 'nav-06-comitente',
-        titulo: 'Comitente: solo Cronograma y Obra',
-        esperado: 'El comitente ve solo las pestañas Cronograma y Obra (sin Presupuesto ni Cambios); nada parpadea ni aparece un error.',
+        titulo: 'Usuario con rol de obra viejo (roles ocultos)',
+        esperado: 'Con los roles de obra ocultos (flag apagado) la barra muestra las 4 pestañas; si el backend le niega la plata, cada pantalla lo dice sin error técnico.',
         rol: 'comitente', url: `${base}/obra`,
         pasos: async (page, h) => {
           await h.settle(page, 2500);

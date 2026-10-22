@@ -15,6 +15,9 @@ export const FEATURES = {
   legacyBudget: process.env.NEXT_PUBLIC_FEATURE_LEGACY_BUDGET === "true",
   /** Landing: cotizador de planes (sección Precios y "Calcular mi precio"). */
   landingPricing: process.env.NEXT_PUBLIC_FEATURE_LANDING_PRICING === "true",
+  /** Roles de obra por proyecto (jefe de obra / capataz / comitente) y el panel
+   *  "Equipo del proyecto". Apagado: el admin ve y controla todo. */
+  projectRoles: process.env.NEXT_PUBLIC_FEATURE_PROJECT_ROLES === "true",
 } as const;
 
 /** Prefijos de ruta de las secciones apagadas. */
