@@ -42,6 +42,9 @@ function NewProjectWizardInner() {
         }
         // edit: arranca en ubicación; wizard normal: siguiente al completado.
         let startStep = editMode ? 4 : Math.min(6, Math.max(1, p.wizard_step + 1));
+        // F5: vuelve al paso en que estaba (?paso=N), si ya lo había alcanzado.
+        const paso = Number(params.get("paso"));
+        if (Number.isInteger(paso) && paso >= 2 && paso <= Math.min(6, p.wizard_step + 1)) startStep = paso;
         // IFC: el índice 3 ya no es "Páginas" sino "Precios" (proveedor).
         setStep(skipHidden(startStep));
       })
@@ -55,6 +58,14 @@ function NewProjectWizardInner() {
       })
       .finally(() => setLoading(false));
   }, [resumeId, router, editMode]);
+
+  // El paso actual queda en la URL para que recargar no lo cambie.
+  useEffect(() => {
+    if (loading || !project) return;
+    const q = new URLSearchParams({ id: String(project.id), paso: String(step) });
+    if (editMode) q.set("edit", "1");
+    window.history.replaceState(null, "", `/projects/new?${q}`);
+  }, [loading, project, step, editMode]);
 
   const goBack = useCallback(
     () => setStep((s) => {

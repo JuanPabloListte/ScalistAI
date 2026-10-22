@@ -362,6 +362,10 @@ export default {
         rol: 'admin', url,
         pasos: async (page, h) => {
           await h.settle(page, 1500);
+          // Ir a Precios desde el stepper (al abrir puede arrancar en el paso siguiente).
+          const aPrecios = page.getByRole('button', { name: /Precios/ });
+          if (await aPrecios.count()) { await aPrecios.first().click(); await h.settle(page, 1500); }
+          h.nota(`URL antes de F5: ${page.url()}`);
           await h.foto(page, 'al-abrir');
           await page.reload(); await h.settle(page, 1500);
           await h.foto(page, 'tras-f5');
