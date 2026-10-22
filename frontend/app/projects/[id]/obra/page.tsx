@@ -157,7 +157,7 @@ export default function ObraPage() {
   return (
     <>
     <ProjectNav projectId={projectId} />
-    <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Seguimiento de obra</h1>

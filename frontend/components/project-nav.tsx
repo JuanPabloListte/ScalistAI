@@ -49,7 +49,7 @@ export function ProjectNav({
   const tabs = TABS.filter((t) => !(hideFinancial && t.financial));
 
   return (
-    <nav aria-label="Proyecto" className="border-b border-slate-200 dark:border-slate-800">
+    <nav aria-label="Proyecto">
       <div className={`mx-auto ${containerClass} pt-4`}>
         <div className="flex items-baseline gap-3">
           <Link
@@ -62,7 +62,7 @@ export function ProjectNav({
             {name ?? " "}
           </p>
         </div>
-        <div className="-mb-px mt-3 flex min-h-[2rem] gap-4 overflow-x-auto">
+        <div className="mt-3 flex min-h-[2rem] gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
           {role !== undefined &&
             tabs.map((t) => {
               const href = `/projects/${projectId}/${t.key}`;

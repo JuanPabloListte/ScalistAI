@@ -68,7 +68,7 @@ export default function ChangesPage() {
   return (
     <>
     <ProjectNav projectId={projectId} />
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-6xl p-6">
       <header className="mb-6">
         <h1 className="text-sm text-slate-500 dark:text-slate-400">
           Qué se movió desde el baseline

@@ -946,7 +946,7 @@ export default function ProjectGanttPage() {
   return (
     <>
     <ProjectNav projectId={projectId} />
-    <main className="mx-auto max-w-none px-6 md:px-10 py-8">
+    <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
           <h1 className="sr-only">Cronograma de obra</h1>
