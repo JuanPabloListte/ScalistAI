@@ -67,7 +67,7 @@ export default function ChangesPage() {
 
   return (
     <>
-    <ProjectNav projectId={projectId} containerClass="max-w-5xl px-6" />
+    <ProjectNav projectId={projectId} />
     <div className="mx-auto max-w-5xl p-6">
       <header className="mb-6">
         <h1 className="text-sm text-slate-500 dark:text-slate-400">

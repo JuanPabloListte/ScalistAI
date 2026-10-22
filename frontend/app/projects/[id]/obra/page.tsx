@@ -123,7 +123,7 @@ export default function ObraPage() {
   if (loading) {
     return (
       <>
-        <ProjectNav projectId={projectId} containerClass="max-w-4xl px-4 sm:px-6" />
+        <ProjectNav projectId={projectId} />
         <div className="p-10 text-center text-slate-500">Cargando avance de obra…</div>
       </>
     );
@@ -132,7 +132,7 @@ export default function ObraPage() {
   if (!progress) {
     return (
       <>
-      <ProjectNav projectId={projectId} containerClass="max-w-4xl px-4 sm:px-6" />
+      <ProjectNav projectId={projectId} />
       <main className="mx-auto max-w-3xl px-6 py-16 text-center">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Seguimiento de obra</h1>
         <p className="mt-3 text-slate-500">{error?.includes("baseline")
@@ -156,7 +156,7 @@ export default function ObraPage() {
 
   return (
     <>
-    <ProjectNav projectId={projectId} containerClass="max-w-4xl px-4 sm:px-6" />
+    <ProjectNav projectId={projectId} />
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
