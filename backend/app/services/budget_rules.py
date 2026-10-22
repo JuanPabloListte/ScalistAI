@@ -42,6 +42,7 @@ MEASURES: dict[str, tuple[str, str]] = {
     "vigueta_ml": ("Viguetas pretensadas (largo)", "m"),
     "losa_m2": ("Losas de entrepiso (superficie)", "m2"),
     "riostra_ml": ("Vigas de fundación / riostras (largo)", "m"),
+    "riostra_m3": ("Vigas de fundación / riostras (volumen)", "m3"),
     "techo_m2": ("Techo / losa de cubierta (superficie)", "m2"),
     "sup_cubierta_m2": ("Superficie cubierta (pisos)", "m2"),
     "cielorraso_m2": ("Cielorrasos (superficie)", "m2"),
@@ -56,7 +57,7 @@ LABOR_MODES = ("unit", "daily")
 MEASURE_STAGE: dict[str, str] = {
     "muro_m2": "Mampostería", "columna_m3": "Estructura", "viga_ml": "Estructura",
     "viga_m3": "Estructura", "vigueta_ml": "Estructura", "losa_m2": "Estructura",
-    "riostra_ml": "Fundaciones", "techo_m2": "Cubierta", "sup_cubierta_m2": "Pisos",
+    "riostra_ml": "Fundaciones", "riostra_m3": "Fundaciones", "techo_m2": "Cubierta", "sup_cubierta_m2": "Pisos",
     "cielorraso_m2": "Cielorrasos", "armadura_kg": "Estructura",
 }
 
@@ -81,6 +82,10 @@ MORTAR_JOINT_M = 0.015
 # y avisar que inflar el hormigón como hacía el 20 × 30 fijo.
 BEAM_DEFAULT_WIDTH_M = 0.18
 BEAM_DEFAULT_DEPTH_M = 0.25
+# Ídem para las vigas de fundación / zapatas (riostra) sin sección: 20 × 30 cm,
+# la sección que suponían las reglas viejas por metro lineal.
+RIOSTRA_DEFAULT_WIDTH_M = 0.20
+RIOSTRA_DEFAULT_DEPTH_M = 0.30
 
 # --- Avisos de cordura (alerts) ---
 # En una estructura de hormigón armado convencional el hormigón de vigas anda
@@ -143,6 +148,7 @@ def measures_from_elements(elements: Iterable) -> Measures:
     bars_without_kg = 0
     openings_m2 = 0.0
     beams_estimated = 0
+    riostras_estimated = 0
     floor_estimated = False
     structure_levels: set = set()
     concrete: set[str] = set()          # tipos de hormigón presentes en el modelo
@@ -174,6 +180,11 @@ def measures_from_elements(elements: Iterable) -> Measures:
             add("losa_m2", A)
         elif t == "riostra" and L:
             add("riostra_ml", L)
+            vol = (e.geometry or {}).get("volume_m3")
+            if not vol or vol <= 0:
+                vol = L * RIOSTRA_DEFAULT_WIDTH_M * RIOSTRA_DEFAULT_DEPTH_M
+                riostras_estimated += 1
+            add("riostra_m3", vol)
         elif t == "roof" and A:
             add("techo_m2", A)
         elif t == "room" and A:
@@ -210,6 +221,7 @@ def measures_from_elements(elements: Iterable) -> Measures:
         m.warnings.append(
             f"{bars_without_kg} barras de armadura sin largo/sección en el IFC no se computan.")
     m.alerts = sanity_alerts(m, beams_estimated=beams_estimated,
+                             riostras_estimated=riostras_estimated,
                              floor_estimated=floor_estimated,
                              structure_levels=len(structure_levels),
                              rebar_hosts=rebar_hosts if bars_with_host_info else None,
@@ -242,7 +254,8 @@ def _rebar_missing_text(rebar_hosts: set[str] | None, concrete: set[str]) -> str
     return f"El modelo trae hierro solo en {_join(con)}: faltan {_join(faltan)}."
 
 
-def sanity_alerts(m: Measures, *, beams_estimated: int = 0, floor_estimated: bool = False,
+def sanity_alerts(m: Measures, *, beams_estimated: int = 0, riostras_estimated: int = 0,
+                  floor_estimated: bool = False,
                   structure_levels: int = 0, rebar_hosts: set[str] | None = None,
                   concrete: set[str] | None = None) -> list[dict]:
     """Avisos para el usuario cuando las medidas del modelo no son creíbles.
@@ -266,6 +279,11 @@ def sanity_alerts(m: Measures, *, beams_estimated: int = 0, floor_estimated: boo
         add("medio", f"{beams_estimated} {'viga' if uno else 'vigas'} sin sección en el "
                      f"modelo: se {'estimó' if uno else 'estimaron'} "
                      f"{BEAM_DEFAULT_WIDTH_M * 100:g}×{BEAM_DEFAULT_DEPTH_M * 100:g} cm.")
+    if riostras_estimated:
+        uno = riostras_estimated == 1
+        add("medio", f"{riostras_estimated} {'viga' if uno else 'vigas'} de fundación sin "
+                     f"sección en el modelo: se {'estimó' if uno else 'estimaron'} "
+                     f"{RIOSTRA_DEFAULT_WIDTH_M * 100:g}×{RIOSTRA_DEFAULT_DEPTH_M * 100:g} cm.")
     if floor_estimated:
         add("medio", "El modelo no trae ambientes: la superficie cubierta es una estimación.")
     if v.get("losa_m2", 0.0) <= 0 and structure_levels > 1:
@@ -669,11 +687,11 @@ DEFAULT_RULES: list[tuple] = [
     ("viga_m3", "Piedra (hormigón vigas)", _AGGREG, "m3", 0.75, "fixed", 10, [], None),
     ("vigueta_ml", "Vigueta pretensada", ["vigueta"], "m", 1.0, "fixed", 3, [],
      "Metros de vigueta del modelo."),
-    ("riostra_ml", "Cemento (hormigón riostras)", ["cemento"], "kg", 21.0, "fixed", 5,
-     ["pegamento", "albanileria"], "Sección supuesta 20 × 30 cm = 0,06 m³ por metro."),
-    ("riostra_ml", "Arena gruesa (hormigón riostras)", ["arena gruesa"], "m3", 0.039, "fixed", 10,
+    ("riostra_m3", "Cemento (hormigón riostras)", ["cemento"], "kg", 350.0, "fixed", 5,
+     ["pegamento", "albanileria"], _HORMIGON_NOTE),
+    ("riostra_m3", "Arena gruesa (hormigón riostras)", ["arena gruesa"], "m3", 0.65, "fixed", 10,
      [], None),
-    ("riostra_ml", "Piedra (hormigón riostras)", _AGGREG, "m3", 0.045, "fixed", 10, [], None),
+    ("riostra_m3", "Piedra (hormigón riostras)", _AGGREG, "m3", 0.75, "fixed", 10, [], None),
     ("techo_m2", "Ladrillo de losa (cerámico)", ["losa"], "u", 5.5, "fixed", 5,
      ["pegamento"], "Losa de viguetas cada 50 cm con ladrillo cerámico de 25 × 38/40."),
     ("techo_m2", "Cemento (capa de compresión)", ["cemento"], "kg", 17.5, "fixed", 5,

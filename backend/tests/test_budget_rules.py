@@ -159,7 +159,7 @@ def test_juego_por_defecto_con_presupuestos_reales():
                       mode=r[5], waste_pct=r[6], exclude_keywords=r[7])
              for i, r in enumerate(DEFAULT_RULES)]
     # vigueta_ml no: el corralón de obra gruesa no siempre cotiza viguetas.
-    m = Measures(values={k: 10.0 for k in ("muro_m2", "columna_m3", "viga_m3", "riostra_ml",
+    m = Measures(values={k: 10.0 for k in ("muro_m2", "columna_m3", "viga_m3", "riostra_m3",
                                            "techo_m2", "losa_m2", "armadura_kg")},
                  rebar_kg={6.0: 2.0, 8.0: 3.0, 10.0: 5.0})
     r = compute_budget(m, rules, lines)
@@ -196,6 +196,65 @@ def test_vigas_por_volumen_viguetas_y_losas():
     # Todas con volumen: sin aviso de sección.
     m = measures_from_elements([_el("beam", length=10, volume_m3=0.9)])
     assert m.alerts == [] and m.values["viga_m3"] == 0.9
+
+
+def test_riostras_por_volumen():
+    """Vigas de fundación / zapatas (type riostra): el hormigón sale del volumen
+    real del IFC; sin sección se estima 20×30 y se avisa. El largo sigue
+    (mano de obra y Gantt)."""
+    from app.services.budget_rules import measures_from_elements
+
+    m = measures_from_elements([
+        _el("riostra", length=10, volume_m3=0.875, width_m=0.25, depth_m=0.35),  # VF 25×35
+        _el("riostra", length=5, volume_m3=None, width_m=None, depth_m=None),    # sin sección
+        _el("riostra", length=2),                       # import viejo: solo largo
+    ])
+    assert m.values["riostra_ml"] == 17 and m.counts["riostra_ml"] == 3
+    assert abs(m.values["riostra_m3"] - (0.875 + 7 * 0.20 * 0.30)) < 1e-9
+    assert m.counts["riostra_m3"] == 3
+    d = m.as_dict()
+    med = {x["key"]: x for x in d["measures"]}
+    assert med["riostra_m3"]["label"] == "Vigas de fundación / riostras (volumen)"
+    assert med["riostra_m3"]["unit"] == "m3"
+    assert [a["message"] for a in d["alerts"]] == [
+        "2 vigas de fundación sin sección en el modelo: se estimaron 20×30 cm."]
+    assert d["alerts"][0]["level"] == "medio"
+    (a,) = measures_from_elements([_el("riostra", length=3)]).alerts
+    assert a["message"] == "1 viga de fundación sin sección en el modelo: se estimó 20×30 cm."
+    # Todas con volumen: sin aviso.
+    m = measures_from_elements([_el("riostra", length=10, volume_m3=0.875)])
+    assert m.alerts == [] and m.values["riostra_m3"] == 0.875
+    # Vigas y riostras sin sección: un aviso por cada una.
+    msgs = [a["message"] for a in _alerts([_el("beam", length=4), _el("riostra", length=4)])]
+    assert msgs == ["1 viga sin sección en el modelo: se estimó 18×25 cm.",
+                    "1 viga de fundación sin sección en el modelo: se estimó 20×30 cm."], msgs
+
+
+def test_juego_estandar_riostras_m3():
+    from app.services.budget_rules import (DEFAULT_LABOR_RULES, DEFAULT_RULES, MEASURE_STAGE,
+                                           MEASURES, RuleSpec, _HORMIGON_NOTE, compute_budget,
+                                           measures_from_elements)
+    from app.services.budget_schedule import _SHORT
+
+    assert not [r for r in DEFAULT_RULES if r[0] == "riostra_ml"],         "el hormigón de riostras ya no va por metro lineal"
+    ri = {r[1]: r for r in DEFAULT_RULES if r[0] == "riostra_m3"}
+    assert ri["Cemento (hormigón riostras)"][4] == 350.0
+    assert ri["Cemento (hormigón riostras)"][8] == _HORMIGON_NOTE
+    assert ri["Arena gruesa (hormigón riostras)"][4] == 0.65
+    assert ri["Piedra (hormigón riostras)"][4] == 0.75
+    (mo,) = [r for r in DEFAULT_LABOR_RULES if r[1] == "Mano de obra: vigas de fundación"]
+    assert mo[0] == "riostra_ml" and mo[2] == "Fundaciones"
+    assert MEASURE_STAGE["riostra_m3"] == "Fundaciones" and "riostra_ml" in MEASURES
+    assert _SHORT["riostra_m3"] == "hormigón de fundaciones"
+    # 40 ml de VF 25×35 = 3,5 m³ -> 3,5 × 350 × 1,05 kg de cemento.
+    m = measures_from_elements([_el("riostra", length=40, volume_m3=3.5)])
+    rules = [RuleSpec(id=i, measure=r[0], label=r[1], keywords=r[2], unit=r[3], factor=r[4],
+                      mode=r[5], waste_pct=r[6], exclude_keywords=r[7])
+             for i, r in enumerate(DEFAULT_RULES)]
+    r = compute_budget(m, rules, [_line(1, "CEMENTO X 25 KG", 6000, 25, "kg")])
+    cem = next(i for i in r["items"] if i["label"] == "Cemento (hormigón riostras)")
+    assert cem["status"] == "ok" and cem["measure"] == "riostra_m3"
+    assert abs(cem["quantity"] - 3.5 * 350 * 1.05) < 1e-6
 
 
 def test_juego_estandar_vigas_m3_losas_y_viguetas():
