@@ -66,7 +66,7 @@ export function ProjectNav({
             {name ?? " "}
           </p>
         </div>
-        <div className="mt-3 flex min-h-[2rem] gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+        <div className="mt-3 flex min-h-[2rem] gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-slate-200 dark:border-slate-800">
           {role !== undefined &&
             tabs.map((t) => {
               const href = `/projects/${projectId}/${t.key}`;

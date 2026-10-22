@@ -63,7 +63,7 @@ function FilterBar({
         aria-label={groupLabel}
         value={value.group}
         onChange={(e) => onChange({ ...value, group: e.target.value })}
-        className={`max-w-[16rem] ${FIELD_CLS}`}
+        className={`w-full min-w-0 sm:w-auto sm:max-w-[16rem] ${FIELD_CLS}`}
       >
         <option value="">{allLabel}</option>
         {groups.map((g) => <option key={g} value={g}>{g}</option>)}
@@ -228,7 +228,7 @@ function SupplierBudget() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-400">Precio de venta</p>
-            <p className="text-4xl font-bold tabular-nums">{price ? money(price.total) : "—"}</p>
+            <p className="text-3xl font-bold tabular-nums sm:text-4xl">{price ? money(price.total) : "—"}</p>
             <p className="mt-1 text-sm text-slate-300">
               {pl
                 ? [pl.supplier ?? pl.filename, view?.rule_set?.name && `reglas: ${view.rule_set.name}`]
@@ -236,7 +236,7 @@ function SupplierBudget() {
                 : noAccess ? "" : "Falta el presupuesto del proveedor"}
             </p>
           </div>
-          <div className="flex gap-8 text-right">
+          <div className="grid w-full grid-cols-1 gap-3 sm:flex sm:w-auto sm:gap-8 sm:text-right">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Materiales</p>
               <p className="text-xl font-semibold tabular-nums">{price ? money(price.materials) : "—"}</p>

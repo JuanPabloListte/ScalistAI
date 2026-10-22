@@ -210,11 +210,16 @@ function LaborRow({
   useEffect(() => {
     setPrice(it.mode === "unit" && it.unit_price != null ? qty(it.unit_price, 2) : "");
   }, [it.mode, it.unit_price]);
+  const [priceErr, setPriceErr] = useState<string | null>(null);
   const st = STATUS[it.status];
 
   function commit() {
     const v = price.trim() ? num(price) : null;
-    if (v != null && !(v >= 0)) return;
+    if (v != null && !(v >= 0 && Number.isFinite(v))) {
+      setPriceErr("Ingresá un número válido.");
+      return;
+    }
+    setPriceErr(null);
     if (v !== (it.unit_price ?? null)) onPrice(v);
   }
 
@@ -256,19 +261,28 @@ function LaborRow({
       </td>
       <td className="px-3 py-2 text-right">
         {it.mode === "unit" ? (
-          <div className="flex items-center justify-end gap-1">
-            <span className="text-xs text-slate-500">$</span>
-            <input
-              inputMode="decimal"
-              value={price}
-              disabled={disabled}
-              placeholder={`por ${unit}`}
-              aria-label={`Precio por ${unit} de ${it.label}`}
-              onChange={(e) => setPrice(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-              className="w-28 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm tabular-nums dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
+          <div>
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-xs text-slate-500">$</span>
+              <input
+                inputMode="decimal"
+                value={price}
+                disabled={disabled}
+                placeholder={`por ${unit}`}
+                aria-label={`Precio por ${unit} de ${it.label}`}
+                aria-invalid={priceErr ? true : undefined}
+                onChange={(e) => {
+                  setPrice(e.target.value);
+                  setPriceErr(null);
+                }}
+                onBlur={commit}
+                onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                className="w-28 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm tabular-nums dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+            </div>
+            {priceErr && (
+              <div role="alert" className="mt-1 whitespace-nowrap text-[11px] text-red-600 dark:text-red-400">{priceErr}</div>
+            )}
           </div>
         ) : (
           <span className="tabular-nums text-slate-700 dark:text-slate-200">

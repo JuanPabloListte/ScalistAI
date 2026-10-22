@@ -203,7 +203,7 @@ export function ProjectPricesPanel({
       </div>}
 
       {pl ? (
-        <div className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700 md:grid-cols-[1.4fr_1fr_1fr]">
+        <div className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700 grid-cols-1 md:grid-cols-[1.4fr_1fr_1fr] [&>*]:min-w-0">
           <Field label="Archivo del proveedor">
             <div className="flex items-start gap-3">
               <FileIcon />
