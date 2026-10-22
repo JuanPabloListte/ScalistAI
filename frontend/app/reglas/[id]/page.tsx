@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   api,
@@ -227,6 +227,18 @@ export default function RuleSetEditorPage() {
   const canEdit = original?.is_system ? !!me?.is_superadmin : isAdmin;
   const [query, setQuery] = useState("");
   const [measureFilter, setMeasureFilter] = useState("");
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [tabsMore, setTabsMore] = useState(false);
+  const updateTabsMore = useCallback(() => {
+    const el = tabsRef.current;
+    setTabsMore(!!el && el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+  // Se recalcula en cada render (cambian las pestañas) y al redimensionar.
+  useEffect(() => { updateTabsMore(); });
+  useEffect(() => {
+    window.addEventListener("resize", updateTabsMore);
+    return () => window.removeEventListener("resize", updateTabsMore);
+  }, [updateTabsMore]);
   const q = query.trim().toLowerCase();
   const filtering = !!q || !!measureFilter;
   const matches = (r: DraftRule) =>
@@ -395,7 +407,11 @@ export default function RuleSetEditorPage() {
       )}
 
       {/* TABS por medida */}
-      <div className="mt-6 flex gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+      {/* Si hay más pestañas a la derecha, el borde se desvanece para avisar que se desplaza. */}
+      <div ref={tabsRef} onScroll={updateTabsMore}
+           style={tabsMore ? { maskImage: "linear-gradient(to right, #000 calc(100% - 3rem), transparent)",
+                               WebkitMaskImage: "linear-gradient(to right, #000 calc(100% - 3rem), transparent)" } : undefined}
+           className="mt-6 flex gap-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
         {[{ key: "", label: "Todas", n: draft.rules.length },
           ...meta.measures
             .map((m) => ({ key: m.key, label: TAB_LABEL[m.key] ?? m.label,
