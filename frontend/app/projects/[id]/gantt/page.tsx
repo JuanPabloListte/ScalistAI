@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import {
@@ -23,6 +23,7 @@ import {
   Maximize2, Minimize2, Users,
 } from "lucide-react";
 import { ProjectTeam } from "@/components/project-team";
+import { ProjectNav } from "@/components/project-nav";
 import { ProjectNotFound } from "@/components/project-not-found";
 import { FEATURES } from "@/lib/features";
 
@@ -75,7 +76,6 @@ type TaskJiraMetadata = {
 
 export default function ProjectGanttPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const projectId = Number(params.id);
 
   const [project, setProject] = useState<Project | null>(null);
@@ -944,15 +944,13 @@ export default function ProjectGanttPage() {
   const hasData = allTasks.length > 0;
 
   return (
-    <main className="mx-auto max-w-none px-6 md:px-10 py-10">
+    <>
+    <ProjectNav projectId={projectId} containerClass="max-w-none px-6 md:px-10" />
+    <main className="mx-auto max-w-none px-6 md:px-10 py-8">
       <header className="mb-6 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
-          <button onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition hover:text-brand-600 dark:text-slate-400">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-            Volver
-          </button>
-          <div className="flex items-center gap-3 mt-2">
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Cronograma de obra</h1>
+          <h1 className="sr-only">Cronograma de obra</h1>
+          <div className="flex items-center gap-3">
             <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm border ${
               plan?.status === "active"
                 ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/20 dark:text-green-400 dark:border-green-800/40"
@@ -2278,5 +2276,6 @@ export default function ProjectGanttPage() {
       )}
 
     </main>
+    </>
   );
 }

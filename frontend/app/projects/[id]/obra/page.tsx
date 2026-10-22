@@ -9,10 +9,11 @@
  */
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, type WorkProgress, type TaskProgress, type ProgressEntryRow } from "@/lib/api";
 import { CostosTab } from "@/components/obra/costos-tab";
+import { ProjectNav } from "@/components/project-nav";
 
 function fmtARS(n: number): string {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -104,7 +105,6 @@ function TaskRow({ t, projectId }: { t: TaskProgress; projectId: number }) {
 
 export default function ObraPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const projectId = Number(params.id);
 
   const [progress, setProgress] = useState<WorkProgress | null>(null);
@@ -120,10 +120,19 @@ export default function ObraPage() {
   }, [projectId]);
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div className="p-10 text-center text-slate-500">Cargando avance de obra…</div>;
+  if (loading) {
+    return (
+      <>
+        <ProjectNav projectId={projectId} containerClass="max-w-4xl px-4 sm:px-6" />
+        <div className="p-10 text-center text-slate-500">Cargando avance de obra…</div>
+      </>
+    );
+  }
 
   if (!progress) {
     return (
+      <>
+      <ProjectNav projectId={projectId} containerClass="max-w-4xl px-4 sm:px-6" />
       <main className="mx-auto max-w-3xl px-6 py-16 text-center">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Seguimiento de obra</h1>
         <p className="mt-3 text-slate-500">{error?.includes("baseline")
@@ -134,6 +143,7 @@ export default function ObraPage() {
           Ir al cronograma para congelar el baseline →
         </Link>
       </main>
+      </>
     );
   }
 
@@ -145,11 +155,12 @@ export default function ObraPage() {
   }
 
   return (
+    <>
+    <ProjectNav projectId={projectId} containerClass="max-w-4xl px-4 sm:px-6" />
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6">
-        <button onClick={() => router.back()} className="text-sm font-medium text-slate-500 hover:text-brand-600">← Volver</button>
-        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">Seguimiento de obra</h1>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Seguimiento de obra</h1>
           <span className="text-xs text-slate-500">Plan v{progress.version} · al {fmtDate(progress.as_of)}</span>
         </div>
         <div className="mt-4 flex gap-1 border-b border-slate-200 dark:border-slate-800">
@@ -226,5 +237,6 @@ export default function ObraPage() {
       </>
       )}
     </main>
+    </>
   );
 }
