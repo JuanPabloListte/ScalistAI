@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { LaborPanel, SalePricePanel, matchesLaborFilter } from "@/components/labor-budget";
 import { LegacyBudget } from "@/components/legacy-budget";
 import { matchesReviewFilter } from "@/components/price-review";
+import { ProjectNav } from "@/components/project-nav";
 import { ProjectNotFound } from "@/components/project-not-found";
 import { ProjectPricesPanel } from "@/components/wizard/step-3-prices";
 import { api, ApiError, isUnauthorized, type Project, type ProjectBudgetView, type User } from "@/lib/api";
@@ -167,11 +167,10 @@ function SupplierBudget() {
   if (notFound) return <ProjectNotFound />;
 
   return (
+    <>
+    <ProjectNav projectId={projectId} />
     <main className="mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex items-center justify-between gap-3">
-        <Link href="/projects" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-          ← Volver a proyectos
-        </Link>
+      <div className="flex items-center justify-end gap-3">
         <div className="flex items-center gap-2">
         <div className="relative">
           <button
@@ -226,8 +225,7 @@ function SupplierBudget() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white shadow-sm dark:border-slate-700">
-        <p className="text-sm text-slate-300">{project?.name ?? " "}</p>
-        <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-400">Precio de venta</p>
             <p className="text-4xl font-bold tabular-nums">{price ? money(price.total) : "—"}</p>
@@ -301,5 +299,6 @@ function SupplierBudget() {
 
       {view && <SalePricePanel projectId={projectId} view={view} canEdit onView={onLaborView} />}
     </main>
+    </>
   );
 }

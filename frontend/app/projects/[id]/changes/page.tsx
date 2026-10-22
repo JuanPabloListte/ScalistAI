@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { ProjectNav } from "@/components/project-nav";
 import {
   api,
-  type Project,
   type ProjectChanges,
 } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
@@ -37,10 +37,8 @@ function versionStatusLabel(status: string): string {
 
 export default function ChangesPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const projectId = Number(params.id);
 
-  const [project, setProject] = useState<Project | null>(null);
   const [data, setData] = useState<ProjectChanges | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +49,8 @@ export default function ChangesPage() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    Promise.all([api.getProject(projectId), api.getProjectChanges(projectId)])
-      .then(([proj, changes]) => {
-        setProject(proj);
+    api.getProjectChanges(projectId)
+      .then((changes) => {
         setData(changes);
         setOpenCompute(changes.summary.n_compute_changed > 0);
         setOpenPrices(changes.summary.n_price_changed > 0);
@@ -69,29 +66,13 @@ export default function ChangesPage() {
   const hasBaseline = data?.prices.baseline_plan_id != null;
 
   return (
+    <>
+    <ProjectNav projectId={projectId} containerClass="max-w-5xl px-6" />
     <div className="mx-auto max-w-5xl p-6">
-      <button
-        type="button"
-        onClick={() => {
-          // No usar /projects/[id]: en IFC esa ruta hace replace → presupuesto.
-          if (typeof window !== "undefined" && window.history.length > 1) {
-            router.back();
-          } else {
-            router.push(`/projects/${projectId}/gantt`);
-          }
-        }}
-        className="mb-4 text-xs font-medium text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-      >
-        ← Volver
-      </button>
-
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
-          Cambios
+        <h1 className="text-sm text-slate-500 dark:text-slate-400">
+          Qué se movió desde el baseline
         </h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          {project?.name ?? `Proyecto #${projectId}`} — qué se movió desde el baseline
-        </p>
       </header>
 
       {loading && (
@@ -364,6 +345,7 @@ export default function ChangesPage() {
         </>
       )}
     </div>
+    </>
   );
 }
 
