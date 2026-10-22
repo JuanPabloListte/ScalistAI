@@ -248,6 +248,28 @@ def test_aviso_de_totales_es_ar_y_sin_contradiccion():
         "faltan renglones."], r["warnings"]
 
 
+def test_presentacion_por_m2():
+    """Cerámicos por caja de X m² o precio por m²; el resto no cambia."""
+    from app.services.budget_rules import amount_in_unit
+    from app.services.price_list_parse import parse_presentation
+
+    caja = parse_presentation("CERAMICO 45X45 CAJA 2,03 M2")
+    assert (caja["amount"], caja["unit"]) == (2.03, "m2")
+    assert caja["attrs"]["dims"] == [45.0, 45.0]
+    assert amount_in_unit(caja, "m2") == 2.03
+    for desc, amount in [("REVESTIMIENTO 30x60 1,44m2 caja", 1.44),
+                         ("PISO CERAMICO 2.16 MTS2", 2.16), ("CERAMICO CAJA 1,5 m²", 1.5),
+                         ("PORCELANATO 60X60 X M2", 1.0)]:
+        p = parse_presentation(desc)
+        assert (p["amount"], p["unit"]) == (amount, "m2"), (desc, p)
+    assert parse_presentation("CERAMICO 45x45", "m2")["unit"] == "m2"   # columna de unidad
+    # No se confunde con metros ni con otras unidades.
+    assert parse_presentation("HIERRO 12 MTS - 8 MM")["unit"] == "m"
+    assert parse_presentation("ARENA X M3 BOLSON")["unit"] == "m3"
+    assert parse_presentation("PEGAMENTO CERAMICOS 30 KG")["unit"] == "kg"
+    assert parse_presentation("CERAMICO 45X45")["unit"] == "u"
+
+
 def test_fixtures_reales():
     """Presupuestos reales (si están en disco)."""
     from app.services.price_list_parse import parse_price_list
