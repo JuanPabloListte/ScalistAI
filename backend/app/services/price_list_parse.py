@@ -86,10 +86,14 @@ def _to_float(tok: str, dec: str) -> float | None:
 _PRES_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:kgs?|kilos?)\b\.?", re.I), "kg"),
     (re.compile(r"(\d+(?:[.,]\d+)?)\s*m3\b", re.I), "m3"),
+    # Cerámicos por caja: "CAJA 2,03 M2", "1,44 m²", "2.16 MTS2".
+    (re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:m2|m²|mts2|mt2)(?![\w²])", re.I), "m2"),
     (re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:l|lts?|litros?)\b", re.I), "l"),
     (re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:mts|mt|metros|m)\b", re.I), "m"),
 ]
 _PER_M3 = re.compile(r"\bx\s*m3\b", re.I)
+# "PORCELANATO 60X60 X M2": precio por m².
+_PER_M2 = re.compile(r"\bx\s*(?:m2|m²)(?![\w²])", re.I)
 _DIAM = re.compile(r"(\d+(?:[.,]\d+)?)\s*mm\b", re.I)
 # "HIERRO 8 C/U": el número tras "hierro" es el diámetro aunque no diga MM.
 _REBAR = re.compile(r"^\s*(?:hierro|acero)\s+(\d+(?:[.,]\d+)?)\s+(?:c/u|u|un|barra)?\b", re.I)
@@ -107,6 +111,8 @@ def _f(s: str) -> float:
 def _presentation_in(text: str) -> dict | None:
     if _PER_M3.search(text):
         return {"amount": 1.0, "unit": "m3"}
+    if _PER_M2.search(text):
+        return {"amount": 1.0, "unit": "m2"}
     for rx, unit in _PRES_PATTERNS:
         m = rx.search(text)
         if m:

@@ -46,6 +46,9 @@ MEASURES: dict[str, tuple[str, str]] = {
     "techo_m2": ("Techo / losa de cubierta (superficie)", "m2"),
     "sup_cubierta_m2": ("Superficie cubierta (pisos)", "m2"),
     "cielorraso_m2": ("Cielorrasos (superficie)", "m2"),
+    "revestimiento_m2": ("Revestimiento cerámico de muros (superficie)", "m2"),
+    "puerta_u": ("Puertas (unidades)", "u"),
+    "ventana_u": ("Ventanas (unidades)", "u"),
     "armadura_kg": ("Armadura (kg de hierro, por diámetro)", "kg"),
 }
 
@@ -59,6 +62,7 @@ MEASURE_STAGE: dict[str, str] = {
     "viga_m3": "Estructura", "vigueta_ml": "Estructura", "losa_m2": "Estructura",
     "riostra_ml": "Fundaciones", "riostra_m3": "Fundaciones", "techo_m2": "Cubierta", "sup_cubierta_m2": "Pisos",
     "cielorraso_m2": "Cielorrasos", "armadura_kg": "Estructura",
+    "revestimiento_m2": "Revestimientos", "puerta_u": "Aberturas", "ventana_u": "Aberturas",
 }
 
 
@@ -86,6 +90,14 @@ BEAM_DEFAULT_DEPTH_M = 0.25
 # la sección que suponían las reglas viejas por metro lineal.
 RIOSTRA_DEFAULT_WIDTH_M = 0.20
 RIOSTRA_DEFAULT_DEPTH_M = 0.30
+# Muros con revestimiento cerámico (baños, cocinas): el material del muro en el
+# IFC (normalizado: sin acentos, minúsculas) contiene alguna de estas raíces. Se
+# computa una cara, bruta (las aberturas no se asignan a un muro). "Ladrillo
+# cerámico" o "bloque cerámico" es el material del muro, no un revestimiento.
+TILED_WALL_MATERIAL_HINTS = ("ceram", "azulej", "revest")
+TILED_WALL_MATERIAL_EXCLUDE = ("ladrillo", "bloque")
+# geometry["subtype"] de las aberturas del IFC → medida que cuenta unidades.
+OPENING_SUBTYPE_MEASURE = {"door": "puerta_u", "window": "ventana_u"}
 
 # --- Avisos de cordura (alerts) ---
 # En una estructura de hormigón armado convencional el hormigón de vigas anda
@@ -139,6 +151,14 @@ class Measures:
         }
 
 
+def is_tiled_wall_material(material: str | None) -> bool:
+    """¿El material del muro es un revestimiento cerámico ("Cerámica blanca",
+    "Azulejo 20x20", "Revestimiento baño")?"""
+    mat = _norm(material or "")
+    return (any(h in mat for h in TILED_WALL_MATERIAL_HINTS)
+            and not any(x in mat for x in TILED_WALL_MATERIAL_EXCLUDE))
+
+
 def measures_from_elements(elements: Iterable) -> Measures:
     """`elements`: objetos con type, length_m, area_m2, height_m, geometry."""
     m = Measures()
@@ -163,8 +183,16 @@ def measures_from_elements(elements: Iterable) -> Measures:
         L, A, H = e.length_m or 0.0, e.area_m2 or 0.0, e.height_m or 0.0
         if t == "wall" and L and H:
             add("muro_m2", L * H)
-        elif t == "opening" and L and H:
-            openings_m2 += L * H
+            # El muro revestido se levanta igual: sigue en muro_m2.
+            if is_tiled_wall_material((e.geometry or {}).get("material")):
+                add("revestimiento_m2", L * H)
+        elif t == "opening":
+            if L and H:
+                openings_m2 += L * H
+            # Unidades por tipo; una abertura sin subtype no suma a ninguna.
+            key = OPENING_SUBTYPE_MEASURE.get((e.geometry or {}).get("subtype"))
+            if key:
+                add(key, 1.0)
         elif t == "column" and A and H:
             add("columna_m3", A * H)
         elif t == "beam" and L:
@@ -675,6 +703,21 @@ DEFAULT_RULES: list[tuple] = [
     ("muro_m2", "Cal hidratada (revoque grueso, 2 caras)", ["cal hidratada"], "kg", 8.0, "fixed",
      5, [], None),
     ("muro_m2", "Arena fina (revoque, 2 caras)", ["arena fina"], "m3", 0.04, "fixed", 10, [], None),
+    # Terminaciones de muros, a DOS caras sobre el m² neto de muro (copia en la
+    # migración t9b0c1d2e3f4, igual que revestimiento, pisos y aberturas).
+    ("muro_m2", "Revoque fino (2 caras)", ["revoque fino"], "kg", 8.0, "fixed", 10, [],
+     "Revoque fino premezclado, ~4 kg/m² por cara."),
+    ("muro_m2", "Fijador (2 caras)", ["fijador"], "l", 0.2, "fixed", 5, [],
+     "Fijador sellador, ~0,1 l/m² por cara."),
+    ("muro_m2", "Pintura látex (2 caras, 2 manos)", ["latex", "látex"], "l", 0.5, "fixed", 5,
+     ["cielorraso"], "Látex interior, 2 manos: ~0,25 l/m² por cara."),
+    ("revestimiento_m2", "Cerámico de revestimiento", ["ceramico", "revestimiento"], "m2", 1.0,
+     "fixed", 10, ["piso", "ladrillo", "pegamento", "pastina"],
+     "m² de muros con material cerámico en el modelo (una cara)."),
+    ("revestimiento_m2", "Pegamento para cerámicos", ["pegamento"], "kg", 5.0, "fixed", 5,
+     ["porcelanato"], "Pegamento cementicio, ~5 kg/m²."),
+    ("revestimiento_m2", "Pastina", ["pastina"], "kg", 0.3, "fixed", 5, [],
+     "~0,3 kg/m² con juntas de 2-3 mm."),
     ("columna_m3", "Cemento (hormigón columnas)", ["cemento"], "kg", 350.0, "fixed", 5,
      ["pegamento", "albanileria"], _HORMIGON_NOTE),
     ("columna_m3", "Arena gruesa (hormigón columnas)", ["arena gruesa"], "m3", 0.65, "fixed", 10,
@@ -707,11 +750,36 @@ DEFAULT_RULES: list[tuple] = [
      "fixed", 10, [], None),
     ("losa_m2", "Piedra (capa de compresión, entrepiso)", _AGGREG, "m3", 0.0375, "fixed", 10,
      [], None),
+    ("sup_cubierta_m2", "Piso cerámico", ["piso ceramico", "ceramico"], "m2", 1.0, "fixed", 10,
+     ["revestimiento", "ladrillo", "pegamento", "pastina"],
+     "m² de superficie cubierta (pisos del modelo)."),
+    ("sup_cubierta_m2", "Pegamento (piso)", ["pegamento"], "kg", 5.0, "fixed", 5,
+     ["porcelanato"], "Pegamento cementicio, ~5 kg/m²."),
+    ("sup_cubierta_m2", "Pastina (piso)", ["pastina"], "kg", 0.3, "fixed", 5, [],
+     "~0,3 kg/m² con juntas de 2-3 mm."),
     ("armadura_kg", "Hierro", ["hierro", "acero"], "kg", 1.0, "rebar", 8, ["alambre", "malla"],
      "Un ítem por diámetro; kg exactos del modelo convertidos a barras de 12 m."),
     ("armadura_kg", "Alambre de atar", ["alambre"], "kg", 0.02, "fixed", 0, [],
      "~2% del peso del hierro."),
+    ("puerta_u", "Puerta", ["puerta"], "u", 1.0, "fixed", 0,
+     ["cerradura", "bisagra", "picaporte", "manija", "burlete"],
+     "Una por puerta del modelo; elegí el modelo y la medida en el proveedor."),
+    ("ventana_u", "Ventana", ["ventana"], "u", 1.0, "fixed", 0,
+     ["cerradura", "bisagra", "manija", "burlete"],
+     "Una por ventana del modelo; elegí el modelo y la medida en el proveedor."),
 ]
+
+# Rubro de las reglas de material que no es el de su medida (las de muro_m2
+# cubren mampostería, revoques y pintura).
+_PINTURA_LABELS = ("Fijador (2 caras)", "Pintura látex (2 caras, 2 manos)")
+
+
+def default_material_stage(measure: str, label: str) -> str:
+    if "revoque" in label.lower():
+        return "Revoques"
+    if label in _PINTURA_LABELS:
+        return "Pintura"
+    return MEASURE_STAGE[measure]
 
 
 _CUADRILLA_2 = [{"trade": "Oficial", "count": 1}, {"trade": "Ayudante", "count": 1}]
@@ -720,17 +788,25 @@ _LABOR_NOTE = "Rendimiento de referencia: ajustalo a tu gente."
 
 # (measure, label, rubro, rendimiento por día de la cuadrilla, cuadrilla).
 # Modo por defecto: tercerizado (precio por unidad, que carga cada proyecto).
-# Hay copia en las migraciones o4c5d6e7f8a9 y q6e7f8a9b0c1 para juegos ya sembrados.
+# Hay copia en las migraciones o4c5d6e7f8a9, q6e7f8a9b0c1 y t9b0c1d2e3f4 para juegos ya sembrados.
 DEFAULT_LABOR_RULES: list[tuple] = [
     ("muro_m2", "Mano de obra: mampostería", "Mampostería", 8.0, _CUADRILLA_2),
     ("muro_m2", "Mano de obra: revoques (2 caras)", "Revoques", 6.0, _CUADRILLA_2),
+    # Terminaciones: copia en la migración t9b0c1d2e3f4 para juegos ya sembrados.
+    ("muro_m2", "Mano de obra: revoque fino (2 caras)", "Revoques", 8.0, _CUADRILLA_2),
+    ("muro_m2", "Mano de obra: pintura (2 caras)", "Pintura", 15.0, _CUADRILLA_2),
+    ("revestimiento_m2", "Mano de obra: revestimiento cerámico", "Revestimientos", 8.0,
+     _CUADRILLA_2),
     ("columna_m3", "Mano de obra: columnas de H°A°", "Estructura", 0.5, _CUADRILLA_3),
     ("viga_ml", "Mano de obra: vigas de H°A°", "Estructura", 4.0, _CUADRILLA_3),
     ("riostra_ml", "Mano de obra: vigas de fundación", "Fundaciones", 5.0, _CUADRILLA_3),
     ("techo_m2", "Mano de obra: losa de cubierta", "Cubierta", 10.0, _CUADRILLA_3),
     ("losa_m2", "Mano de obra: losa de entrepiso", "Estructura", 10.0, _CUADRILLA_3),
     ("sup_cubierta_m2", "Mano de obra: contrapiso y carpeta", "Pisos", 12.0, _CUADRILLA_2),
+    ("sup_cubierta_m2", "Mano de obra: piso cerámico", "Pisos", 10.0, _CUADRILLA_2),
     ("cielorraso_m2", "Mano de obra: cielorrasos", "Terminaciones", 10.0, _CUADRILLA_2),
+    ("puerta_u", "Mano de obra: colocación de puertas", "Aberturas", 4.0, _CUADRILLA_2),
+    ("ventana_u", "Mano de obra: colocación de ventanas", "Aberturas", 4.0, _CUADRILLA_2),
 ]
 
 
@@ -740,7 +816,7 @@ def _default_rules():
     rules = [
         Rule(position=i, measure=m, label=lbl, keywords=list(kw), unit=u, factor=f,
              mode=mode, waste_pct=w, exclude_keywords=list(ex), notes=notes,
-             stage="Revoques" if "revoque" in lbl.lower() else MEASURE_STAGE[m])
+             stage=default_material_stage(m, lbl))
         for i, (m, lbl, kw, u, f, mode, w, ex, notes) in enumerate(DEFAULT_RULES)
     ]
     start = len(rules)

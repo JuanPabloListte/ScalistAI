@@ -163,10 +163,13 @@ def test_juego_por_defecto_con_presupuestos_reales():
                                            "techo_m2", "losa_m2", "armadura_kg")},
                  rebar_kg={6.0: 2.0, 8.0: 3.0, 10.0: 5.0})
     r = compute_budget(m, rules, lines)
-    # Las viguetas pretensadas no las cotiza ese corralón (las vende el fabricante):
-    # quedan sin precio a propósito; todo lo demás de obra gruesa tiene que encontrarse.
+    # Las viguetas pretensadas no las cotiza ese corralón (las vende el fabricante),
+    # ni las terminaciones de muro (revoque fino, fijador, pintura): quedan sin
+    # precio a propósito; todo lo demás de obra gruesa tiene que encontrarse.
+    sin_cotizar = {"Vigueta pretensada", "Revoque fino (2 caras)", "Fijador (2 caras)",
+                   "Pintura látex (2 caras, 2 manos)"}
     faltan = [i["label"] for i in r["items"]
-              if i["status"] not in ("ok", "sin_medida") and i["label"] != "Vigueta pretensada"]
+              if i["status"] not in ("ok", "sin_medida") and i["label"] not in sin_cotizar]
     assert faltan == [], faltan
 
 
@@ -285,6 +288,155 @@ def test_juego_estandar_vigas_m3_losas_y_viguetas():
     assert MEASURES["viga_m3"] == ("Vigas de hormigón (volumen)", "m3")
     assert MEASURES["vigueta_ml"] == ("Viguetas pretensadas (largo)", "m")
     assert MEASURES["losa_m2"] == ("Losas de entrepiso (superficie)", "m2")
+
+
+def test_aberturas_por_subtype():
+    """Puertas y ventanas se cuentan por geometry.subtype; una abertura sin
+    subtype (o de otro tipo) descuenta del muro pero no suma unidades."""
+    from app.services.budget_rules import MEASURE_STAGE, MEASURES, measures_from_elements
+    from app.services.budget_schedule import _SHORT
+
+    m = measures_from_elements([
+        _el("wall", length=20, height=3),                          # 60 m² brutos
+        _el("opening", length=0.9, height=2.1, subtype="door"),
+        _el("opening", length=0.8, height=2.0, subtype="door"),
+        _el("opening", length=1.5, height=1.1, subtype="window"),
+        _el("opening", length=1.0, height=1.0),                    # sin subtype
+        _el("opening", length=1.0, height=1.0, subtype="otro"),
+        _el("opening", subtype="window"),                          # sin medidas: cuenta igual
+    ])
+    assert m.values["puerta_u"] == 2 and m.counts["puerta_u"] == 2
+    assert m.values["ventana_u"] == 2 and m.counts["ventana_u"] == 2
+    huecos = 0.9 * 2.1 + 0.8 * 2.0 + 1.5 * 1.1 + 1.0 + 1.0
+    assert abs(m.values["muro_m2"] - (60 - huecos)) < 1e-9
+    d = {x["key"]: x for x in m.as_dict()["measures"]}
+    assert d["puerta_u"]["label"] == "Puertas (unidades)" and d["puerta_u"]["unit"] == "u"
+    assert d["ventana_u"]["label"] == "Ventanas (unidades)" and d["ventana_u"]["value"] == 2
+    assert MEASURE_STAGE["puerta_u"] == MEASURE_STAGE["ventana_u"] == "Aberturas"
+    assert _SHORT["puerta_u"] == "puertas" and _SHORT["ventana_u"] == "ventanas"
+    # Sin aberturas con subtype: medida en 0 (no falta la clave).
+    vacio = measures_from_elements([_el("opening", length=1, height=1)])
+    assert vacio.values.get("puerta_u", 0) == 0 and vacio.values.get("ventana_u", 0) == 0
+
+
+def test_revestimiento_por_material():
+    """revestimiento_m2 = L×H (una cara) de muros con material cerámico; esos
+    muros siguen en muro_m2. Ladrillo cerámico no es revestimiento."""
+    from app.services.budget_rules import (MEASURE_STAGE, MEASURES, is_tiled_wall_material,
+                                           measures_from_elements)
+    from app.services.budget_schedule import _SHORT
+
+    m = measures_from_elements([
+        _el("wall", length=10, height=3, material="Ladrillo"),
+        _el("wall", length=4, height=2.5, material="Cerámica blanca"),
+        _el("wall", length=2, height=2, material="AZULEJO 20x20"),
+        _el("wall", length=3, height=2, material="Revestimiento baño"),
+        _el("wall", length=5, height=3, material="Muro por defecto"),
+        _el("wall", length=5, height=3, material="Ladrillo cerámico hueco 12"),
+        _el("wall", length=5, height=3),                           # sin material
+    ])
+    assert abs(m.values["revestimiento_m2"] - (10 + 4 + 6)) < 1e-9
+    assert m.counts["revestimiento_m2"] == 3
+    assert abs(m.values["muro_m2"] - (30 + 10 + 4 + 6 + 15 + 15 + 15)) < 1e-9
+    assert is_tiled_wall_material("CERÁMICO") and not is_tiled_wall_material(None)
+    assert not is_tiled_wall_material("Bloque cerámico")
+    assert MEASURES["revestimiento_m2"] == (
+        "Revestimiento cerámico de muros (superficie)", "m2")
+    assert MEASURE_STAGE["revestimiento_m2"] == "Revestimientos"
+    assert _SHORT["revestimiento_m2"] == "revestimientos"
+    assert "revestimiento_m2" not in measures_from_elements(
+        [_el("wall", length=5, height=3, material="Ladrillo")]).values
+
+
+def test_juego_estandar_terminaciones_y_aberturas():
+    from app.services.budget_rules import (DEFAULT_LABOR_RULES, DEFAULT_RULES, RuleSpec,
+                                           _default_rules, compute_budget, compute_labor,
+                                           measures_from_elements)
+
+    mat = {(r[0], r[1]): r for r in DEFAULT_RULES}
+    esperado = {
+        ("puerta_u", "Puerta"): (["puerta"], "u", 1.0),
+        ("ventana_u", "Ventana"): (["ventana"], "u", 1.0),
+        ("muro_m2", "Revoque fino (2 caras)"): (["revoque fino"], "kg", 8.0),
+        ("muro_m2", "Fijador (2 caras)"): (["fijador"], "l", 0.2),
+        ("muro_m2", "Pintura látex (2 caras, 2 manos)"): (["latex", "látex"], "l", 0.5),
+        ("revestimiento_m2", "Cerámico de revestimiento"): (["ceramico", "revestimiento"],
+                                                            "m2", 1.0),
+        ("revestimiento_m2", "Pegamento para cerámicos"): (["pegamento"], "kg", 5.0),
+        ("revestimiento_m2", "Pastina"): (["pastina"], "kg", 0.3),
+        ("sup_cubierta_m2", "Piso cerámico"): (["piso ceramico", "ceramico"], "m2", 1.0),
+        ("sup_cubierta_m2", "Pegamento (piso)"): (["pegamento"], "kg", 5.0),
+        ("sup_cubierta_m2", "Pastina (piso)"): (["pastina"], "kg", 0.3),
+    }
+    for k, (kw, unit, factor) in esperado.items():
+        assert k in mat, k
+        assert (mat[k][2], mat[k][3], mat[k][4]) == (kw, unit, factor), mat[k]
+    assert mat[("muro_m2", "Revoque fino (2 caras)")][6] == 10
+    assert mat[("revestimiento_m2", "Cerámico de revestimiento")][6] == 10
+    assert mat[("sup_cubierta_m2", "Piso cerámico")][6] == 10
+    assert "porcelanato" in mat[("revestimiento_m2", "Pegamento para cerámicos")][7]
+    assert "revestimiento" in mat[("sup_cubierta_m2", "Piso cerámico")][7]
+
+    labor = {r[1]: r for r in DEFAULT_LABOR_RULES}
+    for lbl, measure, stage in [
+            ("Mano de obra: colocación de puertas", "puerta_u", "Aberturas"),
+            ("Mano de obra: colocación de ventanas", "ventana_u", "Aberturas"),
+            ("Mano de obra: revoque fino (2 caras)", "muro_m2", "Revoques"),
+            ("Mano de obra: pintura (2 caras)", "muro_m2", "Pintura"),
+            ("Mano de obra: revestimiento cerámico", "revestimiento_m2", "Revestimientos"),
+            ("Mano de obra: piso cerámico", "sup_cubierta_m2", "Pisos")]:
+        assert labor[lbl][0] == measure and labor[lbl][2] == stage, labor[lbl]
+        assert labor[lbl][3] > 0 and labor[lbl][4], labor[lbl]
+
+    # Rubros del juego sembrado: pintura y fijador no quedan en Mampostería.
+    seeded = {(r.measure, r.label): r for r in _default_rules()}
+    assert seeded[("muro_m2", "Revoque fino (2 caras)")].stage == "Revoques"
+    assert seeded[("muro_m2", "Fijador (2 caras)")].stage == "Pintura"
+    assert seeded[("muro_m2", "Pintura látex (2 caras, 2 manos)")].stage == "Pintura"
+    assert seeded[("muro_m2", "Ladrillo portante 12")].stage == "Mampostería"
+    assert seeded[("revestimiento_m2", "Pastina")].stage == "Revestimientos"
+    assert seeded[("puerta_u", "Puerta")].stage == "Aberturas"
+    assert seeded[("sup_cubierta_m2", "Piso cerámico")].stage == "Pisos"
+    lab = seeded[("puerta_u", "Mano de obra: colocación de puertas")]
+    assert lab.kind == "labor" and lab.unit == "u"
+    assert len({(r.measure, r.label) for r in seeded.values()}) == len(_default_rules())
+
+    # De punta a punta: cerámico por caja de 2,03 m², puertas por unidad.
+    m = measures_from_elements([
+        _el("wall", length=10, height=3, material="Cerámica blanca"),   # 30 m²
+        _el("opening", length=0.9, height=2, subtype="door"),
+        _el("opening", length=0.9, height=2, subtype="door"),
+        _el("room", area=50),
+    ])
+    rules = [RuleSpec.of(r) for r in seeded.values()]
+    for i, r in enumerate(rules):
+        r.id = i
+    lines = [
+        _line(1, "CERAMICO 45X45 CAJA 2,03 M2", 9000, 2.03, "m2", dims=[45, 45]),
+        _line(2, "PUERTA PLACA 80X200", 80000, dims=[80, 200]),
+        _line(3, "PEGAMENTO CERAMICOS 30 KG", 7000, 30, "kg"),
+        _line(4, "PEGAMENTO PORCELANATO 30 KG", 5000, 30, "kg"),
+        _line(5, "LATEX INTERIOR 20 LTS", 60000, 20, "l"),
+        _line(6, "LATEX CIELORRASOS 20 LTS", 40000, 20, "l"),
+    ]
+    r = compute_budget(m, rules, lines)
+    it = {i["label"]: i for i in r["items"]}
+    rev = it["Cerámico de revestimiento"]
+    assert rev["status"] == "ok" and rev["line"]["row"] == 1
+    assert abs(rev["quantity"] - 33.0) < 1e-9                      # 30 m² + 10%
+    assert abs(rev["units_to_buy"] - 33.0 / 2.03) < 1e-3           # cajas
+    piso = it["Piso cerámico"]
+    assert piso["line"]["row"] == 1 and abs(piso["quantity"] - 55.0) < 1e-9
+    assert it["Puerta"]["status"] == "ok" and it["Puerta"]["units_to_buy"] == 2
+    assert it["Ventana"]["status"] == "sin_medida"
+    assert it["Pegamento para cerámicos"]["line"]["row"] == 3      # porcelanato excluido
+    assert it["Pintura látex (2 caras, 2 manos)"]["line"]["row"] == 5
+    # Pintura sobre el muro neto (30 − 2 puertas de 1,8 m²); revestimiento sobre el bruto.
+    assert abs(it["Pintura látex (2 caras, 2 manos)"]["quantity"] - 26.4 * 0.5 * 1.05) < 1e-9
+    mo = {i["label"]: i for i in compute_labor(m, rules, {})["items"]}
+    assert mo["Mano de obra: colocación de puertas"]["quantity"] == 2
+    assert mo["Mano de obra: colocación de puertas"]["days"] == 0.5
+    assert mo["Mano de obra: revestimiento cerámico"]["quantity"] == 30
 
 
 def _alerts(elements):

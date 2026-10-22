@@ -25,15 +25,18 @@ from app.services import budget_rules as br
 
 # Orden de obra de los rubros conocidos; el resto va después, alfabético.
 STAGE_ORDER = ("Fundaciones", "Estructura", "Mampostería", "Cubierta", "Revoques",
-               "Pisos", "Cielorrasos", "Terminaciones")
+               "Pisos", "Revestimientos", "Cielorrasos", "Aberturas", "Pintura",
+               "Terminaciones")
 
 _SHORT = {"muro_m2": "muros", "columna_m3": "columnas", "viga_ml": "vigas",
           "viga_m3": "hormigón de vigas",
           "vigueta_ml": "viguetas", "losa_m2": "entrepisos",
           "riostra_ml": "riostras", "riostra_m3": "hormigón de fundaciones",
           "techo_m2": "techo", "sup_cubierta_m2": "pisos",
-          "cielorraso_m2": "cielorrasos", "armadura_kg": "armadura"}
-_UNIT = {"m2": "m²", "m3": "m³", "m": "ml", "kg": "kg"}
+          "cielorraso_m2": "cielorrasos", "armadura_kg": "armadura",
+          "revestimiento_m2": "revestimientos", "puerta_u": "puertas",
+          "ventana_u": "ventanas"}
+_UNIT = {"m2": "m²", "m3": "m³", "m": "ml", "kg": "kg", "u": "u"}
 
 
 def task_name(stage: str, measure: str) -> str:
